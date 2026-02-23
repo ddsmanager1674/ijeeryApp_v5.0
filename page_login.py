@@ -175,11 +175,20 @@ class LoginWindow(ctk.CTk):
                 raise ImportError("Module app_main non trouvé")
             
             from app_main import App
-            
-            # Minimiser la fenêtre de login au lieu de la cacher
-            self.iconify()
-            
-            # Créer l'application principale
+
+            # Détruire la fenêtre de login AVANT de créer une nouvelle instance Tk
+            # Evite d'avoir deux instances de Tkinter dans le même processus
+            try:
+                self.withdraw()
+                self.update_idletasks()
+            except Exception:
+                pass
+            try:
+                self.destroy()
+            except Exception:
+                pass
+
+            # Créer l'application principale (nouvelle instance Tk)
             main_app = App(session_data)
             
             # Marquer que l'app est lancée
