@@ -108,8 +108,8 @@ class PageCaisse(ctk.CTkFrame):
         self.frame_top = ctk.CTkFrame(self, fg_color="#f5f5f5")
         self.frame_top.pack(pady=10, fill="x", padx=10)
 
-        self.label_solde_global = ctk.CTkLabel(self.frame_top, text="Solde de caisse : 0 Ar", text_color="#000", font=("Arial", 18, "bold"))
-        self.label_solde_global.pack(side="left", padx=20)
+        # self.label_solde_global = ctk.CTkLabel(self.frame_top, text="Solde de caisse : 0 Ar", text_color="#000", font=("Arial", 18, "bold"))
+        # self.label_solde_global.pack(side="left", padx=20)
 
         self.frame_filtre = ctk.CTkFrame(self.frame_top, fg_color="#f5f5f5")
         self.frame_filtre.pack(side="left", padx=20)
@@ -800,12 +800,12 @@ class PageCaisse(ctk.CTkFrame):
             
             solde = float(res[0]) if res and res[0] is not None else 0.0
             
-            self.label_solde_global.configure(
-                text=f"Solde de caisse : {self.format_montant(solde)} Ar"
-            )
+            # self.label_solde_global.configure(
+            #     text=f"Solde de caisse : {self.format_montant(solde)} Ar"
+            # )
         except Exception as e:
             print(f"Erreur calcul solde global: {e}")
-            self.label_solde_global.configure(text="Solde de caisse : Erreur Ar")
+            # self.label_solde_global.configure(text="Solde de caisse : Erreur Ar")
 
     def generer_pdf(self):
         if not self.donnees_pour_pdf:
