@@ -1753,13 +1753,13 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
             print(f"[DEBUG] Stock récupéré (sélection article): {stock_reel} | brut='{stock_texte}'")
 
             if stock_reel <= 0:
-                if not messagebox.askyesno(
+                messagebox.showwarning(
                     "Avertissement",
                     f"Quantité en stock insuffisante ({stock_texte} {values[4]}).\n"
-                    "Voulez-vous continuer quand même ?",
+                    "Vous ne pouvez pas continuer.",
                     icon="warning"
-                ):
-                    return
+                )
+                return
         
             article_data = {
                 'idarticle': values[0],
@@ -1945,14 +1945,14 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
         # Vérification AVANT ajout au tableau par rapport au stock temporairement stocké lors de la sélection.
         if self.index_ligne_selectionnee is None and self.stock_temporaire_selection is not None:
             if qtvente > self.stock_temporaire_selection:
-                if not messagebox.askyesno(
+                messagebox.showwarning(
                     "Avertissement",
                     f"Quantité saisie ({self.formater_nombre(qtvente)} {self.article_selectionne['nom_unite']}) "
                     f"dépasse le stock disponible ({self.formater_nombre(self.stock_temporaire_selection)} {self.article_selectionne['nom_unite']}).\n"
-                    "Voulez-vous continuer quand même ?",
+                    "Vous ne pouvez pas continuer.",
                     icon="warning"
-                ):
-                    return
+                )
+                return
 
         # Vérification du stock
         #if self.index_ligne_selectionnee is None: 
