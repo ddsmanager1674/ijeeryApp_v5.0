@@ -4,6 +4,8 @@ import psycopg2
 from datetime import datetime
 import json
 import os
+import textwrap
+import subprocess
 from resource_utils import get_config_path, safe_file_read
 
 
@@ -147,6 +149,20 @@ class PageClient(ctk.CTkFrame):
                                        fg_color="#f39c12", hover_color="#e67e22")
         self.credit_page_button.pack(side="left", padx=5)
         
+        # --- Frame de Recherche ---
+        search_frame = ctk.CTkFrame(self)
+        search_frame.pack(fill="x", pady=10, padx=0)
+        
+        ctk.CTkLabel(search_frame, text="Rechercher Client :", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5)
+        self.search_entry = ctk.CTkEntry(search_frame, width=300, placeholder_text="Nom, contact, adresse, NIF ou crédit...")
+        self.search_entry.pack(side="left", padx=5, fill="x", expand=True)
+        
+        # Stocker les données complètes pour la recherche
+        self.all_clients_data = []
+        
+        # Bind pour mise à jour en temps réel
+        self.search_entry.bind("<KeyRelease>", self.filter_clients)
+        
         # Treeview
         columns = ("Nom du Client", "Contact", "Adresse", "NIF", "Crédit", "Type")
         self.tree = ttk.Treeview(self, columns=columns, show="headings")
@@ -159,6 +175,7 @@ class PageClient(ctk.CTkFrame):
         
         self.tree.pack(fill="both", expand=True, pady=10)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
+        self.tree.bind("<Double-1>", self.on_client_double_click)
         
         self.selected_cli_id = None
 
@@ -178,6 +195,8 @@ class PageClient(ctk.CTkFrame):
                 ORDER BY c.nomcli ASC
             """)
             clients = self.cursor.fetchall()
+            self.all_clients_data = clients  # Stocker les données complètes
+            
             for idx, cli in enumerate(clients):
                 tag = "even" if idx % 2 == 0 else "odd"
                 self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], cli[5], cli[6]), tags=(tag,))
@@ -269,6 +288,44 @@ class PageClient(ctk.CTkFrame):
             entry.delete(0, "end")
         self.selected_cli_id = None
 
+    def filter_clients(self, event=None):
+        """Filtre les clients en temps réel basé sur la requête de recherche."""
+        search_query = self.search_entry.get().lower().strip()
+        
+        # Vider le treeview
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Si la requête est vide, afficher tous les clients
+        if not search_query:
+            for idx, cli in enumerate(self.all_clients_data):
+                tag = "even" if idx % 2 == 0 else "odd"
+                self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], cli[5], cli[6]), tags=(tag,))
+            return
+        
+        # Filtrer les clients
+        idx = 0
+        for cli in self.all_clients_data:
+            # cli = (idclient, nomcli, contactcli, adressecli, nifcli, credit, typeclient)
+            # Chercher dans tous les champs
+            nom = str(cli[1]).lower() if cli[1] else ""
+            contact = str(cli[2]).lower() if cli[2] else ""
+            adresse = str(cli[3]).lower() if cli[3] else ""
+            nif = str(cli[4]).lower() if cli[4] else ""
+            credit = str(cli[5]).lower() if cli[5] else ""
+            typeclient = str(cli[6]).lower() if cli[6] else ""
+            
+            # Vérifier si la requête correspond à un champ
+            if (search_query in nom or 
+                search_query in contact or 
+                search_query in adresse or 
+                search_query in nif or 
+                search_query in credit or
+                search_query in typeclient):
+                tag = "even" if idx % 2 == 0 else "odd"
+                self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], cli[5], cli[6]), tags=(tag,))
+                idx += 1
+
     def open_credit_window(self):
         """Ouvre la fenêtre des crédits clients dans un nouveau pop-up."""
         credit_window = ctk.CTkToplevel(self)
@@ -285,6 +342,1103 @@ class PageClient(ctk.CTkFrame):
         # Initialisation de la page de crédit à l'intérieur du pop-up
         credit_page = PageClientCrédit(credit_window)
         credit_page.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+    def on_client_double_click(self, event):
+        """Appelé au double-clic sur une ligne client."""
+        selected = self.tree.selection()
+        if not selected:
+            return
+        
+        idclient = selected[0]
+        self.open_client_credit_details(idclient)
+
+    def open_client_credit_details(self, idclient):
+        """Ouvre une fenêtre avec les détails de crédit personnalisés pour un client."""
+        # Récupérer les infos du client
+        try:
+            self.cursor.execute(
+                """SELECT c.idclient, c.nomcli, c.contactcli, c.adressecli, c.nifcli, c.credit, t.designationtypeclient
+                FROM tb_client c
+                LEFT JOIN tb_typeclient t ON c.idtypeclient = t.idtypeclient
+                WHERE c.idclient = %s""", (idclient,))
+            client_info = self.cursor.fetchone()
+        except psycopg2.Error as err:
+            try:
+                if self.conn:
+                    self.conn.rollback()
+            except Exception:
+                pass
+            messagebox.showerror("Erreur", f"Impossible de récupérer les infos du client: {err}")
+            return
+        
+        if not client_info:
+            messagebox.showwarning("Attention", "Client non trouvé.")
+            return
+        
+        # Créer la fenêtre de détails
+        detail_window = ctk.CTkToplevel(self)
+        detail_window.title(f"Détails de Crédit - {client_info[1]}")
+        detail_window.geometry("1400x800")
+        detail_window.attributes("-topmost", True)
+        
+        # Configuration du layout principal (2 colonnes)
+        detail_window.grid_columnconfigure(0, weight=0, minsize=350)  # Sidebar gauche (25%)
+        detail_window.grid_columnconfigure(1, weight=1)  # Contenu droit (75%)
+        detail_window.grid_rowconfigure(0, weight=1)
+        
+        # ============================================
+        # SIDEBAR GAUCHE (25% - Infos Client + Crédit)
+        # ============================================
+        sidebar_frame = ctk.CTkFrame(detail_window, fg_color="#f0f0f0")
+        sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        sidebar_frame.grid_rowconfigure(2, weight=1)  # Pour avoir du space vide
+        
+        # --- Titre Informations ---
+        ctk.CTkLabel(sidebar_frame, text="Informations Client", 
+                    font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                    text_color="#2c3e50").pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # --- Infos Client ---
+        info_data = [
+            ("Nom:", client_info[1]),
+            ("Contact:", client_info[2] or "N/A"),
+            ("Adresse:", client_info[3] or "N/A"),
+            ("NIF:", client_info[4] or "N/A"),
+            ("Plafond Crédit:", f"{client_info[5] or 0} Ar"),
+            ("Type:", client_info[6] or "N/A")
+        ]
+        
+        for label, value in info_data:
+            info_row = ctk.CTkFrame(sidebar_frame, fg_color="transparent")
+            info_row.pack(anchor="w", padx=10, pady=2, fill="x")
+            
+            ctk.CTkLabel(info_row, text=label, font=ctk.CTkFont(weight="bold", size=10),
+                        text_color="#34495e", width=80).pack(side="left", anchor="nw")
+            ctk.CTkLabel(info_row, text=value, font=ctk.CTkFont(size=10),
+                        text_color="#2c3e50").pack(side="left", anchor="nw", padx=(5, 0), fill="x", expand=True)
+        
+        # --- Séparateur ---
+        ctk.CTkLabel(sidebar_frame, text="", fg_color="#bdc3c7", height=1).pack(fill="x", pady=10, padx=10)
+        
+        # --- Titre Crédit ---
+        ctk.CTkLabel(sidebar_frame, text="Situation Crédit", 
+                    font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                    text_color="#2c3e50").pack(anchor="w", padx=10, pady=(5, 10))
+        
+        # --- Label Crédit Total ---
+        credit_info_frame = ctk.CTkFrame(sidebar_frame, fg_color="transparent")
+        credit_info_frame.pack(anchor="w", padx=10, pady=2, fill="x")
+        
+        ctk.CTkLabel(credit_info_frame, text="Total Restant:", font=ctk.CTkFont(weight="bold", size=10),
+                    text_color="#34495e").pack(side="left", anchor="nw")
+        label_montant_restant = ctk.CTkLabel(credit_info_frame, text="0,00 Ar", 
+                                            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                                            text_color="#e74c3c")
+        label_montant_restant.pack(side="left", anchor="nw", padx=(5, 0))
+        
+        # --- Bouton Paiement Global ---
+        btn_paiement_global = ctk.CTkButton(sidebar_frame, text="💳 Effectuer Paiement", 
+                                          fg_color="#3498db", hover_color="#2980b9", 
+                                          height=40, font=ctk.CTkFont(size=11, weight="bold"),
+                                          command=lambda: None)
+        btn_paiement_global.pack(padx=10, pady=10, fill="x")
+        
+        # --- Bouton Ajouter Créance ---
+        btn_ajouter_creance = ctk.CTkButton(sidebar_frame, text="➕ Ajouter Créance", 
+                                          fg_color="#27ae60", hover_color="#229954", 
+                                          height=40, font=ctk.CTkFont(size=11, weight="bold"),
+                                          command=lambda: self._open_add_creance_window(idclient, detail_window))
+        btn_ajouter_creance.pack(padx=10, pady=10, fill="x")
+        
+        # ============================================
+        # CONTENU DROIT (75% - Crédits + Paiements)
+        # ============================================
+        right_frame = ctk.CTkFrame(detail_window)
+        right_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        right_frame.grid_columnconfigure(0, weight=1)
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_rowconfigure(1, weight=1)
+        
+        # --- TABLEAU DES CRÉDITS (Haut) ---
+        table_frame = ctk.CTkFrame(right_frame)
+        table_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        table_frame.grid_columnconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(1, weight=0)
+        table_frame.grid_rowconfigure(0, weight=0)
+        table_frame.grid_rowconfigure(1, weight=1)
+        
+        ctk.CTkLabel(table_frame, text="Récapitulatif des Crédits", 
+                    font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
+        
+        # Créer le treeview des crédits
+        colonnes_credits = ("ID", "Type", "Date", "Montant", "Montant Payé", "Solde Restant", "Statut")
+        tree_credits = ttk.Treeview(table_frame, columns=colonnes_credits, show='headings', height=10)
+        tree_credits.tag_configure("complet", background="#C8E6C9", foreground="#000000")
+        tree_credits.tag_configure("partiel", background="#FFF9C4", foreground="#000000")
+        tree_credits.tag_configure("impaye", background="#FFCDD2", foreground="#000000")
+        
+        for col in colonnes_credits:
+            tree_credits.heading(col, text=col)
+            if col == "ID":
+                tree_credits.column(col, width=0, stretch=False)
+            elif col in ("Montant", "Montant Payé", "Solde Restant"):
+                tree_credits.column(col, width=100, anchor='e')
+            else:
+                tree_credits.column(col, width=110, anchor='w')
+        
+        scrollbar = ttk.Scrollbar(table_frame, command=tree_credits.yview)
+        tree_credits.configure(yscrollcommand=scrollbar.set)
+        tree_credits.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
+        
+        # Charger les crédits du client depuis les deux sources
+        try:
+            # 1. Crédits de vente (tb_pmtfacture avec idmode = 4)
+            self.cursor.execute("""
+                SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
+                FROM tb_pmtfacture
+                WHERE idclient = %s AND idmode = 4 AND deleted = 0
+                ORDER BY datepmt DESC
+            """, (idclient,))
+            credits_vente = self.cursor.fetchall()
+            
+            # 2. Autres créances (tb_autrecreance)
+            self.cursor.execute("""
+                SELECT id, 'Créance' as type, numfact, dateregistre, montant, dateecheance
+                FROM tb_autrecreance
+                WHERE idclient = %s
+                ORDER BY dateregistre DESC
+            """, (idclient,))
+            autrecreances = self.cursor.fetchall()
+            
+            # Fusionner les deux listes
+            tous_credits = []
+            for credit in credits_vente:
+                tous_credits.append(credit)
+            for creance in autrecreances:
+                tous_credits.append(creance)
+            
+            # Trier les crédits par date DESC (plus récent en premier)
+            tous_credits.sort(key=lambda x: x[3], reverse=True)
+            
+            # Calculer le crédit total restant
+            credit_total_initial = 0
+            credit_total_paye = 0
+            
+            # Pour chaque crédit, récupérer les paiements effectués
+            for idx, credit in enumerate(tous_credits):
+                credit_id, type_credit, ref, date_credit, montant_initial, date_echeance = credit
+                
+                # Récupérer les paiements effectués pour ce crédit
+                self.cursor.execute("""
+                    SELECT COALESCE(SUM(mtpaye), 0)
+                    FROM tb_pmtcredit
+                    WHERE idclient = %s AND (refvente = %s OR id = %s)
+                """, (idclient, ref, credit_id))
+                result_paiement = self.cursor.fetchone()
+                montant_paye = result_paiement[0] if result_paiement else 0
+                
+                credit_total_initial += montant_initial
+                credit_total_paye += montant_paye
+                
+                solde_restant = montant_initial - montant_paye
+                
+                # Déterminer le statut
+                if solde_restant <= 0:
+                    statut = "✓ Payé Complètement"
+                    tag = "complet"
+                elif montant_paye > 0:
+                    statut = "⚠️ Partiellement Payé"
+                    tag = "partiel"
+                else:
+                    statut = "✗ Impayé"
+                    tag = "impaye"
+                
+                tree_credits.insert('', 'end', iid=f"{type_credit}_{credit_id}", values=(
+                    credit_id,
+                    type_credit,
+                    date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
+                    f"{montant_initial or 0:,.2f}",
+                    f"{montant_paye:,.2f}",
+                    f"{solde_restant:,.2f}",
+                    statut
+                ), tags=(tag,))
+            
+            # Mettre à jour le montant total crédit restant
+            credit_total_restant = credit_total_initial - credit_total_paye
+            label_montant_restant.configure(text=f"{credit_total_restant:,.2f} Ar")
+            
+            # Fonction pour le paiement global
+            def on_paiement_global_click():
+                self._open_global_payment_window(idclient, credit_total_initial, credit_total_paye, credit_total_restant, detail_window, tree_credits)
+            
+            # Connecter le bouton à la fonction
+            btn_paiement_global.configure(command=on_paiement_global_click)
+        
+        except psycopg2.Error as err:
+            messagebox.showerror("Erreur", f"Erreur chargement crédits: {err}")
+        
+        # Fonction pour gérer le double-clic sur les crédits
+        def on_credit_double_click(event):
+            selected = tree_credits.selection()
+            if not selected:
+                return
+            
+            item_id = selected[0]
+            try:
+                values = tree_credits.item(item_id)['values']
+                credit_id = values[0]
+                type_credit = values[1]
+                montant_total = float(str(values[3]).replace(',', '.').replace(' ', ''))
+                montant_paye = float(str(values[4]).replace(',', '.').replace(' ', ''))
+                solde_restant = float(str(values[5]).replace(',', '.').replace(' ', ''))
+                
+                # Vérifier si complètement payé
+                if solde_restant <= 0:
+                    messagebox.showinfo("Paiement Complet", 
+                        f"Ce crédit est complètement payé.\n\n"
+                        f"Type: {type_credit}\n"
+                        f"Montant Total: {montant_total:,.2f} Ar\n"
+                        f"Montant Payé: {montant_paye:,.2f} Ar")
+                    return
+                
+                # Ouvrir fenêtre de paiement
+                self._open_payment_window(credit_id, idclient, type_credit, montant_total, montant_paye, solde_restant, tree_credits, detail_window)
+            
+            except (ValueError, psycopg2.Error) as err:
+                messagebox.showerror("Erreur", f"Erreur récupération crédit: {err}")
+        
+        tree_credits.bind("<Double-1>", on_credit_double_click)
+
+        # --- TABLEAU D'HISTORIQUE DES PAIEMENTS (Bas) ---
+        payment_frame = ctk.CTkFrame(right_frame)
+        payment_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(5, 0))
+        payment_frame.grid_columnconfigure(0, weight=1)
+        payment_frame.grid_columnconfigure(1, weight=0)
+        payment_frame.grid_rowconfigure(0, weight=0)
+        payment_frame.grid_rowconfigure(1, weight=1)
+        
+        ctk.CTkLabel(payment_frame, text="Historique des Paiements", 
+                    font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
+        
+        # Créer le treeview des paiements
+        colonnes_paiements = ("ID", "Date Paiement", "Montant Payé", "Observation", "Utilisateur")
+        tree_paiements = ttk.Treeview(payment_frame, columns=colonnes_paiements, show='headings', height=8)
+        tree_paiements.tag_configure("even", background="#FFFFFF", foreground="#000000")
+        tree_paiements.tag_configure("odd", background="#E6EFF8", foreground="#000000")
+        
+        for col in colonnes_paiements:
+            tree_paiements.heading(col, text=col)
+            if col == "ID":
+                tree_paiements.column(col, width=0, stretch=False)
+            elif col == "Montant Payé":
+                tree_paiements.column(col, width=120, anchor='e')
+            elif col == "Date Paiement":
+                tree_paiements.column(col, width=130, anchor='center')
+            else:
+                tree_paiements.column(col, width=150, anchor='w')
+        
+        scrollbar_pmt = ttk.Scrollbar(payment_frame, command=tree_paiements.yview)
+        tree_paiements.configure(yscrollcommand=scrollbar_pmt.set)
+        tree_paiements.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
+        scrollbar_pmt.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
+        
+        # Charger l'historique des paiements
+        try:
+            self.cursor.execute("""
+                SELECT p.id, p.datepmt, p.mtpaye, p.observation, 
+                       COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
+                FROM tb_pmtcredit p
+                LEFT JOIN tb_users u ON p.iduser = u.iduser
+                WHERE p.idclient = %s
+                ORDER BY p.datepmt DESC
+            """, (idclient,))
+            paiements = self.cursor.fetchall()
+            
+            for idx, pmt in enumerate(paiements):
+                pmt_id, date_pmt, montant_pmt, observation, utilisateur = pmt
+                tag = "even" if idx % 2 == 0 else "odd"
+                
+                tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
+                    pmt_id,
+                    date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
+                    f"{montant_pmt or 0:,.2f}",
+                    observation or "",
+                    utilisateur or "N/A"
+                ), tags=(tag,))
+            
+            # Afficher un message si aucun paiement
+            if not paiements:
+                empty_label = ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré", 
+                                          text_color="gray", font=ctk.CTkFont(size=11))
+                empty_label.grid(row=1, column=0, pady=20)
+        
+        except psycopg2.Error as err:
+            messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
+
+    def _open_payment_window(self, credit_id, idclient, type_credit, montant_total, montant_paye, solde_restant, tree_credits, parent_window):
+        """Ouvre une fenêtre pour enregistrer un paiement partiel."""
+        payment_window = ctk.CTkToplevel(parent_window)
+        payment_window.title("Enregistrer un Paiement")
+        payment_window.geometry("450x350")
+        payment_window.grab_set()
+        
+        # Info du crédit
+        info_text = f"""Crédit ID: {credit_id}
+Type: {type_credit}
+
+Montant Total: {montant_total:,.2f} Ar
+Montant Déjà Payé: {montant_paye:,.2f} Ar
+Solde Restant: {solde_restant:,.2f} Ar"""
+        
+        ctk.CTkLabel(payment_window, text=info_text, justify="left", 
+                    font=ctk.CTkFont(family="Segoe UI", size=11)).pack(padx=10, pady=10)
+        
+        # Entrée du montant à payer
+        ctk.CTkLabel(payment_window, text=f"Montant à Payer (max: {solde_restant:,.2f} Ar):",
+                    font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=5)
+        entry_montant = ctk.CTkEntry(payment_window, width=350)
+        entry_montant.pack(padx=10, pady=5)
+        
+        # Observation
+        ctk.CTkLabel(payment_window, text="Observation (optionnel):",
+                    font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=(10, 5))
+        entry_obs = ctk.CTkEntry(payment_window, width=350)
+        entry_obs.pack(padx=10, pady=5)
+
+        # Mode de paiement (récupérer depuis la table tb_modepaiement)
+        try:
+            self.cursor.execute("SELECT idmode, modedepaiement FROM tb_modepaiement ORDER BY modedepaiement")
+            modes = self.cursor.fetchall()
+        except Exception:
+            modes = []
+
+        mode_names = [m[1] for m in modes] if modes else []
+        mode_map = {m[1]: m[0] for m in modes} if modes else {}
+
+        ctk.CTkLabel(payment_window, text="Mode de Paiement:", font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=(10, 5))
+        mode_combo = ctk.CTkComboBox(payment_window, values=mode_names, width=350)
+        if mode_names:
+            mode_combo.set(mode_names[0])
+        mode_combo.pack(padx=10, pady=5)
+        
+        def enregistrer_paiement():
+            try:
+                montant_paiement = float(entry_montant.get().replace(',', '.'))
+                observation = entry_obs.get().strip()
+                
+                if montant_paiement <= 0:
+                    messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
+                    return
+                
+                if montant_paiement > solde_restant:
+                    messagebox.showwarning("Attention", f"Le montant dépasse le solde restant ({solde_restant:,.2f} Ar).")
+                    return
+                
+                # Déterminer l'idmode sélectionné (peut être None)
+                selected_mode = mode_combo.get() if mode_names else None
+                idmode_sel = mode_map.get(selected_mode) if selected_mode else None
+
+                # Enregistrer le paiement dans tb_pmtcredit en respectant le schéma
+                date_pmt = datetime.now()
+                self.cursor.execute("""
+                    INSERT INTO tb_pmtcredit 
+                    (datepmt, mtpaye, observation, idtypeoperation, idclient, idmode, idpaiment, iduser)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (date_pmt, montant_paiement, observation, 1, idclient, idmode_sel, None, 1))  # idtypeoperation=1, idpaiment=NULL, iduser=1
+                self.conn.commit()
+                
+                messagebox.showinfo("Succès", f"Paiement de {montant_paiement:,.2f} Ar enregistré avec succès!")
+                
+                # Générer et imprimer le ticket 80mm
+                ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_payment_{idclient}_{date_pmt.strftime("%Y%m%d%H%M%S")}.txt')
+                os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
+                self._generate_ticket_80mm_payment(idclient, montant_paiement, idmode_sel, date_pmt, ticket_filename)
+                
+                # Demander si l'utilisateur veut imprimer
+                result = messagebox.askyesno("Imprimer", "Voulez-vous imprimer le reçu paiement sur X80?")
+                if result:
+                    self._print_ticket_80mm(ticket_filename)
+                
+                # Rafraîchir le tableau des crédits
+                for item in tree_credits.get_children():
+                    tree_credits.delete(item)
+                
+                # Recharger tous les crédits
+                try:
+                    # 1. Crédits de vente
+                    self.cursor.execute("""
+                        SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
+                        FROM tb_pmtfacture
+                        WHERE idclient = %s AND idmode = 4 AND deleted = 0
+                        ORDER BY datepmt DESC
+                    """, (idclient,))
+                    credits_vente = self.cursor.fetchall()
+                    
+                    # 2. Autres créances
+                    self.cursor.execute("""
+                        SELECT id, 'Créance' as type, numfact, dateregistre, montant, dateecheance
+                        FROM tb_autrecreance
+                        WHERE idclient = %s
+                        ORDER BY dateregistre DESC
+                    """, (idclient,))
+                    autrecreances = self.cursor.fetchall()
+                    
+                    tous_credits = credits_vente + autrecreances
+                    # Trier les crédits par date DESC (plus récent en premier)
+                    tous_credits.sort(key=lambda x: x[3], reverse=True)
+                    
+                    for idx, credit in enumerate(tous_credits):
+                        credit_id_temp, type_credit_temp, ref, date_credit, montant_initial, date_echeance = credit
+                        
+                        self.cursor.execute("""
+                            SELECT COALESCE(SUM(mtpaye), 0)
+                            FROM tb_pmtcredit
+                            WHERE idclient = %s AND (refvente = %s OR id = %s)
+                        """, (idclient, ref, credit_id_temp))
+                        result_paiement = self.cursor.fetchone()
+                        montant_paye_temp = result_paiement[0] if result_paiement else 0
+                        
+                        solde_restant_temp = montant_initial - montant_paye_temp
+                        
+                        if solde_restant_temp <= 0:
+                            statut = "✓ Payé Complètement"
+                            tag = "complet"
+                        elif montant_paye_temp > 0:
+                            statut = "⚠️ Partiellement Payé"
+                            tag = "partiel"
+                        else:
+                            statut = "✗ Impayé"
+                            tag = "impaye"
+                        
+                        tree_credits.insert('', 'end', iid=f"{type_credit_temp}_{credit_id_temp}", values=(
+                            credit_id_temp,
+                            type_credit_temp,
+                            date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
+                            f"{montant_initial or 0:,.2f}",
+                            f"{montant_paye_temp:,.2f}",
+                            f"{solde_restant_temp:,.2f}",
+                            statut
+                        ), tags=(tag,))
+                
+                except psycopg2.Error as err:
+                    messagebox.showerror("Erreur", f"Erreur rafraîchissement: {err}")
+                
+                payment_window.destroy()
+            
+            except ValueError:
+                messagebox.showerror("Erreur", "Veuillez entrer un montant valide.")
+            except psycopg2.Error as err:
+                self.conn.rollback()
+                messagebox.showerror("Erreur", f"Erreur enregistrement paiement: {err}")
+        
+        btn_frame = ctk.CTkFrame(payment_window)
+        btn_frame.pack(padx=10, pady=10)
+        
+        ctk.CTkButton(btn_frame, text="Enregistrer", command=enregistrer_paiement, 
+                     fg_color="#2ecc71").pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Annuler", command=payment_window.destroy, 
+                     fg_color="#e74c3c").pack(side="left", padx=5)
+
+    def _open_global_payment_window(self, idclient, credit_total_initial, credit_total_paye, credit_total_restant, parent_window, tree_credits):
+        """Ouvre une fenêtre pour effectuer un paiement global sur tous les crédits."""
+        payment_window = ctk.CTkToplevel(parent_window)
+        payment_window.title("Paiement Global des Crédits")
+        payment_window.geometry("500x400")
+        payment_window.grab_set()
+        
+        # Info du crédit global
+        info_text = f"""Récapitulatif du Crédit Client (ID: {idclient})
+
+Montant Total des Crédits: {credit_total_initial:,.2f} Ar
+Montant Total Déjà Payé: {credit_total_paye:,.2f} Ar
+Solde Total Restant: {credit_total_restant:,.2f} Ar"""
+        
+        ctk.CTkLabel(payment_window, text=info_text, justify="left", 
+                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold")).pack(padx=10, pady=10)
+        
+        # Entrée du montant global à payer
+        ctk.CTkLabel(payment_window, text=f"Montant Global à Payer (max: {credit_total_restant:,.2f} Ar):",
+                    font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=5)
+        entry_montant = ctk.CTkEntry(payment_window, width=400)
+        entry_montant.pack(padx=10, pady=5)
+        
+        # Observation
+        ctk.CTkLabel(payment_window, text="Observation (optionnel):",
+                    font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=(10, 5))
+        entry_obs = ctk.CTkEntry(payment_window, width=400)
+        entry_obs.pack(padx=10, pady=5)
+        
+        # Info sur la distribution automatique
+        info_dist = ctk.CTkLabel(payment_window, 
+                                text="Le paiement sera distribué automatiquement par ancienneté (factures les plus anciennes d'abord).",
+                                text_color="#95a5a6",
+                                font=ctk.CTkFont(family="Segoe UI", size=10, slant="italic"))
+        info_dist.pack(padx=10, pady=5)
+
+        # Mode de paiement (récupérer depuis la table tb_modepaiement)
+        try:
+            self.cursor.execute("SELECT idmode, modedepaiement FROM tb_modepaiement ORDER BY modedepaiement")
+            modes = self.cursor.fetchall()
+        except Exception:
+            modes = []
+
+        mode_names = [m[1] for m in modes] if modes else []
+        mode_map = {m[1]: m[0] for m in modes} if modes else {}
+
+        ctk.CTkLabel(payment_window, text="Mode de Paiement:", font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=(10, 5))
+        mode_combo_global = ctk.CTkComboBox(payment_window, values=mode_names, width=400)
+        if mode_names:
+            mode_combo_global.set(mode_names[0])
+        mode_combo_global.pack(padx=10, pady=5)
+        
+        def enregistrer_paiement_global():
+            try:
+                montant_global = float(entry_montant.get().replace(',', '.'))
+                observation = entry_obs.get().strip()
+                
+                if montant_global <= 0:
+                    messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
+                    return
+                
+                if montant_global > credit_total_restant:
+                    messagebox.showwarning("Attention", f"Le montant dépasse le solde total ({credit_total_restant:,.2f} Ar).")
+                    return
+                
+                # Récupérer tous les crédits du client ordonnés par date (FIFO - plus anciens d'abord)
+                # On unifie la colonne date sous l'alias "docdate" puis on ordonne sur cet alias
+                self.cursor.execute("""
+                    SELECT * FROM (
+                        SELECT id, 'Crédit Vente' as type, refvente as ref, datepmt as docdate, mtpaye as montant_initial, dateecheance
+                        FROM tb_pmtfacture
+                        WHERE idclient = %s AND idmode = 4 AND deleted = 0
+                        UNION ALL
+                        SELECT id, 'Créance' as type, numfact as ref, dateregistre as docdate, montant as montant_initial, dateecheance
+                        FROM tb_autrecreance
+                        WHERE idclient = %s
+                    ) t
+                    ORDER BY t.docdate DESC
+                """, (idclient, idclient))
+                tous_credits = self.cursor.fetchall()
+                
+                # Calculer les soldes restants pour chaque crédit
+                credits_avec_solde = []
+                for credit in tous_credits:
+                    credit_id, type_credit, ref, date_credit, montant_initial, date_echeance = credit
+                    
+                    # Récupérer les paiements existants
+                    self.cursor.execute("""
+                        SELECT COALESCE(SUM(mtpaye), 0)
+                        FROM tb_pmtcredit
+                        WHERE idclient = %s AND (refvente = %s OR id = %s)
+                    """, (idclient, ref, credit_id))
+                    result = self.cursor.fetchone()
+                    montant_paye = result[0] if result else 0
+                    solde_restant = montant_initial - montant_paye
+                    
+                    if solde_restant > 0:  # Seulement les crédits non payés
+                        credits_avec_solde.append({
+                            'credit_id': credit_id,
+                            'type': type_credit,
+                            'ref': ref,
+                            'solde': solde_restant,
+                            'date': date_credit
+                        })
+                
+                # Distribuer le paiement global en FIFO (par ancienneté)
+                montant_restant = montant_global
+                paiements_distribues = []
+                
+                # idmode sélectionné pour cet ensemble de paiements
+                selected_mode_global = mode_combo_global.get() if mode_names else None
+                idmode_sel_global = mode_map.get(selected_mode_global) if selected_mode_global else None
+
+                for credit_info in credits_avec_solde:
+                    if montant_restant <= 0:
+                        break
+                    
+                    montant_a_payer = min(credit_info['solde'], montant_restant)
+                    date_pmt = datetime.now()
+                    
+                    # Enregistrer le paiement pour ce crédit
+                    self.cursor.execute("""
+                        INSERT INTO tb_pmtcredit 
+                        (datepmt, mtpaye, observation, idtypeoperation, idclient, refvente, idmode, idpaiment, refpmt, id_banque, iduser)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        date_pmt, montant_a_payer, observation, 1, idclient, credit_info['ref'], idmode_sel_global, None, None, None, 1
+                    ))
+                    
+                    paiements_distribues.append({
+                        'type': credit_info['type'],
+                        'credit_id': credit_info['credit_id'],
+                        'montant': montant_a_payer,
+                        'date': date_pmt
+                    })
+                    
+                    montant_restant -= montant_a_payer
+                
+                self.conn.commit()
+                
+                # Message de confirmation
+                msg_confirmation = f"Paiement global de {montant_global:,.2f} Ar enregistré avec succès!\n\n"
+                msg_confirmation += "Distribution:\n"
+                for paiement in paiements_distribues:
+                    msg_confirmation += f"- {paiement['type']} (ID: {paiement['credit_id']}): {paiement['montant']:,.2f} Ar\n"
+                
+                messagebox.showinfo("Succès", msg_confirmation)
+                
+                # Générer et imprimer les tickets 80mm pour chaque paiement distribué
+                for paiement in paiements_distribues:
+                    ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_payment_{idclient}_{paiement["date"].strftime("%Y%m%d%H%M%S%f")}.txt')
+                    os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
+                    self._generate_ticket_80mm_payment(idclient, paiement['montant'], idmode_sel_global, paiement['date'], ticket_filename)
+                
+                # Demander si l'utilisateur veut imprimer
+                result = messagebox.askyesno("Imprimer", f"Voulez-vous imprimer {len(paiements_distribues)} reçu(s) paiement sur X80?")
+                if result:
+                    for paiement in paiements_distribues:
+                        ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_payment_{idclient}_{paiement["date"].strftime("%Y%m%d%H%M%S%f")}.txt')
+                        self._print_ticket_80mm(ticket_filename)
+                
+                # Rafraîchir le tableau des crédits
+                for item in tree_credits.get_children():
+                    tree_credits.delete(item)
+                
+                # Recharger tous les crédits
+                try:
+                    # 1. Crédits de vente
+                    self.cursor.execute("""
+                        SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
+                        FROM tb_pmtfacture
+                        WHERE idclient = %s AND idmode = 4 AND deleted = 0
+                        ORDER BY datepmt DESC
+                    """, (idclient,))
+                    credits_vente = self.cursor.fetchall()
+                    
+                    # 2. Autres créances
+                    self.cursor.execute("""
+                        SELECT id, 'Créance' as type, numfact, dateregistre, montant, dateecheance
+                        FROM tb_autrecreance
+                        WHERE idclient = %s
+                        ORDER BY dateregistre DESC
+                    """, (idclient,))
+                    autrecreances = self.cursor.fetchall()
+                    
+                    tous_credits_refresh = credits_vente + autrecreances
+                    # Trier les crédits par date DESC (plus récent en premier)
+                    tous_credits_refresh.sort(key=lambda x: x[3], reverse=True)
+                    
+                    credit_total_initial_new = 0
+                    credit_total_paye_new = 0
+                    
+                    for idx, credit in enumerate(tous_credits_refresh):
+                        credit_id_temp, type_credit_temp, ref, date_credit, montant_initial, date_echeance = credit
+                        
+                        self.cursor.execute("""
+                            SELECT COALESCE(SUM(mtpaye), 0)
+                            FROM tb_pmtcredit
+                            WHERE idclient = %s AND (refvente = %s OR id = %s)
+                        """, (idclient, ref, credit_id_temp))
+                        result_paiement = self.cursor.fetchone()
+                        montant_paye_temp = result_paiement[0] if result_paiement else 0
+                        
+                        credit_total_initial_new += montant_initial
+                        credit_total_paye_new += montant_paye_temp
+                        
+                        solde_restant_temp = montant_initial - montant_paye_temp
+                        
+                        if solde_restant_temp <= 0:
+                            statut = "✓ Payé Complètement"
+                            tag = "complet"
+                        elif montant_paye_temp > 0:
+                            statut = "⚠️ Partiellement Payé"
+                            tag = "partiel"
+                        else:
+                            statut = "✗ Impayé"
+                            tag = "impaye"
+                        
+                        tree_credits.insert('', 'end', iid=f"{type_credit_temp}_{credit_id_temp}", values=(
+                            credit_id_temp,
+                            type_credit_temp,
+                            date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
+                            f"{montant_initial or 0:,.2f}",
+                            f"{montant_paye_temp:,.2f}",
+                            f"{solde_restant_temp:,.2f}",
+                            statut
+                        ), tags=(tag,))
+                    
+                    # Mettre à jour le label du montant restant
+                    credit_total_restant_new = credit_total_initial_new - credit_total_paye_new
+                    # Trouver et actualiser le label_montant_restant dans le parent
+                    for widget in parent_window.winfo_children():
+                        if isinstance(widget, ctk.CTkFrame):
+                            for child in widget.winfo_children():
+                                if isinstance(child, ctk.CTkLabel) and "Ar" in child.cget("text"):
+                                    try:
+                                        child.configure(text=f"{credit_total_restant_new:,.2f} Ar")
+                                    except:
+                                        pass
+                
+                except psycopg2.Error as err:
+                    messagebox.showerror("Erreur", f"Erreur rafraîchissement: {err}")
+                
+                payment_window.destroy()
+            
+            except ValueError:
+                messagebox.showerror("Erreur", "Veuillez entrer un montant valide.")
+            except psycopg2.Error as err:
+                self.conn.rollback()
+                messagebox.showerror("Erreur", f"Erreur enregistrement paiement: {err}")
+        
+        btn_frame = ctk.CTkFrame(payment_window)
+        btn_frame.pack(padx=10, pady=20)
+        
+        ctk.CTkButton(btn_frame, text="Effectuer le Paiement", command=enregistrer_paiement_global, 
+                     fg_color="#2ecc71", width=150).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Annuler", command=payment_window.destroy, 
+                     fg_color="#e74c3c", width=150).pack(side="left", padx=5)
+
+    def _formater_nombre(self, nombre):
+        """Formate un nombre avec séparateurs de milliers."""
+        if isinstance(nombre, (int, float)):
+            return f"{nombre:,.2f}".replace(",", " ").replace(".", ",")
+        return str(nombre)
+
+    def _get_societe_info(self):
+        """Récupère les informations de la société depuis la table tb_infosociete.
+        Retourne un dict avec des clés 'name','addr','ville','tel','nif','stat','cif'.
+        En cas d'erreur ou si la table est vide, retourne des valeurs par défaut.
+        """
+        defaults = {
+            'name': 'IJEERY',
+            'addr': '',
+            'ville': '',
+            'tel': '',
+            'nif': '',
+            'stat': '',
+            'cif': ''
+        }
+        if not self.conn:
+            return defaults
+        try:
+            self.cursor.execute("""
+                SELECT nomsociete, adressesociete, villesociete, contactsociete, nifsociete, statsociete, cifsociete
+                FROM tb_infosociete LIMIT 1
+            """)
+            societe = self.cursor.fetchone()
+            if not societe:
+                return defaults
+
+            return {
+                'name': societe[0] or defaults['name'],
+                'addr': societe[1] or defaults['addr'],
+                'ville': societe[2] or defaults['ville'],
+                'tel': societe[3] or defaults['tel'],
+                'nif': societe[4] or defaults['nif'],
+                'stat': societe[5] or defaults['stat'],
+                'cif': societe[6] or defaults['cif']
+            }
+        except psycopg2.Error:
+            try:
+                if self.conn:
+                    self.conn.rollback()
+            except Exception:
+                pass
+            return defaults
+
+    def _generate_ticket_80mm_creance(self, idclient, num_fact, montant, filename):
+        """Génère un ticket 80mm pour une créance créée."""
+        MAX_WIDTH = 40
+        
+        # Récupérer les infos societé via helper
+        soc = self._get_societe_info()
+        societe_name = soc.get('name')
+        societe_addr = soc.get('addr')
+        societe_ville = soc.get('ville')
+        societe_tel = soc.get('tel')
+        societe_nif = soc.get('nif')
+        societe_stat = soc.get('stat')
+        societe_cif = soc.get('cif')
+
+        # Récupérer infos client (séparément pour gérer les erreurs proprement)
+        try:
+            self.cursor.execute("SELECT nomcli, prenomcli FROM tb_client WHERE idclient = %s", (idclient,))
+            client = self.cursor.fetchone()
+            client_name = f"{client[0]} {client[1]}" if client else "CLIENT"
+        except psycopg2.Error:
+            try:
+                if self.conn:
+                    self.conn.rollback()
+            except Exception:
+                pass
+            client_name = "CLIENT"
+
+        def center(text):
+            return text.center(MAX_WIDTH)
+
+        def line():
+            return "-" * MAX_WIDTH
+        
+        def wrap_text(text, max_width=MAX_WIDTH):
+            """Divise le texte sur plusieurs lignes si trop long"""
+            lines = []
+            for line_text in str(text).split("\n"):
+                if len(line_text) <= max_width:
+                    lines.append(line_text)
+                else:
+                    import textwrap
+                    wrapped = textwrap.wrap(line_text, max_width)
+                    lines.extend(wrapped)
+            return lines
+
+        content = []
+        
+        # --- EN-TÊTE SOCIÉTÉ (complète) ---
+        content.append(line())
+        content.append(center(societe_name.upper()))
+        
+        if societe_addr:
+            content.extend(wrap_text(center(societe_addr)))
+        if societe_ville:
+            content.append(center(societe_ville))
+        
+        # Infos légales: NIF, STAT, CIF
+        if societe_nif:
+            content.append(center(f"NIF: {societe_nif}"))
+        if societe_stat:
+            content.append(center(f"STAT: {societe_stat}"))
+        if societe_cif:
+            content.append(center(f"CIF: {societe_cif}"))
+        
+        if societe_tel:
+            content.append(center(f"Tél: {societe_tel}"))
+        
+        content.append(line())
+        
+        # --- TYPE DE DOCUMENT ---
+        content.append(center("ENREGISTREMENT CRÉANCE"))
+        content.append(line())
+        
+        # --- INFOS CRÉANCE ---
+        content.append(f"Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+        content.append(f"Créance N°: {num_fact}")
+        content.append(f"Client: {client_name}")
+        content.append(line())
+        
+        # --- MONTANT ---
+        content.append(center("MONTANT"))
+        montant_str = self._formater_nombre(montant)
+        content.append(center(f"{montant_str} Ar"))
+        content.append(line())
+        
+        # --- PIED DE PAGE ---
+        content.append(center("Créance Enregistrée"))
+        content.append(center(datetime.now().strftime("%d/%m/%Y")))
+        content.append("\n")
+        
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(content))
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Erreur génération ticket créance: {e}")
+
+    def _generate_ticket_80mm_payment(self, idclient, montant, idmode, date_pmt, filename):
+        """Génère un ticket 80mm pour un paiement de crédit."""
+        MAX_WIDTH = 40
+        
+        # Récupérer les infos societe via helper
+        soc = self._get_societe_info()
+        societe_name = soc.get('name')
+        societe_addr = soc.get('addr')
+        societe_ville = soc.get('ville')
+        societe_tel = soc.get('tel')
+        societe_nif = soc.get('nif')
+        societe_stat = soc.get('stat')
+        societe_cif = soc.get('cif')
+
+        # Récupérer infos client et mode de paiement séparément
+        try:
+            self.cursor.execute("SELECT nomcli, prenomcli FROM tb_client WHERE idclient = %s", (idclient,))
+            client = self.cursor.fetchone()
+            client_name = f"{client[0]} {client[1]}" if client else "CLIENT"
+        except psycopg2.Error:
+            try:
+                if self.conn:
+                    self.conn.rollback()
+            except Exception:
+                pass
+            client_name = "CLIENT"
+
+        try:
+            # Note: column name may be 'modedepaiement' in some schemas
+            self.cursor.execute("SELECT modedepaiement FROM tb_modepaiement WHERE idmode = %s", (idmode,))
+            mode = self.cursor.fetchone()
+            mode_name = mode[0] if mode else "ESPÈCES"
+        except psycopg2.Error:
+            try:
+                if self.conn:
+                    self.conn.rollback()
+            except Exception:
+                pass
+            mode_name = "ESPÈCES"
+
+        def center(text):
+            return text.center(MAX_WIDTH)
+
+        def line():
+            return "-" * MAX_WIDTH
+        
+        def wrap_text(text, max_width=MAX_WIDTH):
+            """Divise le texte sur plusieurs lignes si trop long"""
+            lines = []
+            for line_text in str(text).split("\n"):
+                if len(line_text) <= max_width:
+                    lines.append(line_text)
+                else:
+                    wrapped = textwrap.wrap(line_text, max_width)
+                    lines.extend(wrapped)
+            return lines
+
+        content = []
+        
+        # --- EN-TÊTE SOCIÉTÉ (complète) ---
+        content.append(line())
+        content.append(center(societe_name.upper()))
+        
+        if societe_addr:
+            content.extend(wrap_text(center(societe_addr)))
+        if societe_ville:
+            content.append(center(societe_ville))
+        
+        # Infos légales: NIF, STAT, CIF
+        if societe_nif:
+            content.append(center(f"NIF: {societe_nif}"))
+        if societe_stat:
+            content.append(center(f"STAT: {societe_stat}"))
+        if societe_cif:
+            content.append(center(f"CIF: {societe_cif}"))
+        
+        if societe_tel:
+            content.append(center(f"Tél: {societe_tel}"))
+        
+        content.append(line())
+        
+        # --- TYPE DE DOCUMENT ---
+        content.append(center("REÇU PAIEMENT CRÉDIT CLIENT"))
+        content.append(line())
+        
+        # --- INFOS PAIEMENT ---
+        content.append(f"Date: {date_pmt.strftime('%d/%m/%Y %H:%M')}")
+        content.append(f"Client: {client_name}")
+        content.append(f"Mode: {mode_name}")
+        content.append(line())
+        
+        # --- MONTANT ---
+        content.append(center("MONTANT PAYÉ"))
+        montant_str = self._formater_nombre(montant)
+        content.append(center(f"{montant_str} Ar"))
+        content.append(line())
+        
+        # --- PIED DE PAGE ---
+        content.append(center("Paiement Reçu"))
+        content.append(center(datetime.now().strftime("%d/%m/%Y %H:%M")))
+        content.append("\n")
+        
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(content))
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Erreur génération ticket paiement: {e}")
+
+    def _print_ticket_80mm(self, filename):
+        """Imprime un fichier ticket 80mm sur l'imprimante par défaut."""
+        try:
+            if os.path.exists(filename):
+                # Windows: utilise notepad pour imprimer
+                if os.name == 'nt':
+                    subprocess.Popen(['notepad.exe', '/p', filename])
+                else:
+                    # Linux/macOS
+                    subprocess.Popen(['lpr', filename])
+        except Exception as e:
+            messagebox.showwarning("Impression", f"Ne peut pas imprimer automatiquement. Fichier: {filename}")
+
+    def _open_add_creance_window(self, idclient, parent_window):
+        """Ouvre une fenêtre pour ajouter une créance manuelle."""
+        creance_window = ctk.CTkToplevel(parent_window)
+        creance_window.title("Ajouter une Créance")
+        creance_window.geometry("400x250")
+        creance_window.grab_set()
+        
+        # Titre
+        ctk.CTkLabel(creance_window, text="Enregistrer une Créance Manuelle", 
+                    font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold")).pack(padx=10, pady=10)
+        
+        # Numéro de facture
+        ctk.CTkLabel(creance_window, text="Numéro de Facture :", font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=(10, 5))
+        entry_numfact = ctk.CTkEntry(creance_window, width=350, placeholder_text="Ex: FAC-2026-001")
+        entry_numfact.pack(padx=10, pady=5)
+        
+        # Montant
+        ctk.CTkLabel(creance_window, text="Montant (Ar) :", font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=(10, 5))
+        entry_montant = ctk.CTkEntry(creance_window, width=350, placeholder_text="Ex: 50000")
+        entry_montant.pack(padx=10, pady=5)
+        
+        def enregistrer_creance():
+            try:
+                num_fact = entry_numfact.get().strip()
+                montant_str = entry_montant.get().strip()
+                
+                if not num_fact or not montant_str:
+                    messagebox.showwarning("Attention", "Veuillez remplir tous les champs.")
+                    return
+                
+                montant = float(montant_str.replace(',', '.'))
+                
+                if montant <= 0:
+                    messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
+                    return
+                
+                # Insérer la créance dans tb_autrecreance
+                self.cursor.execute("""
+                    INSERT INTO tb_autrecreance (idclient, dateregistre, numfact, montant)
+                    VALUES (%s, %s, %s, %s)
+                """, (idclient, datetime.now(), num_fact, montant))
+                self.conn.commit()
+                
+                messagebox.showinfo("Succès", f"Créance de {montant:,.2f} Ar enregistrée avec succès!")
+                
+                # Générer et imprimer le ticket 80mm
+                ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_creance_{idclient}_{datetime.now().strftime("%Y%m%d%H%M%S")}.txt')
+                os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
+                self._generate_ticket_80mm_creance(idclient, num_fact, montant, ticket_filename)
+                
+                # Demander si l'utilisateur veut imprimer
+                result = messagebox.askyesno("Imprimer", "Voulez-vous imprimer le ticket créance sur X80?")
+                if result:
+                    self._print_ticket_80mm(ticket_filename)
+                
+                creance_window.destroy()
+                
+                # Rafraîchir la fenêtre de détails
+                parent_window.destroy()
+                self.open_client_credit_details(idclient)
+            
+            except ValueError:
+                messagebox.showerror("Erreur", "Veuillez entrer un montant valide (nombre).")
+            except psycopg2.Error as err:
+                self.conn.rollback()
+                messagebox.showerror("Erreur", f"Erreur enregistrement créance: {err}")
+        
+        # Boutons
+        btn_frame = ctk.CTkFrame(creance_window)
+        btn_frame.pack(padx=10, pady=15)
+        
+        ctk.CTkButton(btn_frame, text="Enregistrer", command=enregistrer_creance, 
+                     fg_color="#27ae60").pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Annuler", command=creance_window.destroy, 
+                     fg_color="#e74c3c").pack(side="left", padx=5)
 
 if __name__ == "__main__":
     app = ctk.CTk()

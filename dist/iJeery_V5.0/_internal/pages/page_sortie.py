@@ -1112,7 +1112,7 @@ class PageSortie(ctk.CTkFrame):
                         return 
 
             self.detail_sortie.append(nouveau_detail)
-            messagebox.showinfo("Succès", "Article ajouté à la liste.")
+            #messagebox.showinfo("Succès", "Article ajouté à la liste.")
             
         self.charger_details_treeview()
         self.reset_detail_form()

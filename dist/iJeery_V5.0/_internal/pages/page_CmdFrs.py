@@ -1165,7 +1165,7 @@ class PageCommandeFrs(ctk.CTkFrame):
             if self.idcom_charge:
                 self.update_date_modification()
             
-            messagebox.showinfo("Succès", "Article ajouté avec succès!")
+            #messagebox.showinfo("Succès", "Article ajouté avec succès!")
         
         except ValueError:
             messagebox.showerror("Erreur", "Données numériques invalides.")

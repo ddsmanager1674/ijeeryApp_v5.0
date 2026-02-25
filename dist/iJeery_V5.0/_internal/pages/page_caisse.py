@@ -49,7 +49,7 @@ class PageCaisse(ctk.CTkFrame):
             "Crédit": None,
             "Chèque": None,
             "Virement": None,
-            "Any maka vola": None,
+            "Autres": None,
             "Mvola": None,
             "Airtel Money": None,
             "Orange Money": None
@@ -95,7 +95,7 @@ class PageCaisse(ctk.CTkFrame):
             ("Crédit", "#42a5f5"),
             ("Chèque", "#0091ea"),
             ("Virement", "#ce93d8"),
-            ("Any maka vola", "#f44336"),
+            ("Autres", "#f44336"),
             ("Mvola", "#fdd835"),
             ("Airtel Money", "#c0ca33"),
             ("Orange Money", "#00bcd4")
@@ -108,8 +108,8 @@ class PageCaisse(ctk.CTkFrame):
         self.frame_top = ctk.CTkFrame(self, fg_color="#f5f5f5")
         self.frame_top.pack(pady=10, fill="x", padx=10)
 
-        self.label_solde_global = ctk.CTkLabel(self.frame_top, text="Solde de caisse : 0 Ar", text_color="#000", font=("Arial", 18, "bold"))
-        self.label_solde_global.pack(side="left", padx=20)
+        # self.label_solde_global = ctk.CTkLabel(self.frame_top, text="Solde de caisse : 0 Ar", text_color="#000", font=("Arial", 18, "bold"))
+        # self.label_solde_global.pack(side="left", padx=20)
 
         self.frame_filtre = ctk.CTkFrame(self.frame_top, fg_color="#f5f5f5")
         self.frame_filtre.pack(side="left", padx=20)
@@ -314,7 +314,7 @@ class PageCaisse(ctk.CTkFrame):
                 "Crédit": ["Crédit", "Credit"],
                 "Chèque": ["Chèque", "Cheque", "Chèque bancaire"],
                 "Virement": ["Virement", "Virement bancaire"],
-                "Any maka vola": ["Any maka vola", "Any Maka Vola"],
+                "Autres": ["Autres", "Autres"],
                 "Mvola": ["Mvola", "MVOLA"],
                 "Airtel Money": ["Airtel Money", "Airtel money"],
                 "Orange Money": ["Orange Money", "Orange money"]
@@ -800,12 +800,12 @@ class PageCaisse(ctk.CTkFrame):
             
             solde = float(res[0]) if res and res[0] is not None else 0.0
             
-            self.label_solde_global.configure(
-                text=f"Solde de caisse : {self.format_montant(solde)} Ar"
-            )
+            # self.label_solde_global.configure(
+            #     text=f"Solde de caisse : {self.format_montant(solde)} Ar"
+            # )
         except Exception as e:
             print(f"Erreur calcul solde global: {e}")
-            self.label_solde_global.configure(text="Solde de caisse : Erreur Ar")
+            # self.label_solde_global.configure(text="Solde de caisse : Erreur Ar")
 
     def generer_pdf(self):
         if not self.donnees_pour_pdf:

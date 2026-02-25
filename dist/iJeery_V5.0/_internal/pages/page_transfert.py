@@ -800,7 +800,7 @@ class PageTransfert(ctk.CTkFrame):
         id_article = self.article_selectionne['id']
         id_unite = self.article_selectionne['idunite']
         
-        stock_actuel = self.calculer_stock_article(id_article, id_unite, id_mag_sortie)
+        stock_actuel = self.article_selectionne['stock_disponible']
         
         if quantite_saisie > stock_actuel:
             messagebox.showerror("Stock Insuffisant", 

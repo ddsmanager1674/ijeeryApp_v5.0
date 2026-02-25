@@ -56,7 +56,7 @@ def test_mapping_modes():
             "Crédit": None,
             "Chèque": None,
             "Virement": None,
-            "Any maka vola": None,
+            "Autres": None,
             "Mvola": None,
             "Airtel Money": None,
             "Orange Money": None
@@ -73,7 +73,7 @@ def test_mapping_modes():
             "Crédit": ["Crédit", "Credit"],
             "Chèque": ["Chèque", "Cheque", "Chèque bancaire"],
             "Virement": ["Virement", "Virement bancaire"],
-            "Any maka vola": ["Any maka vola", "Any Maka Vola"],
+            "Autres": ["Autres", "Autres"],
             "Mvola": ["Mvola", "MVOLA"],
             "Airtel Money": ["Airtel Money", "Airtel money"],
             "Orange Money": ["Orange Money", "Orange money"]

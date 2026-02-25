@@ -909,7 +909,7 @@ class PageChangementArticle(ctk.CTkFrame):
             })
 
             self.annuler_sortie()
-            messagebox.showinfo("Succès", f"Article '{designation}' ajouté à la sortie")
+            #messagebox.showinfo("Succès", f"Article '{designation}' ajouté à la sortie")
         except ValueError:
             messagebox.showerror("Erreur", "Quantité invalide")
 

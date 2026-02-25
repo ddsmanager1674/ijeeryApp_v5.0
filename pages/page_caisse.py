@@ -49,7 +49,7 @@ class PageCaisse(ctk.CTkFrame):
             "Crédit": None,
             "Chèque": None,
             "Virement": None,
-            "Any maka vola": None,
+            "Autres": None,
             "Mvola": None,
             "Airtel Money": None,
             "Orange Money": None
@@ -95,7 +95,7 @@ class PageCaisse(ctk.CTkFrame):
             ("Crédit", "#42a5f5"),
             ("Chèque", "#0091ea"),
             ("Virement", "#ce93d8"),
-            ("Any maka vola", "#f44336"),
+            ("Autres", "#f44336"),
             ("Mvola", "#fdd835"),
             ("Airtel Money", "#c0ca33"),
             ("Orange Money", "#00bcd4")
@@ -314,7 +314,7 @@ class PageCaisse(ctk.CTkFrame):
                 "Crédit": ["Crédit", "Credit"],
                 "Chèque": ["Chèque", "Cheque", "Chèque bancaire"],
                 "Virement": ["Virement", "Virement bancaire"],
-                "Any maka vola": ["Any maka vola", "Any Maka Vola"],
+                "Autres": ["Autres", "Autres"],
                 "Mvola": ["Mvola", "MVOLA"],
                 "Airtel Money": ["Airtel Money", "Airtel money"],
                 "Orange Money": ["Orange Money", "Orange money"]
