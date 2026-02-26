@@ -132,7 +132,7 @@ class PagePmtFacture(ctk.CTkToplevel):
         except: return ["Espèces"]
         finally: conn.close()
 
-    def calculer_stock_article_reel(self, idarticle, idunite_cible, idmag):
+    def calculer_stock_article_reel(self, idarticle, idunite_cible, idmag, cursor=None):
         """
         ✅ CALCUL CONSOLIDÉ DU STOCK RÉEL :
         Relie tous les mouvements de toutes les unités (PIECE, CARTON, etc.)
@@ -146,113 +146,164 @@ class PagePmtFacture(ctk.CTkToplevel):
         - Inventaires (tb_inventaire) → +stock
         - Avoirs (tb_avoir/tb_avoirdetail.qtavoir) → +stock (annulation de vente)
         """
-        conn = self.connect_db()
-        if not conn:
-            return 0.0
+        conn = None
+        local_cursor = cursor
+        if local_cursor is None:
+            conn = self.connect_db()
+            if not conn:
+                return 0.0
+            local_cursor = conn.cursor()
 
         try:
-            cursor = conn.cursor()
             query = """
             WITH unite_hierarchie AS (
-                SELECT idarticle, idunite, niveau, qtunite
+                SELECT idarticle, idunite, niveau, qtunite, designationunite
                 FROM tb_unite
-                WHERE idarticle = %s
+                WHERE idarticle = %s AND COALESCE(deleted, 0) = 0
             ),
             unite_coeff AS (
                 SELECT
                     idarticle,
                     idunite,
-                    exp(sum(ln(NULLIF(CASE WHEN COALESCE(qtunite, 1) > 0 THEN COALESCE(qtunite, 1) ELSE 1 END, 0)))
-                        OVER (PARTITION BY idarticle ORDER BY COALESCE(niveau, 0) ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-                    ) AS coeff_hierarchique
+                    niveau,
+                    qtunite,
+                    designationunite,
+                    exp(sum(ln(NULLIF(CASE WHEN qtunite > 0 THEN qtunite ELSE 1 END, 0)))
+                        OVER (PARTITION BY idarticle ORDER BY niveau ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+                    ) as coeff_hierarchique
                 FROM unite_hierarchie
             ),
+            base_unite_par_article AS (
+                SELECT DISTINCT ON (idarticle) idarticle, idunite
+                FROM tb_unite
+                WHERE idarticle = %s AND COALESCE(deleted, 0) = 0
+                ORDER BY idarticle, qtunite ASC, idunite ASC
+            ),
             rec AS (
-                SELECT idunite, SUM(qtlivrefrs) AS quantite
-                FROM tb_livraisonfrs
-                WHERE idarticle = %s AND deleted = 0 AND idmag = %s
-                GROUP BY idunite
+                SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite
+                FROM tb_livraisonfrs lf
+                WHERE lf.idarticle = %s AND lf.idmag = %s AND lf.deleted = 0
+                GROUP BY lf.idarticle, lf.idunite, lf.idmag
             ),
             ven AS (
-                SELECT vd.idunite, SUM(vd.qtvente) AS quantite
+                SELECT vd.idarticle, vd.idunite, v.idmag, SUM(vd.qtvente) AS quantite
                 FROM tb_ventedetail vd
-                INNER JOIN tb_vente v ON vd.idvente = v.id
-                WHERE vd.idarticle = %s AND vd.deleted = 0
-                  AND v.deleted = 0 AND v.statut = 'VALIDEE' AND v.idmag = %s
-                GROUP BY vd.idunite
+                INNER JOIN tb_vente v ON vd.idvente = v.id AND v.deleted = 0 AND v.statut = 'VALIDEE'
+                WHERE vd.idarticle = %s AND v.idmag = %s AND vd.deleted = 0
+                GROUP BY vd.idarticle, vd.idunite, v.idmag
             ),
             sor AS (
-                SELECT idunite, SUM(qtsortie) AS quantite
-                FROM tb_sortiedetail
-                WHERE idarticle = %s AND idmag = %s
-                GROUP BY idunite
+                SELECT sd.idarticle, sd.idunite, sd.idmag, SUM(sd.qtsortie) AS quantite
+                FROM tb_sortiedetail sd
+                WHERE sd.idarticle = %s AND sd.idmag = %s
+                GROUP BY sd.idarticle, sd.idunite, sd.idmag
             ),
             tin AS (
-                SELECT idunite, SUM(qttransfert) AS quantite
-                FROM tb_transfertdetail
-                WHERE idarticle = %s AND deleted = 0 AND idmagentree = %s
-                GROUP BY idunite
+                SELECT t.idarticle, t.idunite, t.idmagentree AS idmag, SUM(t.qttransfert) AS quantite
+                FROM tb_transfertdetail t
+                WHERE t.idarticle = %s AND t.deleted = 0 AND t.idmagentree = %s
+                GROUP BY t.idarticle, t.idunite, t.idmagentree
             ),
             tout AS (
-                SELECT idunite, SUM(qttransfert) AS quantite
-                FROM tb_transfertdetail
-                WHERE idarticle = %s AND deleted = 0 AND idmagsortie = %s
-                GROUP BY idunite
+                SELECT t.idarticle, t.idunite, t.idmagsortie AS idmag, SUM(t.qttransfert) AS quantite
+                FROM tb_transfertdetail t
+                WHERE t.idarticle = %s AND t.deleted = 0 AND t.idmagsortie = %s
+                GROUP BY t.idarticle, t.idunite, t.idmagsortie
             ),
             inv AS (
-                SELECT u.idunite, SUM(i.qtinventaire) AS quantite
+                SELECT bu.idarticle, bu.idunite, i.idmag, SUM(i.qtinventaire) AS quantite
                 FROM tb_inventaire i
                 INNER JOIN tb_unite u ON i.codearticle = u.codearticle
+                INNER JOIN base_unite_par_article bu ON bu.idarticle = u.idarticle AND bu.idunite = u.idunite
                 WHERE u.idarticle = %s AND i.idmag = %s
-                GROUP BY u.idunite
+                GROUP BY bu.idarticle, bu.idunite, i.idmag
             ),
             avo AS (
-                SELECT ad.idunite, SUM(ad.qtavoir) AS quantite
-                FROM tb_avoirdetail ad
-                INNER JOIN tb_avoir a ON ad.idavoir = a.id
-                WHERE ad.idarticle = %s AND a.deleted = 0 AND ad.deleted = 0 AND ad.idmag = %s
-                GROUP BY ad.idunite
+                SELECT ad.idarticle, ad.idunite, ad.idmag, SUM(ad.qtavoir) AS quantite
+                FROM tb_avoir a
+                INNER JOIN tb_avoirdetail ad ON a.id = ad.idavoir
+                WHERE ad.idarticle = %s AND ad.idmag = %s AND a.deleted = 0 AND ad.deleted = 0
+                GROUP BY ad.idarticle, ad.idunite, ad.idmag
+            ),
+            conso AS (
+                SELECT ci.idarticle, ci.idunite, ci.idmag, SUM(ci.qtconsomme) AS quantite
+                FROM tb_consommationinterne_details ci
+                WHERE ci.idarticle = %s AND ci.idmag = %s
+                GROUP BY ci.idarticle, ci.idunite, ci.idmag
+            ),
+            ech_in AS (
+                SELECT dce.idarticle, dce.idunite, dce.idmagasin AS idmag, SUM(dce.quantite_entree) AS quantite
+                FROM tb_detailchange_entree dce
+                WHERE dce.idarticle = %s AND dce.idmagasin = %s
+                GROUP BY dce.idarticle, dce.idunite, dce.idmagasin
+            ),
+            ech_out AS (
+                SELECT dcs.idarticle, dcs.idunite, dcs.idmagasin AS idmag, SUM(dcs.quantite_sortie) AS quantite
+                FROM tb_detailchange_sortie dcs
+                WHERE dcs.idarticle = %s AND dcs.idmagasin = %s
+                GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin
             ),
             mouvements_agreges AS (
-                SELECT idunite, quantite, 'reception' AS type_mouvement FROM rec
+                SELECT idarticle, idunite, idmag, quantite, 'reception' AS type_mouvement FROM rec
                 UNION ALL
-                SELECT idunite, quantite, 'vente' AS type_mouvement FROM ven
+                SELECT idarticle, idunite, idmag, quantite, 'vente' AS type_mouvement FROM ven
                 UNION ALL
-                SELECT idunite, quantite, 'sortie' AS type_mouvement FROM sor
+                SELECT idarticle, idunite, idmag, quantite, 'sortie' AS type_mouvement FROM sor
                 UNION ALL
-                SELECT idunite, quantite, 'transfert_in' AS type_mouvement FROM tin
+                SELECT idarticle, idunite, idmag, quantite, 'transfert_in' AS type_mouvement FROM tin
                 UNION ALL
-                SELECT idunite, quantite, 'transfert_out' AS type_mouvement FROM tout
+                SELECT idarticle, idunite, idmag, quantite, 'transfert_out' AS type_mouvement FROM tout
                 UNION ALL
-                SELECT idunite, quantite, 'inventaire' AS type_mouvement FROM inv
+                SELECT idarticle, idunite, idmag, quantite, 'inventaire' AS type_mouvement FROM inv
                 UNION ALL
-                SELECT idunite, quantite, 'avoir' AS type_mouvement FROM avo
+                SELECT idarticle, idunite, idmag, quantite, 'avoir' AS type_mouvement FROM avo
+                UNION ALL
+                SELECT idarticle, idunite, idmag, quantite, 'consommation_interne' AS type_mouvement FROM conso
+                UNION ALL
+                SELECT idarticle, idunite, idmag, quantite, 'echange_entree' AS type_mouvement FROM ech_in
+                UNION ALL
+                SELECT idarticle, idunite, idmag, quantite, 'echange_sortie' AS type_mouvement FROM ech_out
             ),
-            solde_base AS (
+            solde_base_par_mag AS (
                 SELECT
+                    ma.idarticle,
+                    ma.idmag,
                     SUM(
                         CASE ma.type_mouvement
-                            WHEN 'reception'     THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
-                            WHEN 'transfert_in'  THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
-                            WHEN 'inventaire'    THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
-                            WHEN 'avoir'         THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
-                            WHEN 'vente'         THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
-                            WHEN 'sortie'        THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
-                            WHEN 'transfert_out' THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'reception'            THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'transfert_in'         THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'inventaire'           THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'avoir'                THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'echange_entree'       THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'vente'                THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'sortie'               THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'transfert_out'        THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'consommation_interne' THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'echange_sortie'       THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
                             ELSE 0
                         END
-                    ) AS total_base
+                    ) as solde
                 FROM mouvements_agreges ma
-                LEFT JOIN unite_coeff uc ON uc.idunite = ma.idunite
+                LEFT JOIN unite_coeff uc ON uc.idarticle = ma.idarticle AND uc.idunite = ma.idunite
+                GROUP BY ma.idarticle, ma.idmag
             )
-            SELECT GREATEST(
-                COALESCE((SELECT total_base FROM solde_base), 0) /
-                NULLIF(COALESCE((SELECT coeff_hierarchique FROM unite_coeff WHERE idunite = %s), 1), 0),
-                0
-            ) AS stock_reel
+            SELECT
+                GREATEST(
+                    COALESCE(sb.solde, 0) / NULLIF(COALESCE(uc.coeff_hierarchique, 1), 0),
+                    0
+                ) as stock_reel
+            FROM tb_article a
+            INNER JOIN tb_unite u ON a.idarticle = u.idarticle
+            LEFT JOIN unite_coeff uc ON uc.idarticle = u.idarticle AND uc.idunite = u.idunite
+            LEFT JOIN solde_base_par_mag sb ON sb.idarticle = u.idarticle AND sb.idmag = %s
+            WHERE a.deleted = 0
+              AND u.idarticle = %s
+              AND u.idunite = %s
+            LIMIT 1
             """
 
             params = [
+                idarticle,
                 idarticle,
                 idarticle, idmag,      # rec
                 idarticle, idmag,      # ven
@@ -261,18 +312,27 @@ class PagePmtFacture(ctk.CTkToplevel):
                 idarticle, idmag,      # tout
                 idarticle, idmag,      # inv
                 idarticle, idmag,      # avo
+                idarticle, idmag,      # conso
+                idarticle, idmag,      # ech_in
+                idarticle, idmag,      # ech_out
+                idmag,                 # solde magasin
+                idarticle,             # article cible
                 idunite_cible          # unité cible
             ]
-            cursor.execute(query, params)
-            row = cursor.fetchone()
+            local_cursor.execute(query, params)
+            row = local_cursor.fetchone()
             return float(row[0] or 0.0)
 
         except Exception as e:
             print(f"❌ Erreur calcul stock consolidé : {e}")
             return 0.0
         finally:
-            cursor.close()
-            conn.close()
+            if conn is not None:
+                try:
+                    local_cursor.close()
+                except Exception:
+                    pass
+                conn.close()
         
     def _verifier_mode_credit(self, choix):
         """Active ou désactive le calendrier selon le mode choisi"""
@@ -546,7 +606,45 @@ class PagePmtFacture(ctk.CTkToplevel):
                 print(f"    - Prix unitaire: {prixunit}")
                 print(f"    - Magasin: {idmag}")
 
-            # 6. Enregistrement du paiement avec dateecheance ET idclient
+            # 6. Vérification préalable du stock réel avant paiement/validation
+            print(f"\n{'='*70}")
+            print("🔎 ÉTAPE 3 : CONTRÔLE DISPONIBILITÉ STOCK")
+            print(f"{'='*70}")
+            stocks_initiaux = {}
+            stocks_reserves = {}
+            for det_idx, det in enumerate(articles, 1):
+                idarticle = det[0]
+                idunite = det[1]
+                idmag = det[2]
+                codearticle = det[3] or ''
+                designation = det[4]
+                qtvente = float(det[6] or 0)
+                cle_stock = (idarticle, idunite, idmag)
+
+                if cle_stock not in stocks_initiaux:
+                    stock_calcule = self.calculer_stock_article_reel(idarticle, idunite, idmag, cursor=cursor)
+                    stocks_initiaux[cle_stock] = stock_calcule
+                    stocks_reserves[cle_stock] = stock_calcule
+
+                stock_reel = stocks_reserves[cle_stock]
+                print(
+                    f"  Article #{det_idx} - {designation}: "
+                    f"demandé={qtvente}, stock_reel={stock_reel}"
+                )
+
+                if qtvente > stock_reel:
+                    messagebox.showwarning(
+                        "Stock insuffisant",
+                        (
+                            f"Stock insuffisant pour l'article {designation} "
+                            f"({codearticle or idarticle}).\n"
+                            f"Demandé: {qtvente}\nDisponible: {stock_reel}"
+                        )
+                    )
+                    return
+                stocks_reserves[cle_stock] = stock_reel - qtvente
+
+            # 7. Enregistrement du paiement avec dateecheance ET idclient
             # ✅ VÉRIFICATION DOUBLON : Vérifier s'il n'existe pas déjà un paiement identique
             today = datetime.now().date()
             cursor.execute("""
@@ -628,24 +726,25 @@ class PagePmtFacture(ctk.CTkToplevel):
                     codearticle = det[3] or ''
                     designation = det[4]
                     qtvente = float(det[6] or 0)
+                    cle_stock = (idarticle, idunite, idmag)
 
                     print(f"\n  🔄 Article #{det_idx}: {designation}")
                     print(f"     ID: {idarticle}, Code: '{codearticle}', Magasin: {idmag}, Qté vendue: {qtvente}")
 
-                    # 🎯 UTILISER LE CALCUL CONSOLIDÉ DU STOCK RÉEL
-                    stock_reel = self.calculer_stock_article_reel(idarticle, idunite, idmag)
-                    ancien_stock = stock_reel
+                    # Réutiliser le stock validé en amont pour garder la cohérence.
+                    ancien_stock = float(stocks_initiaux.get(cle_stock, 0.0))
                     print(f"     ✓ Stock RÉEL (consolidé): {ancien_stock}")
                     
                     nouveau_stock = ancien_stock - qtvente
                     print(f"     📊 Calcul: {ancien_stock} - {qtvente} = {nouveau_stock}")
 
                     # ⚠️ TODO: Vérification disponibilité (empêche validation si stock insuffisant) - À DÉVELOPPER
-                    # if ancien_stock < qtvente:
-                    #     print(f"     ❌ ERREUR: Stock insuffisant!")
+                    #if ancien_stock < qtvente:
+                    #     print(f"  ⚠️ PAYEMENT NON VALIDEE : Stock insuffisant d'un article vendu!")
                     #     conn.rollback()
                     #     messagebox.showerror("Stock insuffisant", f"Stock insuffisant pour l'article {codearticle or idarticle} (mag {idmag}). Ancien: {ancien_stock}, demandé: {qtvente}")
                     #     return
+                    stocks_initiaux[cle_stock] = nouveau_stock
 
                     # Mise à jour du stock dans tb_stock (synchronisation du cache)
                     if codearticle:
