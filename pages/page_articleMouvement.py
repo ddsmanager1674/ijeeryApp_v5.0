@@ -390,7 +390,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                 FROM tb_vente v
                 INNER JOIN tb_ventedetail vd ON v.id = vd.idvente
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
-                WHERE u.idunite = %s AND v.deleted = 0 AND vd.deleted = 0 AND DATE(v.dateregistre) < %s
+                WHERE u.idunite = %s AND v.deleted = 0 AND vd.deleted = 0
+                AND v.statut = 'VALIDEE' AND DATE(v.dateregistre) < %s
                 
                 UNION ALL
                 -- Transferts Sortie
@@ -833,6 +834,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                 LEFT JOIN tb_users usr ON v.iduser = usr.iduser
                 WHERE DATE(v.dateregistre) BETWEEN %s AND %s
                 AND v.deleted = 0 AND vd.deleted = 0
+                AND v.statut = 'VALIDEE'
             """
             query_params = [date_debut, date_fin]
             
