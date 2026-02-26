@@ -147,144 +147,128 @@ class PagePmtFacture(ctk.CTkToplevel):
         - Avoirs (tb_avoir/tb_avoirdetail.qtavoir) → +stock (annulation de vente)
         """
         conn = self.connect_db()
-        if not conn: return 0.0
-        
+        if not conn:
+            return 0.0
+
         try:
             cursor = conn.cursor()
-            
-            print(f"\n{'='*80}")
-            print(f"🔬 DEBUG CALCUL STOCK ARTICLE #{idarticle} - MAGASIN {idmag}")
-            print(f"{'='*80}")
-            
-            # 1. Récupérer TOUTES les unités liées à cet idarticle
-            cursor.execute("""
-                SELECT idunite, codearticle, COALESCE(qtunite, 1) 
-                FROM tb_unite 
+            query = """
+            WITH unite_hierarchie AS (
+                SELECT idarticle, idunite, niveau, qtunite
+                FROM tb_unite
                 WHERE idarticle = %s
-            """, (idarticle,))
-            unites_liees = cursor.fetchall()
-            
-            print(f"\n📌 Unités trouvées pour idarticle={idarticle}:")
-            for idu, code, qt_u in unites_liees:
-                print(f"   - idunite={idu}, codearticle='{code}', qtunite={qt_u}")
-            
-            # 2. Identifier le qtunite de l'unité qu'on veut afficher
-            qtunite_affichage = 1
-            codearticle_affichage = ""
-            for idu, code, qt_u in unites_liees:
-                if idu == idunite_cible:
-                    qtunite_affichage = qt_u if qt_u > 0 else 1
-                    codearticle_affichage = code
-                    break
-            
-            print(f"\n🎯 Unité d'affichage:")
-            print(f"   idunite_cible={idunite_cible}, qtunite_affichage={qtunite_affichage}, code='{codearticle_affichage}'")
+            ),
+            unite_coeff AS (
+                SELECT
+                    idarticle,
+                    idunite,
+                    exp(sum(ln(NULLIF(CASE WHEN COALESCE(qtunite, 1) > 0 THEN COALESCE(qtunite, 1) ELSE 1 END, 0)))
+                        OVER (PARTITION BY idarticle ORDER BY COALESCE(niveau, 0) ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+                    ) AS coeff_hierarchique
+                FROM unite_hierarchie
+            ),
+            rec AS (
+                SELECT idunite, SUM(qtlivrefrs) AS quantite
+                FROM tb_livraisonfrs
+                WHERE idarticle = %s AND deleted = 0 AND idmag = %s
+                GROUP BY idunite
+            ),
+            ven AS (
+                SELECT vd.idunite, SUM(vd.qtvente) AS quantite
+                FROM tb_ventedetail vd
+                INNER JOIN tb_vente v ON vd.idvente = v.id
+                WHERE vd.idarticle = %s AND vd.deleted = 0
+                  AND v.deleted = 0 AND v.statut = 'VALIDEE' AND v.idmag = %s
+                GROUP BY vd.idunite
+            ),
+            sor AS (
+                SELECT idunite, SUM(qtsortie) AS quantite
+                FROM tb_sortiedetail
+                WHERE idarticle = %s AND idmag = %s
+                GROUP BY idunite
+            ),
+            tin AS (
+                SELECT idunite, SUM(qttransfert) AS quantite
+                FROM tb_transfertdetail
+                WHERE idarticle = %s AND deleted = 0 AND idmagentree = %s
+                GROUP BY idunite
+            ),
+            tout AS (
+                SELECT idunite, SUM(qttransfert) AS quantite
+                FROM tb_transfertdetail
+                WHERE idarticle = %s AND deleted = 0 AND idmagsortie = %s
+                GROUP BY idunite
+            ),
+            inv AS (
+                SELECT u.idunite, SUM(i.qtinventaire) AS quantite
+                FROM tb_inventaire i
+                INNER JOIN tb_unite u ON i.codearticle = u.codearticle
+                WHERE u.idarticle = %s AND i.idmag = %s
+                GROUP BY u.idunite
+            ),
+            avo AS (
+                SELECT ad.idunite, SUM(ad.qtavoir) AS quantite
+                FROM tb_avoirdetail ad
+                INNER JOIN tb_avoir a ON ad.idavoir = a.id
+                WHERE ad.idarticle = %s AND a.deleted = 0 AND ad.deleted = 0 AND ad.idmag = %s
+                GROUP BY ad.idunite
+            ),
+            mouvements_agreges AS (
+                SELECT idunite, quantite, 'reception' AS type_mouvement FROM rec
+                UNION ALL
+                SELECT idunite, quantite, 'vente' AS type_mouvement FROM ven
+                UNION ALL
+                SELECT idunite, quantite, 'sortie' AS type_mouvement FROM sor
+                UNION ALL
+                SELECT idunite, quantite, 'transfert_in' AS type_mouvement FROM tin
+                UNION ALL
+                SELECT idunite, quantite, 'transfert_out' AS type_mouvement FROM tout
+                UNION ALL
+                SELECT idunite, quantite, 'inventaire' AS type_mouvement FROM inv
+                UNION ALL
+                SELECT idunite, quantite, 'avoir' AS type_mouvement FROM avo
+            ),
+            solde_base AS (
+                SELECT
+                    SUM(
+                        CASE ma.type_mouvement
+                            WHEN 'reception'     THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'transfert_in'  THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'inventaire'    THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'avoir'         THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'vente'         THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'sortie'        THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            WHEN 'transfert_out' THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                            ELSE 0
+                        END
+                    ) AS total_base
+                FROM mouvements_agreges ma
+                LEFT JOIN unite_coeff uc ON uc.idunite = ma.idunite
+            )
+            SELECT GREATEST(
+                COALESCE((SELECT total_base FROM solde_base), 0) /
+                NULLIF(COALESCE((SELECT coeff_hierarchique FROM unite_coeff WHERE idunite = %s), 1), 0),
+                0
+            ) AS stock_reel
+            """
 
-            total_stock_global_base = 0
+            params = [
+                idarticle,
+                idarticle, idmag,      # rec
+                idarticle, idmag,      # ven
+                idarticle, idmag,      # sor
+                idarticle, idmag,      # tin
+                idarticle, idmag,      # tout
+                idarticle, idmag,      # inv
+                idarticle, idmag,      # avo
+                idunite_cible          # unité cible
+            ]
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            return float(row[0] or 0.0)
 
-            # 3. Sommer les mouvements de chaque variante
-            for det_idx, (idu_boucle, code_boucle, qtunite_boucle) in enumerate(unites_liees, 1):
-                print(f"\n{'─'*80}")
-                print(f"📦 Unité #{det_idx}: idunite={idu_boucle}, code='{code_boucle}', qtunite={qtunite_boucle}")
-                print(f"{'─'*80}")
-                
-                # Réceptions
-                cursor.execute(
-                    "SELECT COALESCE(SUM(qtlivrefrs), 0) FROM tb_livraisonfrs WHERE idarticle = %s AND idunite = %s AND deleted = 0 AND idmag = %s",
-                    (idarticle, idu_boucle, idmag)
-                )
-                receptions = cursor.fetchone()[0] or 0
-                print(f"  📥 Réceptions (tb_livraisonfrs): {receptions}")
-        
-                # Ventes (UNIQUEMENT VALIDÉES - cohérent avec page_stock.py)
-                cursor.execute(
-                    """SELECT COALESCE(SUM(vd.qtvente), 0) 
-                       FROM tb_ventedetail vd 
-                       INNER JOIN tb_vente v ON vd.idvente = v.id 
-                       WHERE vd.idarticle = %s AND vd.idunite = %s AND vd.deleted = 0 
-                       AND v.deleted = 0 AND v.statut = 'VALIDEE' AND v.idmag = %s""",
-                    (idarticle, idu_boucle, idmag)
-                )
-                ventes = cursor.fetchone()[0] or 0
-                print(f"  📤 Ventes (tb_ventedetail - VALIDÉE uniquement): {ventes}")
-        
-                # Sorties
-                cursor.execute(
-                    "SELECT COALESCE(SUM(qtsortie), 0) FROM tb_sortiedetail WHERE idarticle = %s AND idunite = %s AND idmag = %s",
-                    (idarticle, idu_boucle, idmag)
-                )
-                sorties = cursor.fetchone()[0] or 0
-                print(f"  📤 Sorties (tb_sortiedetail): {sorties}")
-        
-                # Transferts IN
-                cursor.execute(
-                    "SELECT COALESCE(SUM(qttransfert), 0) FROM tb_transfertdetail WHERE idarticle = %s AND idunite = %s AND deleted = 0 AND idmagentree = %s",
-                    (idarticle, idu_boucle, idmag)
-                )
-                t_in = cursor.fetchone()[0] or 0
-                print(f"  ➡️ Transferts IN (idmagentree): {t_in}")
-                
-                # Transferts OUT
-                cursor.execute(
-                    "SELECT COALESCE(SUM(qttransfert), 0) FROM tb_transfertdetail WHERE idarticle = %s AND idunite = %s AND deleted = 0 AND idmagsortie = %s",
-                    (idarticle, idu_boucle, idmag)
-                )
-                t_out = cursor.fetchone()[0] or 0
-                print(f"  ⬅️ Transferts OUT (idmagsortie): {t_out}")
-        
-                # Inventaires
-                cursor.execute(
-                    "SELECT COALESCE(SUM(qtinventaire), 0) FROM tb_inventaire WHERE codearticle = %s AND idmag = %s",
-                    (code_boucle, idmag)
-                )
-                inv = cursor.fetchone()[0] or 0
-                print(f"  📋 Inventaires (tb_inventaire): {inv}")
-
-                # Avoirs (annulation de vente = +stock)
-                cursor.execute(
-                    """
-                    SELECT COALESCE(SUM(ad.qtavoir), 0) 
-                    FROM tb_avoirdetail ad
-                    INNER JOIN tb_avoir a ON ad.idavoir = a.id
-                    WHERE ad.idarticle = %s AND ad.idunite = %s 
-                    AND a.deleted = 0 AND ad.deleted = 0 AND ad.idmag = %s
-                    """,
-                    (idarticle, idu_boucle, idmag)
-                )
-                avoirs = cursor.fetchone()[0] or 0
-                print(f"  🔄 Avoirs/Retours (tb_avoirdetail): {avoirs}")
-
-                # Calcul du solde pour cette unité
-                solde_unite = (receptions + t_in + inv + avoirs) - (ventes + sorties + t_out)
-                print(f"\n  🧮 Formule: ({receptions} + {t_in} + {inv} + {avoirs}) - ({ventes} + {sorties} + {t_out})")
-                print(f"  = ({receptions + t_in + inv + avoirs}) - ({ventes + sorties + t_out})")
-                print(f"  = {solde_unite}")
-                
-                contribution = solde_unite * qtunite_boucle
-                print(f"  × Poids (qtunite={qtunite_boucle}) = {contribution}")
-                
-                total_stock_global_base += contribution
-
-            # 4. Conversion finale pour l'affichage
-            print(f"\n{'='*80}")
-            print(f"🔢 RÉSUMÉ CALCUL FINAL")
-            print(f"{'='*80}")
-            print(f"  Total stock global (base): {total_stock_global_base}")
-            print(f"  qtunite_affichage: {qtunite_affichage}")
-            print(f"  Calcul: {total_stock_global_base} / {qtunite_affichage}")
-            
-            stock_final = total_stock_global_base / qtunite_affichage
-            stock_affiche = max(0.0, stock_final)
-            
-            print(f"\n✅ STOCK FINAL AFFICHÉ: {stock_affiche}")
-            print(f"{'='*80}\n")
-            
-            return stock_affiche
-        
         except Exception as e:
             print(f"❌ Erreur calcul stock consolidé : {e}")
-            import traceback
-            traceback.print_exc()
             return 0.0
         finally:
             cursor.close()
