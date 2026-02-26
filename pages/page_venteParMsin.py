@@ -2068,6 +2068,9 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
         self.article_selectionne = None
         self.stock_temporaire_selection = None
         self.index_ligne_selectionnee = None
+
+        self.entry_remise.delete(0, "end")
+        self.entry_remise.insert(0, "0")
         
         self.entry_article.configure(state="normal")
         self.entry_article.delete(0, "end")
@@ -2374,6 +2377,8 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
         self.btn_enregistrer.configure(state="normal", text="💾 Enregistrer la Facture", fg_color="#2196f3", hover_color="#1976d2")
         self.btn_imprimer.configure(state="disabled")
         self.btn_charger_proforma.configure(state="normal") # Réactiver le bouton Proforma
+        self.entry_remise.configure(state="disabled") # Désactivé par défaut
+        self.entry_remise.delete(0, "end")
         
         # Assurer que l'état Proforma est réinitialisé
         self.reset_proforma_state()

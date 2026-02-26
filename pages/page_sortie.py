@@ -1490,10 +1490,10 @@ class PageSortie(ctk.CTkFrame):
         
         # 1. Insérer en-tête de sortie avec iduser
         sql_sortie = """
-            INSERT INTO tb_sortie (refsortie, iduser, dateregistre, description, deleted)
-            VALUES (%s, %s, %s, %s, 0) RETURNING id
+            INSERT INTO tb_sortie (refsortie, iduser, description, deleted)
+            VALUES (%s, %s, %s, 0) RETURNING id
         """
-        cursor.execute(sql_sortie, (ref_sortie, iduser, date_sortie, motif_sortie))
+        cursor.execute(sql_sortie, (ref_sortie, iduser, motif_sortie))
         idsortie = cursor.fetchone()[0]
 
         # 2. Insérer les détails
