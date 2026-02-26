@@ -20,7 +20,7 @@ REM Lancer PyInstaller
 echo ⏳ Génération de l'EXE en cours...
 echo.
 
-call ".venv\Scripts\python.exe" -m PyInstaller iJeery_V5.0.spec --onedir --noconfirm --distpath dist_final
+call ".venv\Scripts\python.exe" -m PyInstaller iJeery_V5.0.spec --noconfirm --distpath dist_final
 
 REM Vérifier le succès
 if %ERRORLEVEL% EQU 0 (
