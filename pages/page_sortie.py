@@ -385,9 +385,9 @@ class PageSortie(ctk.CTkFrame):
         
         # Déterminer les colonnes selon le type
         if self.type_sortie == "CI":
-            colonnes = ("ID_Article", "ID_Unite", "ID_Magasin", "Code Article", "Désignation", "Magasin", "Unité", "Quantité", "Montant")
+            colonnes = ("ID_Article", "ID_Unite", "ID_Magasin", "Code Article", "Désignation", "Magasin", "Unité", "Quantité", "Montant", "Motif")
         else:  # BS
-            colonnes = ("ID_Article", "ID_Unite", "ID_Magasin", "Code Article", "Désignation", "Magasin", "Unité", "Quantité")
+            colonnes = ("ID_Article", "ID_Unite", "ID_Magasin", "Code Article", "Désignation", "Magasin", "Unité", "Quantité", "Motif")
         
         # Style du treeview
         style = ttk.Style()
@@ -411,6 +411,8 @@ class PageSortie(ctk.CTkFrame):
                 self.tree_details.column(col, width=130, anchor='e')
             elif col == "Désignation":
                 self.tree_details.column(col, width=300, anchor='w')
+            elif col == "Motif":
+                self.tree_details.column(col, width=220, anchor='w')
             else:
                 self.tree_details.column(col, width=120, anchor='w')
         
@@ -1022,6 +1024,9 @@ class PageSortie(ctk.CTkFrame):
         prix_unitaire = 0
         if self.type_sortie == "CI":
             prix_unitaire = self.article_selectionne.get('prix_unitaire', 0)
+        motif_ligne = self.entry_motif.get().strip()
+        if not motif_ligne:
+            motif_ligne = "Aucune description"
 
         nouveau_detail = {
             'idmag': idmag,
@@ -1032,6 +1037,7 @@ class PageSortie(ctk.CTkFrame):
             'idunite': self.article_selectionne['idunite'],
             'nom_unite': self.article_selectionne['nom_unite'],
             'qtsortie': qtsortie,
+            'motif': motif_ligne,
             'prix_unitaire': prix_unitaire,  # *** NOUVEAU ***
             'montant_total': qtsortie * prix_unitaire  # *** NOUVEAU ***
         }
@@ -1055,6 +1061,9 @@ class PageSortie(ctk.CTkFrame):
                     if messagebox.askyesno("Doublon détecté", 
                                           f"L'article '{detail['nom_article']}' est déjà présent. Fusionner?"):
                         self.detail_sortie[i]['qtsortie'] = nouvelle_qte_totale
+                        motif_existant = (self.detail_sortie[i].get('motif') or "").strip()
+                        if motif_ligne and motif_ligne != "Aucune description" and motif_ligne not in motif_existant:
+                            self.detail_sortie[i]['motif'] = f"{motif_existant}, {motif_ligne}".strip(", ")
                         # *** NOUVEAU : Recalculer le montant total ***
                         self.detail_sortie[i]['montant_total'] = nouvelle_qte_totale * self.detail_sortie[i]['prix_unitaire']
                         messagebox.showinfo("Succès", "Quantité fusionnée.")
@@ -1091,6 +1100,7 @@ class PageSortie(ctk.CTkFrame):
             # Ajouter montant pour CI uniquement (prix unitaire calculé à l'ajout)
             if self.type_sortie == "CI":
                 values.append(self.formater_nombre(detail.get('montant_total', 0)))
+            values.append(detail.get('motif', ''))
             
             zebra_tag = "even" if idx % 2 == 0 else "odd"
             self.tree_details.insert('', 'end', values=values, tags=(zebra_tag,))
@@ -1129,6 +1139,8 @@ class PageSortie(ctk.CTkFrame):
         
         self.entry_qtsortie.delete(0, "end")
         self.entry_qtsortie.insert(0, self.formater_nombre(detail['qtsortie']))
+        self.entry_motif.delete(0, "end")
+        self.entry_motif.insert(0, detail.get('motif', ''))
 
         self.btn_ajouter.configure(text="✔️ Valider Modif.", fg_color="#ff8f00", hover_color="#e65100")
         self.btn_annuler_mod.configure(state="normal")
@@ -1165,6 +1177,7 @@ class PageSortie(ctk.CTkFrame):
         self.entry_unite.configure(state="readonly")
         
         self.entry_qtsortie.delete(0, "end")
+        self.entry_motif.delete(0, "end")
         
         self.btn_ajouter.configure(text="➕ Ajouter", fg_color="#2e7d32", hover_color="#1b5e20")
         self.btn_annuler_mod.configure(state="disabled")
@@ -1232,7 +1245,18 @@ class PageSortie(ctk.CTkFrame):
             try:
                 cursor = conn.cursor()
                 query = """
-                    SELECT s.id, s.refsortie, s.dateregistre, s.description,
+                    SELECT s.id, s.refsortie, s.dateregistre,
+                       COALESCE(
+                           NULLIF(
+                               (
+                                   SELECT string_agg(NULLIF(TRIM(sd2.motif), ''), ', ' ORDER BY sd2.id)
+                                   FROM tb_sortiedetail sd2
+                                   WHERE sd2.idsortie = s.id
+                               ),
+                               ''
+                           ),
+                           'Motif non précisé'
+                       ) as motif_lignes,
                        CONCAT(u.prenomuser, ' ', u.nomuser) as utilisateur,
                        (SELECT COUNT(*) 
                         FROM tb_sortiedetail sd 
@@ -1245,7 +1269,16 @@ class PageSortie(ctk.CTkFrame):
                 if filtre:
                     query += """ AND (
                         LOWER(s.refsortie) LIKE LOWER(%s) OR 
-                        LOWER(s.description) LIKE LOWER(%s)
+                        LOWER(
+                            COALESCE(
+                                (
+                                    SELECT string_agg(NULLIF(TRIM(sd2.motif), ''), ', ' ORDER BY sd2.id)
+                                    FROM tb_sortiedetail sd2
+                                    WHERE sd2.idsortie = s.id
+                                ),
+                                ''
+                            )
+                        ) LIKE LOWER(%s)
                     )"""
                     params = [f"%{filtre}%", f"%{filtre}%"]
             
@@ -1324,7 +1357,7 @@ class PageSortie(ctk.CTkFrame):
             # Charger les détails
             query_details = """
                 SELECT sd.idmag, m.designationmag, sd.idarticle, u.codearticle, 
-                   a.designation, sd.idunite, u.designationunite, sd.qtsortie
+                   a.designation, sd.idunite, u.designationunite, sd.qtsortie, sd.motif
                 FROM tb_sortiedetail sd
                 INNER JOIN tb_article a ON sd.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON sd.idunite = u.idunite
@@ -1352,12 +1385,11 @@ class PageSortie(ctk.CTkFrame):
             self.entry_date_sortie.insert(0, sortie[2].strftime("%d/%m/%Y"))
         
             self.entry_motif.delete(0, "end")
-            self.entry_motif.insert(0, sortie[3] or "")
         
             # Charger les détails
             self.detail_sortie = []
             for detail in details:
-                idmag, designationmag, idarticle, codearticle, designation, idunite, designationunite, qtsortie = detail
+                idmag, designationmag, idarticle, codearticle, designation, idunite, designationunite, qtsortie, motif = detail
             
                 self.detail_sortie.append({
                     'idmag': idmag,
@@ -1367,7 +1399,8 @@ class PageSortie(ctk.CTkFrame):
                     'nom_article': designation,
                     'idunite': idunite,
                     'nom_unite': designationunite,
-                    'qtsortie': qtsortie
+                    'qtsortie': qtsortie,
+                    'motif': motif or ""
                 })
         
             self.charger_details_treeview()
@@ -1399,12 +1432,6 @@ class PageSortie(ctk.CTkFrame):
         ref_sortie = self.entry_ref_sortie.get()
         date_sortie_str = self.entry_date_sortie.get()
         designationmag = self.combo_magasin.get()
-        motif_sortie = self.entry_motif.get().strip()
-        
-        # ✅ Si description vide, ajouter texte par défaut
-        if not motif_sortie:
-            motif_sortie = "Aucune description"
-
         if not ref_sortie or not date_sortie_str or not designationmag:
             messagebox.showwarning("Attention", "Veuillez remplir tous les champs obligatoires (Référence, Date, Magasin).")
             return
@@ -1425,7 +1452,6 @@ class PageSortie(ctk.CTkFrame):
                 f"Type: {type_label}\n"
                 f"Référence: {ref_sortie}\n"
                 f"Articles: {len(self.detail_sortie)}\n"
-                f"Motif: {motif_sortie}\n\n"
                 f"Voulez-vous enregistrer cette sortie?"
             )
         else:  # CI
@@ -1435,7 +1461,6 @@ class PageSortie(ctk.CTkFrame):
                 f"Référence: {ref_sortie}\n"
                 f"Articles: {len(self.detail_sortie)}\n"
                 f"Valeur totale: {self.formater_nombre(montant_total_ci)} Ar\n"
-                f"Motif: {motif_sortie}\n\n"
                 f"Voulez-vous enregistrer la consommation?"
             )
         
@@ -1450,10 +1475,10 @@ class PageSortie(ctk.CTkFrame):
             
             if self.type_sortie == "BS":
                 # =============== ENREGISTREMENT SORTIE (BS) ===============
-                self._enregistrer_sortie_bs(cursor, conn, ref_sortie, date_sortie, designationmag, motif_sortie)
+                self._enregistrer_sortie_bs(cursor, conn, ref_sortie, date_sortie, designationmag)
             else:
                 # =============== ENREGISTREMENT CONSOMMATION (CI) ===============
-                self._enregistrer_consommation_ci(cursor, conn, ref_sortie, date_sortie, designationmag, motif_sortie, montant_total_ci)
+                self._enregistrer_consommation_ci(cursor, conn, ref_sortie, date_sortie, designationmag, montant_total_ci)
 
         except psycopg2.Error as e:
             if conn: conn.rollback()
@@ -1465,7 +1490,7 @@ class PageSortie(ctk.CTkFrame):
             if 'cursor' in locals() and cursor: cursor.close()
             if conn: conn.close()
 
-    def _enregistrer_sortie_bs(self, cursor, conn, ref_sortie, date_sortie, designationmag, motif_sortie):
+    def _enregistrer_sortie_bs(self, cursor, conn, ref_sortie, date_sortie, designationmag):
         """Enregistre une Sortie d'Articles (BS) dans tb_sortie et tb_sortiedetail."""
         # Récupérer l'idmag
         cursor.execute("SELECT idmag FROM tb_magasin WHERE designationmag = %s LIMIT 1", (designationmag,))
@@ -1493,13 +1518,13 @@ class PageSortie(ctk.CTkFrame):
             INSERT INTO tb_sortie (refsortie, iduser, description, deleted)
             VALUES (%s, %s, %s, 0) RETURNING id
         """
-        cursor.execute(sql_sortie, (ref_sortie, iduser, motif_sortie))
+        cursor.execute(sql_sortie, (ref_sortie, iduser, None))
         idsortie = cursor.fetchone()[0]
 
         # 2. Insérer les détails
         sql_detail = """
-            INSERT INTO tb_sortiedetail (idsortie, idmag, idarticle, idunite, qtsortie)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO tb_sortiedetail (idsortie, idmag, idarticle, idunite, qtsortie, motif)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """
         for detail in self.detail_sortie:
             cursor.execute(sql_detail, (
@@ -1507,7 +1532,8 @@ class PageSortie(ctk.CTkFrame):
                 detail['idmag'],
                 detail['idarticle'],
                 detail['idunite'],
-                detail['qtsortie']
+                detail['qtsortie'],
+                detail.get('motif')
             ))
 
         conn.commit()
@@ -1519,7 +1545,7 @@ class PageSortie(ctk.CTkFrame):
         
         self.reset_form()
 
-    def _enregistrer_consommation_ci(self, cursor, conn, ref_sortie, date_sortie, designationmag, motif_sortie, montant_total):
+    def _enregistrer_consommation_ci(self, cursor, conn, ref_sortie, date_sortie, designationmag, montant_total):
         """Enregistre une Consommation Interne (CI) dans tb_consommationinterne et tb_consommationinterne_details."""
         # Récupérer iduser depuis session.json
         try:
@@ -1539,7 +1565,7 @@ class PageSortie(ctk.CTkFrame):
             INSERT INTO tb_consommationinterne (refconsommation, iduser, observation, valeur_totale)
             VALUES (%s, %s, %s, %s) RETURNING id
         """
-        cursor.execute(sql_ci, (ref_sortie, iduser, motif_sortie, montant_total))
+        cursor.execute(sql_ci, (ref_sortie, iduser, None, montant_total))
         idconsommation = cursor.fetchone()[0]
 
         # 2. Insérer les détails
@@ -1555,7 +1581,7 @@ class PageSortie(ctk.CTkFrame):
                 detail['idmag'],
                 detail['qtsortie'],
                 detail.get('prix_unitaire', 0),
-                motif_sortie
+                detail.get('motif')
             ))
 
         conn.commit()
@@ -1742,7 +1768,7 @@ class PageSortie(ctk.CTkFrame):
                         pass
 
             # Construire table_data attendu par _build_pdf_a5 : (colonnes_tuple, rows_list)
-            columns = ("Code", "Désignation", "Unité", "Quantité", "Magasin")
+            columns = ("Code", "Désignation", "Unité", "Quantité", "Magasin", "Motif")
             rows = []
             for detail in self.detail_sortie:
                 code = str(detail.get('code_article', ''))
@@ -1750,13 +1776,14 @@ class PageSortie(ctk.CTkFrame):
                 unite = str(detail.get('nom_unite', ''))
                 qte = detail.get('qtsortie', 0) or 0
                 magasin = str(detail.get('designationmag', ''))
-                rows.append((code, nom, unite, qte, magasin))
+                motif = str(detail.get('motif', ''))
+                rows.append((code, nom, unite, qte, magasin, motif))
 
             table_data = (columns, rows)
 
             # Récupérer magasin et motif si disponibles
             magasin_label = self.combo_magasin.get() if hasattr(self, 'combo_magasin') else ''
-            motif_text = self.entry_motif.get().strip() if hasattr(self, 'entry_motif') else ''
+            motif_text = ""
 
             # Appeler le builder centralisé
             try:
@@ -1836,22 +1863,24 @@ class PageSortie(ctk.CTkFrame):
                     except:
                         pass
 
-            # Préparer table_data: Code, Désignation, Unité, Quantité, P.U., Montant
-            columns = ("Code", "Désignation", "Unité", "Quantité", "P.U.", "Montant")
+            # Préparer table_data avec Magasin après Désignation/Unité
+            columns = ("Code", "Désignation", "Unité", "Magasin", "Quantité", "P.U.", "Montant", "Observation")
             rows = []
             for detail in self.detail_sortie:
                 code = str(detail.get('code_article', ''))
                 nom = str(detail.get('nom_article', ''))
                 unite = str(detail.get('nom_unite', ''))
+                magasin = str(detail.get('designationmag', ''))
                 qte = detail.get('qtsortie', 0) or 0
                 pu = detail.get('prix_unitaire', 0) or 0
                 montant = detail.get('montant_total', qte * pu)
-                rows.append((code, nom, unite, qte, pu, montant))
+                obs = str(detail.get('motif', ''))
+                rows.append((code, nom, unite, magasin, qte, pu, montant, obs))
 
             table_data = (columns, rows)
 
             magasin_label = self.combo_magasin.get() if hasattr(self, 'combo_magasin') else ''
-            motif_text = self.entry_motif.get().strip() if hasattr(self, 'entry_motif') else ''
+            motif_text = ""
 
             # Appeler le builder centralisé
             try:
@@ -1947,7 +1976,7 @@ class PageSortie(ctk.CTkFrame):
             # 2. Détails de la Sortie
             sql_details = """
                 SELECT 
-                    u.codearticle, a.designation, u.designationunite, sd.qtsortie, m.designationmag
+                    u.codearticle, a.designation, u.designationunite, sd.qtsortie, m.designationmag, sd.motif
                 FROM tb_sortiedetail sd
                 INNER JOIN tb_article a ON sd.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON sd.idunite = u.idunite
@@ -2044,15 +2073,8 @@ class PageSortie(ctk.CTkFrame):
             elements.append(Paragraph(f"<i>Établi par: {nom_complet}</i>", style_user))
             elements.append(Spacer(1, 10))
 
-            # --- AJOUT DU MOTIF (DESCRIPTION) ---
-            style_motif = styles['Normal']
-            style_motif.fontSize = 9
-            motif_texte = sortie_info.get('description', 'N/A')
-            elements.append(Paragraph(f"<b>Motif de sortie :</b> {motif_texte}", style_motif))
-            elements.append(Spacer(1, 10)) # Espace avant le tableau
-
             # --- TABLEAU DES ARTICLES ---
-            table_data = [['Code', 'Désignation', 'Unité', 'Qté', 'Magasin']]
+            table_data = [['Code', 'Désignation', 'Unité', 'Qté', 'Magasin', 'Motif']]
     
             for item in data['details']:
                 designation_p = Paragraph(item[1], styles['Normal'])
@@ -2061,10 +2083,11 @@ class PageSortie(ctk.CTkFrame):
                     designation_p,  # designation
                     item[2],  # designationunite
                     self.formater_nombre(item[3]),  # qtsortie
-                    item[4]   # designationmag
+                    item[4],  # designationmag
+                    item[5] or ""  # motif ligne
                 ])
 
-            table = Table(table_data, colWidths=[50, 140, 50, 50, 90])
+            table = Table(table_data, colWidths=[45, 110, 40, 40, 70, 75])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),

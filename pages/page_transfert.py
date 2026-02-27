@@ -102,7 +102,7 @@ class PageTransfert(ctk.CTkFrame):
         scrollbar = ttk.Scrollbar(table_frame)
         scrollbar.grid(row=0, column=1, sticky="ns")
 
-        columns = ("Code", "Article", "Unité", "Quantité")
+        columns = ("Code", "Article", "Unité", "Quantité", "Description")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", yscrollcommand=scrollbar.set, height=12)
         scrollbar.config(command=self.tree.yview)
 
@@ -110,10 +110,12 @@ class PageTransfert(ctk.CTkFrame):
         self.tree.heading("Article", text="Nom Article")
         self.tree.heading("Unité", text="Unité")
         self.tree.heading("Quantité", text="Quantité")
+        self.tree.heading("Description", text="Description")
         self.tree.column("Code", width=130, anchor="w")
         self.tree.column("Article", width=380, anchor="w")
         self.tree.column("Unité", width=130, anchor="w")
         self.tree.column("Quantité", width=120, anchor="e")
+        self.tree.column("Description", width=260, anchor="w")
         self.tree.grid(row=0, column=0, sticky="nsew")
 
         self.btn_supprimer = ctk.CTkButton(table_frame, text="Supprimer ligne", command=self.supprimer_ligne, fg_color="#e74c3c", hover_color="#c0392b", height=30)
@@ -775,11 +777,13 @@ class PageTransfert(ctk.CTkFrame):
             return # Sortie de la fonction sans ajouter au Treeview
 
         # 4. Ajout au Treeview et à la liste si stock suffisant
+        description_ligne = (self.entry_description.get() or "").strip()
         self.tree.insert("", "end", values=(
             self.article_selectionne['code'],
             self.article_selectionne['nom'],
             self.article_selectionne['unite'],
-            quantite_saisie
+            quantite_saisie,
+            description_ligne
         ))
         
         self.articles_transfert.append({
@@ -788,8 +792,12 @@ class PageTransfert(ctk.CTkFrame):
             'code': self.article_selectionne['code'],
             'nom': self.article_selectionne['nom'],
             'unite': self.article_selectionne['unite'],
-            'quantite': quantite_saisie
+            'quantite': quantite_saisie,
+            'description': description_ligne
         })
+
+        # La description est saisie par ligne: vider après ajout de l'article.
+        self.entry_description.delete(0, "end")
         
         # Réinitialisation des champs de saisie
         self.reinitialiser_champs_article()
@@ -853,13 +861,12 @@ class PageTransfert(ctk.CTkFrame):
                     SET idmagsortie   = %s,
                         idmagentree   = %s,
                         dateregistre  = %s,
-                        description   = %s
+                        description   = NULL
                     WHERE idtransfert = %s
                 """, (
                     self.magasins_data[mag_sortie],
                     self.magasins_data[mag_entree],
                     self.entry_date.get(),
-                    self.entry_description.get(),
                     idtransfert
                 ))
 
@@ -874,8 +881,8 @@ class PageTransfert(ctk.CTkFrame):
                     cur.execute("""
                         INSERT INTO tb_transfertdetail 
                         (idarticle, idunite, qttransfert, qttransfertsortie, qttransfertentree,
-                         deleted, idtransfert, idmagsortie, idmagentree)
-                        VALUES (%s, %s, %s, %s, %s, 0, %s, %s, %s)
+                         deleted, idtransfert, idmagsortie, idmagentree, description)
+                        VALUES (%s, %s, %s, %s, %s, 0, %s, %s, %s, %s)
                     """, (
                         art['idarticle'],
                         art['idunite'],
@@ -884,7 +891,8 @@ class PageTransfert(ctk.CTkFrame):
                         art['quantite'],
                         idtransfert,
                         self.magasins_data[mag_sortie],
-                        self.magasins_data[mag_entree]
+                        self.magasins_data[mag_entree],
+                        art.get('description', '')
                     ))
 
                 conn.commit()
@@ -908,7 +916,7 @@ class PageTransfert(ctk.CTkFrame):
                 self.magasins_data[mag_sortie],
                 self.magasins_data[mag_entree],
                 self.entry_date.get(),
-                self.entry_description.get()
+                None
             ))
             
             idtransfert = cur.fetchone()[0]
@@ -918,8 +926,8 @@ class PageTransfert(ctk.CTkFrame):
                 cur.execute("""
                     INSERT INTO tb_transfertdetail 
                     (idarticle, idunite, qttransfert, qttransfertsortie, qttransfertentree,
-                     deleted, idtransfert, idmagsortie, idmagentree)
-                    VALUES (%s, %s, %s, %s, %s, 0, %s, %s, %s)
+                     deleted, idtransfert, idmagsortie, idmagentree, description)
+                    VALUES (%s, %s, %s, %s, %s, 0, %s, %s, %s, %s)
                 """, (
                     art['idarticle'],
                     art['idunite'],
@@ -928,7 +936,8 @@ class PageTransfert(ctk.CTkFrame):
                     art['quantite'],
                     idtransfert,
                     self.magasins_data[mag_sortie],
-                    self.magasins_data[mag_entree]
+                    self.magasins_data[mag_entree],
+                    art.get('description', '')
                 ))
             
             conn.commit()
@@ -971,7 +980,7 @@ class PageTransfert(ctk.CTkFrame):
             
             # Détails transfert
             cur.execute("""
-                SELECT u.codearticle, a.designation, u.designationunite, td.qttransfert
+                SELECT u.codearticle, a.designation, u.designationunite, td.qttransfert, td.description
                 FROM tb_transfertdetail td
                 LEFT JOIN tb_article a ON td.idarticle = a.idarticle
                 LEFT JOIN tb_unite u ON td.idunite = u.idunite
@@ -995,16 +1004,17 @@ class PageTransfert(ctk.CTkFrame):
             mag_entree = transfert[6] or ""
 
             # Construire table_data attendu par _build_pdf_a5
-            columns = ("Code", "Désignation", "Unité", "Quantité", "Mouvement")
+            columns = ("Code", "Désignation", "Unité", "Quantité", "Mouvement", "Description")
             rows = []
             mouvement_label = f"{mag_sortie} -> {mag_entree}".strip(" ->")
-            for code, designation, unite, qte in details:
+            for code, designation, unite, qte, description_ligne in details:
                 rows.append((
                     str(code or ""),
                     str(designation or ""),
                     str(unite or ""),
                     qte or 0,
-                    mouvement_label
+                    mouvement_label,
+                    str(description_ligne or "")
                 ))
 
             table_data = (columns, rows)
@@ -1103,7 +1113,7 @@ class PageTransfert(ctk.CTkFrame):
         scrollbar = ttk.Scrollbar(tree_frame)
         scrollbar.pack(side="right", fill="y")
         
-        columns = ("ID", "Référence", "Date", "Mag. Sortie", "Mag. Entrée", "Utilisateur")
+        columns = ("ID", "Référence", "Date", "Mag. Sortie", "Mag. Entrée", "Utilisateur", "Description")
         self.tree_transferts = ttk.Treeview(tree_frame, columns=columns, show="headings",
                                     yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.tree_transferts.yview)
@@ -1113,6 +1123,7 @@ class PageTransfert(ctk.CTkFrame):
         self.tree_transferts.heading("Mag. Sortie", text="De (Magasin)")
         self.tree_transferts.heading("Mag. Entrée", text="À (Magasin)")
         self.tree_transferts.heading("Utilisateur", text="Utilisateur")
+        self.tree_transferts.heading("Description", text="Description")
         
         self.tree_transferts.column("ID", width=0, stretch=False)
         self.tree_transferts.column("Référence", width=150)
@@ -1120,8 +1131,9 @@ class PageTransfert(ctk.CTkFrame):
         self.tree_transferts.column("Mag. Sortie", width=150)
         self.tree_transferts.column("Mag. Entrée", width=150)
         self.tree_transferts.column("Utilisateur", width=100)
+        self.tree_transferts.column("Description", width=260)
         
-        self.tree_transferts["displaycolumns"] = ("Référence", "Date", "Mag. Sortie", "Mag. Entrée", "Utilisateur")
+        self.tree_transferts["displaycolumns"] = ("Référence", "Date", "Mag. Sortie", "Mag. Entrée", "Utilisateur", "Description")
         self.tree_transferts.pack(fill="both", expand=True)
 
         # ---------- barre de boutons (désactivés jusqu'à une sélection) ----------
@@ -1161,7 +1173,18 @@ class PageTransfert(ctk.CTkFrame):
                 query = """
                     SELECT t.idtransfert, t.reftransfert, t.dateregistre, 
                            ms.designationmag as mag_sortie, me.designationmag as mag_entree, 
-                           u.username
+                           u.username,
+                           COALESCE(
+                                NULLIF(
+                                    (
+                                        SELECT string_agg(NULLIF(TRIM(td.description), ''), ', ' ORDER BY td.id)
+                                        FROM tb_transfertdetail td
+                                        WHERE td.idtransfert = t.idtransfert AND td.deleted = 0
+                                    ),
+                                    ''
+                                ),
+                                'Description non précisée'
+                           ) AS description_lignes
                     FROM tb_transfert t
                     LEFT JOIN tb_magasin ms ON t.idmagsortie = ms.idmag
                     LEFT JOIN tb_magasin me ON t.idmagentree = me.idmag
@@ -1307,7 +1330,7 @@ class PageTransfert(ctk.CTkFrame):
             
             # 2. Détails des articles
             cur.execute("""
-                SELECT td.idarticle, td.idunite, u.codearticle, a.designation, u.designationunite, td.qttransfert
+                SELECT td.idarticle, td.idunite, u.codearticle, a.designation, u.designationunite, td.qttransfert, td.description
                 FROM tb_transfertdetail td
                 LEFT JOIN tb_article a ON td.idarticle = a.idarticle
                 LEFT JOIN tb_unite u ON td.idunite = u.idunite
@@ -1321,7 +1344,7 @@ class PageTransfert(ctk.CTkFrame):
                 # Format: (idart, idunite, code, nom, unite, qte)
                 
                 # Treeview (pour l'affichage)
-                self.tree.insert("", "end", values=(det[2], det[3], det[4], det[5]))
+                self.tree.insert("", "end", values=(det[2], det[3], det[4], det[5], det[6] or ""))
                 
                 # Liste interne (pour la gestion)
                 self.articles_transfert.append({
@@ -1330,7 +1353,8 @@ class PageTransfert(ctk.CTkFrame):
                     'code': det[2],
                     'nom': det[3],
                     'unite': det[4],
-                    'quantite': det[5]
+                    'quantite': det[5],
+                    'description': det[6] or ""
                 })
 
             messagebox.showinfo("Succès", f"Transfert {transfert[0]} chargé. Mode Lecture Seule.")
@@ -1392,7 +1416,7 @@ class PageTransfert(ctk.CTkFrame):
 
             # 2. Détails des articles
             cur.execute("""
-                SELECT td.idarticle, td.idunite, u.codearticle, a.designation, u.designationunite, td.qttransfert
+                SELECT td.idarticle, td.idunite, u.codearticle, a.designation, u.designationunite, td.qttransfert, td.description
                 FROM tb_transfertdetail td
                 LEFT JOIN tb_article a ON td.idarticle = a.idarticle
                 LEFT JOIN tb_unite u ON td.idunite = u.idunite
@@ -1402,14 +1426,15 @@ class PageTransfert(ctk.CTkFrame):
 
             self.articles_transfert = []
             for det in details:
-                self.tree.insert("", "end", values=(det[2], det[3], det[4], det[5]))
+                self.tree.insert("", "end", values=(det[2], det[3], det[4], det[5], det[6] or ""))
                 self.articles_transfert.append({
                     'idarticle': det[0],
                     'idunite': det[1],
                     'code': det[2],
                     'nom': det[3],
                     'unite': det[4],
-                    'quantite': det[5]
+                    'quantite': det[5],
+                    'description': det[6] or ""
                 })
 
             cur.close()
