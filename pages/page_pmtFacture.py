@@ -13,8 +13,12 @@ from resource_utils import get_config_path, safe_file_read
 
 # --- BIBLIOTHÈQUES POUR LE PDF ---
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import mm
+from reportlab.lib.pagesizes import A5, landscape
 from reportlab.lib.units import mm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 try:
     from num2words import num2words
 except ImportError:
@@ -91,6 +95,11 @@ class PagePmtFacture(ctk.CTkToplevel):
             date_pattern='dd/mm/yyyy'
         )
         self.cal_echeance.grid(row=1, column=3, padx=10, pady=10, sticky="w")
+
+        # Ligne 3 : Description crédit
+        ctk.CTkLabel(saisie_frame, text="Description crédit :").grid(row=2, column=0, padx=10, pady=10, sticky="w")
+        self.entry_description_credit = ctk.CTkEntry(saisie_frame, width=420, placeholder_text="Motif / détails du crédit")
+        self.entry_description_credit.grid(row=2, column=1, columnspan=3, padx=10, pady=10, sticky="w")
         
         # Désactiver par défaut au démarrage
         self._verifier_mode_credit(self.option_mode_pmt.get())
@@ -338,8 +347,11 @@ class PagePmtFacture(ctk.CTkToplevel):
         """Active ou désactive le calendrier selon le mode choisi"""
         if choix.lower() == "crédit":
             self.cal_echeance.configure(state="normal")
+            self.entry_description_credit.configure(state="normal")
         else:
             self.cal_echeance.configure(state="disabled")
+            self.entry_description_credit.delete(0, "end")
+            self.entry_description_credit.configure(state="disabled")
 
     def verifier_code_autorisation(self, code_saisi: str) -> bool:
         """
@@ -514,8 +526,12 @@ class PagePmtFacture(ctk.CTkToplevel):
         
         # Récupération de la date d'échéance si mode Crédit
         date_echeance = None
+        description_credit = ""
         if nom_mode_pmt.lower() == "crédit":
             date_echeance = self.cal_echeance.get_date() # Objet datetime.date
+            description_credit = (self.entry_description_credit.get() or "").strip()
+            if not description_credit:
+                description_credit = f"Acceptation du crédit pour la facture {self.refvente}"
 
         conn = self.connect_db()
         if not conn: return
@@ -571,14 +587,28 @@ class PagePmtFacture(ctk.CTkToplevel):
                 return
             
             # 3. Infos Client
-            cursor.execute("SELECT nomcli FROM tb_client WHERE nomcli = %s", (self.client,))
+            cursor.execute(
+                "SELECT nomcli, COALESCE(adressecli, ''), COALESCE(contactcli, '') "
+                "FROM tb_client WHERE nomcli = %s",
+                (self.client,)
+            )
             res_client = cursor.fetchone()
             client = res_client[0] if res_client else "Inconnu"
+            client_adresse = res_client[1] if res_client else ""
+            client_contact = res_client[2] if res_client else ""
             
             # 4. Nom de l'utilisateur
             cursor.execute("SELECT username FROM tb_users WHERE iduser = %s", (self.iduser,))
             res_user = cursor.fetchone()
             username = res_user[0] if res_user else "Inconnu"
+
+            # 4-bis. Nom du magasin
+            magasin_nom = f"Magasin {idmag_facture}" if idmag_facture else "N/A"
+            if idmag_facture:
+                cursor.execute("SELECT designationmag FROM tb_magasin WHERE idmag = %s", (idmag_facture,))
+                res_mag = cursor.fetchone()
+                if res_mag and res_mag[0]:
+                    magasin_nom = res_mag[0]
 
             # ============================================================
             # ÉTAPE 2 : RÉCUPÉRER LES DÉTAILS DE VENTE (ARTICLES)
@@ -702,7 +732,7 @@ class PagePmtFacture(ctk.CTkToplevel):
                 datetime.now(), 
                 id_mode_selectionne, 
                 self.iduser, 
-                f"PMT {self.refvente} - {self.client}", 
+                description_credit if nom_mode_pmt.lower() == "crédit" else f"PMT {self.refvente} - {self.client}",
                 refpmt,
                 date_echeance,
                 idclient
@@ -825,6 +855,21 @@ class PagePmtFacture(ctk.CTkToplevel):
             print(f"📋 ClientAPayer_ImpressionTicket = {imprimer_ticket}")
             
             self._generer_ticket_pdf(info_soc, username, articles_pdf, montant_saisi, nom_mode_pmt, refpmt, date_echeance, imprimer_ticket)
+            if nom_mode_pmt.lower() == "crédit":
+                self._generer_etat_credit_pdf(
+                    info_soc=info_soc,
+                    username=username,
+                    refpmt=refpmt,
+                    magasin=magasin_nom,
+                    ref_facture=self.refvente,
+                    client_nom=client,
+                    montant_paye=montant_saisi,
+                    date_echeance=date_echeance,
+                    client_adresse=client_adresse,
+                    client_contact=client_contact,
+                    description_credit=description_credit,
+                    imprimer_ticket=imprimer_ticket
+                )
             
             # Message de confirmation
             msg_impression = " (impression lancée)" if imprimer_ticket == 1 else " (sans impression)"
@@ -876,6 +921,208 @@ class PagePmtFacture(ctk.CTkToplevel):
             lignes.append(ligne_courante)
         
         return lignes if lignes else [""]
+
+    def _formater_montant(self, montant):
+        try:
+            return f"{float(montant):,.2f} Ar".replace(',', ' ')
+        except Exception:
+            return f"{montant} Ar"
+
+    def _generer_etat_credit_pdf(
+        self, info_soc, username, refpmt, magasin, ref_facture, client_nom, montant_paye,
+        date_echeance, client_adresse, client_contact, description_credit, imprimer_ticket=1
+    ):
+        """Génère l'état d'acceptation de crédit (A5 paysage) et l'ouvre avec le ticket."""
+        try:
+            temp_dir = tempfile.gettempdir()
+            output_path = os.path.join(
+                temp_dir,
+                f"Acceptation_Credit_{ref_facture}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            )
+
+            page_width, _ = landscape(A5)
+            margin = 5 * mm
+            page_width_usable = page_width - 2 * margin
+
+            doc = SimpleDocTemplate(
+                output_path,
+                pagesize=landscape(A5),
+                rightMargin=margin,
+                leftMargin=margin,
+                topMargin=margin,
+                bottomMargin=margin,
+            )
+
+            elements = []
+            styles = getSampleStyleSheet()
+            color_header = colors.HexColor("#034787")
+
+            verse_title = Paragraph(
+                "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
+                ParagraphStyle(
+                    "MainTitleCredit",
+                    parent=styles["Normal"],
+                    fontSize=10,
+                    textColor=colors.black,
+                    alignment=TA_CENTER,
+                    fontName="Helvetica-Bold",
+                    spaceAfter=3,
+                ),
+            )
+            verse_table = Table([[verse_title]], colWidths=[page_width_usable])
+            verse_table.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 1, colors.black),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            elements.append(verse_table)
+
+            company_width = page_width_usable * 0.33
+            right_width = page_width_usable * 0.67 - 2 * mm
+            title_width = right_width * 0.55
+            info_width = right_width * 0.45
+            header_height = 28 * mm
+
+            nom_soc = info_soc[0] if info_soc else "IJEERY"
+            adr_soc = info_soc[1] if info_soc and len(info_soc) > 1 else ""
+            contact_soc = info_soc[2] if info_soc and len(info_soc) > 2 else ""
+            ville_soc = info_soc[3] if info_soc and len(info_soc) > 3 else ""
+            echeance_str = date_echeance.strftime('%d/%m/%Y') if date_echeance else "N/A"
+
+            company_details = Paragraph(
+                f"<b>{nom_soc}</b><br/>"
+                f"Adresse : {adr_soc}<br/>"
+                f"Ville : {ville_soc}<br/>"
+                f"Contact : {contact_soc}<br/>",
+                ParagraphStyle("CompanyCredit", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=12),
+            )
+            company_table = Table([[company_details]], colWidths=[company_width - 2 * mm], rowHeights=[header_height])
+            company_table.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 1, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]))
+
+            operation_title = Paragraph(
+                "ACCEPTATION DE CREDIT",
+                ParagraphStyle(
+                    "OpCreditTitle",
+                    parent=styles["Normal"],
+                    fontSize=14,
+                    fontName="Helvetica-Bold",
+                    alignment=TA_CENTER,
+                    textColor=color_header,
+                ),
+            )
+            operation_info = Paragraph(
+                f"<b>Reference :</b> {refpmt}<br/>"
+                f"<b>Date et heure :</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}<br/>"
+                f"<b>Magasin :</b> {magasin}<br/>"
+                f"<b>Operateur :</b> {username}",
+                ParagraphStyle("OpCreditInfo", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=12),
+            )
+            operation_table = Table([[operation_title, operation_info]], colWidths=[title_width, info_width], rowHeights=[header_height])
+            operation_table.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 1, colors.black),
+                ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]))
+
+            header_table = Table([[company_table, operation_table]], colWidths=[company_width, right_width])
+            header_table.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (0, 0), 8),
+                ("LEFTPADDING", (1, 0), (1, 0), 8),
+            ]))
+            elements.append(header_table)
+            elements.append(Spacer(1, 3 * mm))
+
+            
+
+            infos_credit = Paragraph(
+                f"<b><u>Infos Credit</u></b><br/>",
+                ParagraphStyle("InfoCreditLine", parent=styles["Normal"], fontSize=9, alignment=TA_CENTER, leading=11),
+            )
+            elements.append(infos_credit)
+            elements.append(Spacer(1, 2 * mm))
+
+            columns = ["Ref. Facture", "Nom Client", "Montant", "Date echeance"]
+            row_data = [[ref_facture, client_nom, self._formater_montant(montant_paye), echeance_str]]
+            table_width = page_width_usable * 0.95
+            col_widths = [table_width * 0.22, table_width * 0.34, table_width * 0.20, table_width * 0.24]
+            table_data = [columns] + row_data
+
+            credit_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+            credit_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8E8E8")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 11),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+                ("ALIGN", (0, 1), (1, -1), "LEFT"),
+                ("ALIGN", (2, 1), (3, -1), "CENTER"),
+                ("FONTSIZE", (0, 1), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 1, colors.black),
+                ("LINEBEFORE", (1, 0), (1, -1), 1, color_header),
+                ("LINEBEFORE", (2, 0), (2, -1), 1, color_header),
+                ("LINEBEFORE", (3, 0), (3, -1), 1, color_header),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            elements.append(credit_table)
+            elements.append(Spacer(1, 3 * mm))
+
+            coord_client = Paragraph(
+                f"<br/>&nbsp;&nbsp;&nbsp;<b><u>Coordonnees client :</u></b> {client_adresse or '-'} ; Tel : {client_contact or '-'}",
+                ParagraphStyle("CoordClient", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=11),
+            )
+            elements.append(coord_client)
+            elements.append(Spacer(1, 1.5 * mm))
+
+            desc_credit = Paragraph(
+                f"<b><u>&nbsp;&nbsp;&nbsp;Description</u>:</b> {description_credit or '-'}",
+                ParagraphStyle("DescCredit", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=11),
+            )
+            elements.append(desc_credit)
+            elements.append(Spacer(1, 4 * mm))
+
+            sig_left = Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;<u>Le Responsable</u>", ParagraphStyle("SigRespo", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT))
+            sig_right = Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;<u>Le Client</u>", ParagraphStyle("SigClient", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT))
+            sig_table = Table([[sig_left, "", sig_right]], colWidths=[page_width_usable * 0.35, page_width_usable * 0.30, page_width_usable * 0.35])
+            sig_table.setStyle(TableStyle([
+                ("TOPPADDING", (0, 0), (-1, -1), 10),
+                ("ALIGN", (0, 0), (0, 0), "LEFT"),
+                ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+            ]))
+            elements.append(sig_table)
+
+            doc.build(elements)
+
+            if imprimer_ticket == 1:
+                try:
+                    if os.name == 'nt':
+                        os.startfile(output_path)
+                    elif os.name == 'posix':
+                        subprocess.call(['xdg-open', output_path])
+                    print(f"✅ État crédit ouvert : {output_path}")
+                except Exception as e:
+                    print(f"⚠️ Erreur ouverture état crédit : {e}")
+            else:
+                print(f"📄 État crédit généré (impression désactivée) : {output_path}")
+
+        except Exception as e:
+            print(f"❌ Erreur génération état crédit PDF : {e}")
+            traceback.print_exc()
 
     def _generer_ticket_pdf(self, info_soc, username, articles, montant_paye, mode_paiement, refpmt, date_echeance=None, imprimer_ticket=1):
         """Génère un ticket de paiement PDF au format 80mm"""
@@ -982,11 +1229,11 @@ class PagePmtFacture(ctk.CTkToplevel):
             y -= 5*mm
             
             # --- MONTANT TOTAL ---
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(5*mm, y, "MONTANT TOTAL:")
-            montant_total_str = f"{total_calcule:,.2f} Ar".replace(',', ' ')
-            c.drawRightString(largeur - 5*mm, y, montant_total_str)
-            y -= 6*mm
+            #c.setFont("Helvetica-Bold", 10)
+            #c.drawString(5*mm, y, "MONTANT TOTAL:")
+            #montant_total_str = f"{total_calcule:,.2f} Ar".replace(',', ' ')
+            #c.drawRightString(largeur - 5*mm, y, montant_total_str)
+            #y -= 6*mm
             
             # --- MONTANT PAYÉ ---
             c.setFont("Helvetica-Bold", 10)
