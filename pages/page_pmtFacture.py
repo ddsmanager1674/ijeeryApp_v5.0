@@ -547,13 +547,28 @@ class PagePmtFacture(ctk.CTkToplevel):
             cursor.execute("SELECT nomsociete, adressesociete, contactsociete, villesociete FROM tb_infosociete LIMIT 1")
             info_soc = cursor.fetchone()
             
-            # 2. Récupérer l'idclient depuis tb_vente
-            cursor.execute("SELECT idclient, idmag FROM tb_vente WHERE refvente = %s", (self.refvente,))
+            # 2. Récupérer les infos de facture depuis tb_vente
+            cursor.execute("SELECT idclient, idmag, statut FROM tb_vente WHERE refvente = %s", (self.refvente,))
             res_vente = cursor.fetchone()
             idclient = res_vente[0] if res_vente else None
             idmag_facture = res_vente[1] if res_vente else None
+            statut_vente = res_vente[2] if res_vente else None
             print(f"✓ ID Client: {idclient}")
             print(f"✓ Magasin: {idmag_facture}")
+            print(f"✓ Statut facture: {statut_vente}")
+
+            # Vérification dynamique en temps réel du statut avant validation.
+            cursor.execute("SELECT statut FROM tb_vente WHERE refvente = %s", (self.refvente,))
+            statut_row = cursor.fetchone()
+            statut_vente_actuel = statut_row[0] if statut_row else None
+
+            # Bloquer le paiement si la facture n'est plus EN_ATTENTE.
+            if statut_vente_actuel is not None and statut_vente_actuel != 'EN_ATTENTE':
+                messagebox.showwarning(
+                    "Paiement annulé",
+                    f"Ce facture n'est plus en attente, il est déja {statut_vente_actuel}"
+                )
+                return
             
             # 3. Infos Client
             cursor.execute("SELECT nomcli FROM tb_client WHERE nomcli = %s", (self.client,))
