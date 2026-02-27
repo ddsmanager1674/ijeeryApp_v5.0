@@ -6,7 +6,14 @@ import json
 import os
 import textwrap
 import subprocess
+import tempfile
 from resource_utils import get_config_path, safe_file_read
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import mm
+try:
+    from num2words import num2words
+except ImportError:
+    num2words = None
 
 
 from .page_clientCrédit import PageClientCrédit
@@ -493,88 +500,13 @@ class PageClient(ctk.CTkFrame):
         
         # Charger les crédits du client depuis les deux sources
         try:
-            # 1. Crédits de vente (tb_pmtfacture avec idmode = 4)
-            self.cursor.execute("""
-                SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
-                FROM tb_pmtfacture
-                WHERE idclient = %s AND idmode = 4 AND deleted = 0
-                ORDER BY datepmt DESC
-            """, (idclient,))
-            credits_vente = self.cursor.fetchall()
-            
-            # 2. Autres créances (tb_autrecreance)
-            self.cursor.execute("""
-                SELECT id, 'Créance' as type, numfact, dateregistre, montant, dateecheance
-                FROM tb_autrecreance
-                WHERE idclient = %s
-                ORDER BY dateregistre DESC
-            """, (idclient,))
-            autrecreances = self.cursor.fetchall()
-            
-            # Fusionner les deux listes
-            tous_credits = []
-            for credit in credits_vente:
-                tous_credits.append(credit)
-            for creance in autrecreances:
-                tous_credits.append(creance)
-            
-            # Trier les crédits par date DESC (plus récent en premier)
-            tous_credits.sort(key=lambda x: x[3], reverse=True)
-            
-            # Calculer le crédit total restant
-            credit_total_initial = 0
-            credit_total_paye = 0
-            
-            # Pour chaque crédit, récupérer les paiements effectués
-            for idx, credit in enumerate(tous_credits):
-                credit_id, type_credit, ref, date_credit, montant_initial, date_echeance = credit
-                
-                # Récupérer les paiements effectués pour ce crédit
-                self.cursor.execute("""
-                    SELECT COALESCE(SUM(mtpaye), 0)
-                    FROM tb_pmtcredit
-                    WHERE idclient = %s AND (refvente = %s OR id = %s)
-                """, (idclient, ref, credit_id))
-                result_paiement = self.cursor.fetchone()
-                montant_paye = result_paiement[0] if result_paiement else 0
-                
-                credit_total_initial += montant_initial
-                credit_total_paye += montant_paye
-                
-                solde_restant = montant_initial - montant_paye
-                
-                # Déterminer le statut
-                if solde_restant <= 0:
-                    statut = "✓ Payé Complètement"
-                    tag = "complet"
-                elif montant_paye > 0:
-                    statut = "⚠️ Partiellement Payé"
-                    tag = "partiel"
-                else:
-                    statut = "✗ Impayé"
-                    tag = "impaye"
-                
-                tree_credits.insert('', 'end', iid=f"{type_credit}_{credit_id}", values=(
-                    credit_id,
-                    type_credit,
-                    date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
-                    f"{montant_initial or 0:,.2f}",
-                    f"{montant_paye:,.2f}",
-                    f"{solde_restant:,.2f}",
-                    statut
-                ), tags=(tag,))
-            
-            # Mettre à jour le montant total crédit restant
-            credit_total_restant = credit_total_initial - credit_total_paye
-            label_montant_restant.configure(text=f"{credit_total_restant:,.2f} Ar")
-            
-            # Fonction pour le paiement global
+            self._render_credit_table(tree_credits, idclient, label_montant_restant)
+
+            # Paiement global uniquement
             def on_paiement_global_click():
-                self._open_global_payment_window(idclient, credit_total_initial, credit_total_paye, credit_total_restant, detail_window, tree_credits)
-            
-            # Connecter le bouton à la fonction
+                self._open_global_payment_window(idclient, detail_window, tree_credits, label_montant_restant)
+
             btn_paiement_global.configure(command=on_paiement_global_click)
-        
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur chargement crédits: {err}")
         
@@ -586,27 +518,9 @@ class PageClient(ctk.CTkFrame):
             
             item_id = selected[0]
             try:
-                values = tree_credits.item(item_id)['values']
-                credit_id = values[0]
-                type_credit = values[1]
-                montant_total = float(str(values[3]).replace(',', '.').replace(' ', ''))
-                montant_paye = float(str(values[4]).replace(',', '.').replace(' ', ''))
-                solde_restant = float(str(values[5]).replace(',', '.').replace(' ', ''))
-                
-                # Vérifier si complètement payé
-                if solde_restant <= 0:
-                    messagebox.showinfo("Paiement Complet", 
-                        f"Ce crédit est complètement payé.\n\n"
-                        f"Type: {type_credit}\n"
-                        f"Montant Total: {montant_total:,.2f} Ar\n"
-                        f"Montant Payé: {montant_paye:,.2f} Ar")
-                    return
-                
-                # Ouvrir fenêtre de paiement
-                self._open_payment_window(credit_id, idclient, type_credit, montant_total, montant_paye, solde_restant, tree_credits, detail_window)
-            
+                self._open_global_payment_window(idclient, detail_window, tree_credits, label_montant_restant)
             except (ValueError, psycopg2.Error) as err:
-                messagebox.showerror("Erreur", f"Erreur récupération crédit: {err}")
+                messagebox.showerror("Erreur", f"Erreur ouverture paiement global: {err}")
         
         tree_credits.bind("<Double-1>", on_credit_double_click)
 
@@ -840,12 +754,14 @@ Solde Restant: {solde_restant:,.2f} Ar"""
         ctk.CTkButton(btn_frame, text="Annuler", command=payment_window.destroy, 
                      fg_color="#e74c3c").pack(side="left", padx=5)
 
-    def _open_global_payment_window(self, idclient, credit_total_initial, credit_total_paye, credit_total_restant, parent_window, tree_credits):
+    def _open_global_payment_window(self, idclient, parent_window, tree_credits, label_montant_restant):
         """Ouvre une fenêtre pour effectuer un paiement global sur tous les crédits."""
         payment_window = ctk.CTkToplevel(parent_window)
         payment_window.title("Paiement Global des Crédits")
         payment_window.geometry("500x400")
         payment_window.grab_set()
+
+        _, credit_total_initial, credit_total_paye, credit_total_restant, _ = self._compute_credit_status_fifo(idclient)
         
         # Info du crédit global
         info_text = f"""Récapitulatif du Crédit Client (ID: {idclient})
@@ -905,183 +821,54 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                     messagebox.showwarning("Attention", f"Le montant dépasse le solde total ({credit_total_restant:,.2f} Ar).")
                     return
                 
-                # Récupérer tous les crédits du client ordonnés par date (FIFO - plus anciens d'abord)
-                # On unifie la colonne date sous l'alias "docdate" puis on ordonne sur cet alias
-                self.cursor.execute("""
-                    SELECT * FROM (
-                        SELECT id, 'Crédit Vente' as type, refvente as ref, datepmt as docdate, mtpaye as montant_initial, dateecheance
-                        FROM tb_pmtfacture
-                        WHERE idclient = %s AND idmode = 4 AND deleted = 0
-                        UNION ALL
-                        SELECT id, 'Créance' as type, numfact as ref, dateregistre as docdate, montant as montant_initial, dateecheance
-                        FROM tb_autrecreance
-                        WHERE idclient = %s
-                    ) t
-                    ORDER BY t.docdate DESC
-                """, (idclient, idclient))
-                tous_credits = self.cursor.fetchall()
-                
-                # Calculer les soldes restants pour chaque crédit
-                credits_avec_solde = []
-                for credit in tous_credits:
-                    credit_id, type_credit, ref, date_credit, montant_initial, date_echeance = credit
-                    
-                    # Récupérer les paiements existants
-                    self.cursor.execute("""
-                        SELECT COALESCE(SUM(mtpaye), 0)
-                        FROM tb_pmtcredit
-                        WHERE idclient = %s AND (refvente = %s OR id = %s)
-                    """, (idclient, ref, credit_id))
-                    result = self.cursor.fetchone()
-                    montant_paye = result[0] if result else 0
-                    solde_restant = montant_initial - montant_paye
-                    
-                    if solde_restant > 0:  # Seulement les crédits non payés
-                        credits_avec_solde.append({
-                            'credit_id': credit_id,
-                            'type': type_credit,
-                            'ref': ref,
-                            'solde': solde_restant,
-                            'date': date_credit
-                        })
-                
-                # Distribuer le paiement global en FIFO (par ancienneté)
-                montant_restant = montant_global
-                paiements_distribues = []
-                
                 # idmode sélectionné pour cet ensemble de paiements
                 selected_mode_global = mode_combo_global.get() if mode_names else None
                 idmode_sel_global = mode_map.get(selected_mode_global) if selected_mode_global else None
 
-                for credit_info in credits_avec_solde:
-                    if montant_restant <= 0:
-                        break
-                    
-                    montant_a_payer = min(credit_info['solde'], montant_restant)
-                    date_pmt = datetime.now()
-                    
-                    # Enregistrer le paiement pour ce crédit
-                    self.cursor.execute("""
-                        INSERT INTO tb_pmtcredit 
-                        (datepmt, mtpaye, observation, idtypeoperation, idclient, refvente, idmode, idpaiment, refpmt, id_banque, iduser)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        date_pmt, montant_a_payer, observation, 1, idclient, credit_info['ref'], idmode_sel_global, None, None, None, 1
-                    ))
-                    
-                    paiements_distribues.append({
-                        'type': credit_info['type'],
-                        'credit_id': credit_info['credit_id'],
-                        'montant': montant_a_payer,
-                        'date': date_pmt
-                    })
-                    
-                    montant_restant -= montant_a_payer
+                date_pmt = datetime.now()
+                self.cursor.execute("""
+                    INSERT INTO tb_pmtcredit 
+                    (datepmt, mtpaye, observation, idtypeoperation, idclient, refvente, idmode, idpaiment, refpmt, id_banque, iduser)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    date_pmt, montant_global, observation, 1, idclient, None, idmode_sel_global, None, None, None, 1
+                ))
                 
                 self.conn.commit()
                 
                 # Message de confirmation
-                msg_confirmation = f"Paiement global de {montant_global:,.2f} Ar enregistré avec succès!\n\n"
-                msg_confirmation += "Distribution:\n"
-                for paiement in paiements_distribues:
-                    msg_confirmation += f"- {paiement['type']} (ID: {paiement['credit_id']}): {paiement['montant']:,.2f} Ar\n"
-                
-                messagebox.showinfo("Succès", msg_confirmation)
-                
-                # Générer et imprimer les tickets 80mm pour chaque paiement distribué
-                for paiement in paiements_distribues:
-                    ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_payment_{idclient}_{paiement["date"].strftime("%Y%m%d%H%M%S%f")}.txt')
-                    os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
-                    self._generate_ticket_80mm_payment(idclient, paiement['montant'], idmode_sel_global, paiement['date'], ticket_filename)
-                
-                # Demander si l'utilisateur veut imprimer
-                result = messagebox.askyesno("Imprimer", f"Voulez-vous imprimer {len(paiements_distribues)} reçu(s) paiement sur X80?")
-                if result:
-                    for paiement in paiements_distribues:
-                        ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_payment_{idclient}_{paiement["date"].strftime("%Y%m%d%H%M%S%f")}.txt')
-                        self._print_ticket_80mm(ticket_filename)
+                messagebox.showinfo("Succès", f"Paiement global de {montant_global:,.2f} Ar enregistré avec succès!")
+
+                # Générer un ticket PDF avec le modèle créance (plus lisible et cohérent)
+                societe_data = self._get_societe_info()
+                societe_tuple = (
+                    societe_data.get('name', ''),
+                    societe_data.get('addr', ''),
+                    societe_data.get('ville', ''),
+                    societe_data.get('tel', ''),
+                )
+                username = self._get_username_by_id(1)
+                client_nom = self._get_client_name(idclient)
+                ref_ticket = f"PMT-GLOBAL-{idclient}-{date_pmt.strftime('%Y%m%d%H%M%S')}"
+                # Ligne synthétique pour le tableau du ticket
+                articles = [("", "Paiement global crédit client", "", 1, float(montant_global), float(montant_global))]
+
+                # Demander si l'utilisateur veut ouvrir le PDF
+                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le reçu PDF de paiement ?")
+                self._generer_ticket_pdf_paiement_credit(
+                    societe=societe_tuple,
+                    username=username,
+                    articles=articles,
+                    montant=float(montant_global),
+                    mode_nom=selected_mode_global or "Credit",
+                    refpmt=ref_ticket,
+                    client_nom=client_nom,
+                    date_paiement=date_pmt,
+                    open_after=result
+                )
                 
                 # Rafraîchir le tableau des crédits
-                for item in tree_credits.get_children():
-                    tree_credits.delete(item)
-                
-                # Recharger tous les crédits
-                try:
-                    # 1. Crédits de vente
-                    self.cursor.execute("""
-                        SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
-                        FROM tb_pmtfacture
-                        WHERE idclient = %s AND idmode = 4 AND deleted = 0
-                        ORDER BY datepmt DESC
-                    """, (idclient,))
-                    credits_vente = self.cursor.fetchall()
-                    
-                    # 2. Autres créances
-                    self.cursor.execute("""
-                        SELECT id, 'Créance' as type, numfact, dateregistre, montant, dateecheance
-                        FROM tb_autrecreance
-                        WHERE idclient = %s
-                        ORDER BY dateregistre DESC
-                    """, (idclient,))
-                    autrecreances = self.cursor.fetchall()
-                    
-                    tous_credits_refresh = credits_vente + autrecreances
-                    # Trier les crédits par date DESC (plus récent en premier)
-                    tous_credits_refresh.sort(key=lambda x: x[3], reverse=True)
-                    
-                    credit_total_initial_new = 0
-                    credit_total_paye_new = 0
-                    
-                    for idx, credit in enumerate(tous_credits_refresh):
-                        credit_id_temp, type_credit_temp, ref, date_credit, montant_initial, date_echeance = credit
-                        
-                        self.cursor.execute("""
-                            SELECT COALESCE(SUM(mtpaye), 0)
-                            FROM tb_pmtcredit
-                            WHERE idclient = %s AND (refvente = %s OR id = %s)
-                        """, (idclient, ref, credit_id_temp))
-                        result_paiement = self.cursor.fetchone()
-                        montant_paye_temp = result_paiement[0] if result_paiement else 0
-                        
-                        credit_total_initial_new += montant_initial
-                        credit_total_paye_new += montant_paye_temp
-                        
-                        solde_restant_temp = montant_initial - montant_paye_temp
-                        
-                        if solde_restant_temp <= 0:
-                            statut = "✓ Payé Complètement"
-                            tag = "complet"
-                        elif montant_paye_temp > 0:
-                            statut = "⚠️ Partiellement Payé"
-                            tag = "partiel"
-                        else:
-                            statut = "✗ Impayé"
-                            tag = "impaye"
-                        
-                        tree_credits.insert('', 'end', iid=f"{type_credit_temp}_{credit_id_temp}", values=(
-                            credit_id_temp,
-                            type_credit_temp,
-                            date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
-                            f"{montant_initial or 0:,.2f}",
-                            f"{montant_paye_temp:,.2f}",
-                            f"{solde_restant_temp:,.2f}",
-                            statut
-                        ), tags=(tag,))
-                    
-                    # Mettre à jour le label du montant restant
-                    credit_total_restant_new = credit_total_initial_new - credit_total_paye_new
-                    # Trouver et actualiser le label_montant_restant dans le parent
-                    for widget in parent_window.winfo_children():
-                        if isinstance(widget, ctk.CTkFrame):
-                            for child in widget.winfo_children():
-                                if isinstance(child, ctk.CTkLabel) and "Ar" in child.cget("text"):
-                                    try:
-                                        child.configure(text=f"{credit_total_restant_new:,.2f} Ar")
-                                    except:
-                                        pass
-                
-                except psycopg2.Error as err:
-                    messagebox.showerror("Erreur", f"Erreur rafraîchissement: {err}")
+                self._render_credit_table(tree_credits, idclient, label_montant_restant)
                 
                 payment_window.destroy()
             
@@ -1104,6 +891,100 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
         if isinstance(nombre, (int, float)):
             return f"{nombre:,.2f}".replace(",", " ").replace(".", ",")
         return str(nombre)
+
+    def _fetch_client_credits(self, idclient):
+        """Retourne la liste unifiée des crédits d'un client (vente + créance)."""
+        self.cursor.execute("""
+            SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
+            FROM tb_pmtfacture
+            WHERE idclient = %s AND idmode = 4 AND deleted = 0
+        """, (idclient,))
+        credits_vente = self.cursor.fetchall()
+
+        self.cursor.execute("""
+            SELECT id, 'Créance' as type, numfact, dateregistre, montant, dateecheance
+            FROM tb_autrecreance
+            WHERE idclient = %s
+        """, (idclient,))
+        autrecreances = self.cursor.fetchall()
+
+        tous_credits = credits_vente + autrecreances
+        tous_credits.sort(key=lambda x: x[3], reverse=True)  # affichage DESC
+        return tous_credits
+
+    def _compute_credit_status_fifo(self, idclient):
+        """
+        Calcule les statuts avec paiement global FIFO:
+        répartition du total payé du plus ancien vers le plus récent.
+        """
+        tous_credits_desc = self._fetch_client_credits(idclient)
+
+        self.cursor.execute("""
+            SELECT COALESCE(SUM(mtpaye), 0)
+            FROM tb_pmtcredit
+            WHERE idclient = %s
+        """, (idclient,))
+        total_paye_global = float(self.cursor.fetchone()[0] or 0)
+
+        total_initial = sum(float(c[4] or 0) for c in tous_credits_desc)
+        paid_remaining = total_paye_global
+
+        # Travail FIFO en ASC (plus ancien -> plus récent)
+        credits_asc = sorted(tous_credits_desc, key=lambda x: x[3] or datetime.min)
+        status_map = {}
+
+        for credit in credits_asc:
+            credit_id, type_credit, ref, date_credit, montant_initial, _ = credit
+            montant_initial = float(montant_initial or 0)
+            key = f"{type_credit}_{credit_id}"
+
+            if paid_remaining >= montant_initial:
+                montant_paye_ligne = montant_initial
+                statut = "✓ Payé Complètement"
+                tag = "complet"
+                paid_remaining -= montant_initial
+            elif paid_remaining > 0:
+                montant_paye_ligne = paid_remaining
+                statut = "⚠️ Partiellement Payé"
+                tag = "partiel"
+                paid_remaining = 0
+            else:
+                montant_paye_ligne = 0.0
+                statut = "✗ Impayé"
+                tag = "impaye"
+
+            solde_restant = montant_initial - montant_paye_ligne
+            status_map[key] = (montant_paye_ligne, solde_restant, statut, tag)
+
+        total_restant = max(total_initial - total_paye_global, 0)
+        return tous_credits_desc, total_initial, total_paye_global, total_restant, status_map
+
+    def _render_credit_table(self, tree_credits, idclient, label_montant_restant=None):
+        """Rafraîchit le tableau récapitulatif avec la logique FIFO globale."""
+        for item in tree_credits.get_children():
+            tree_credits.delete(item)
+
+        tous_credits_desc, total_initial, total_paye_global, total_restant, status_map = self._compute_credit_status_fifo(idclient)
+
+        for credit in tous_credits_desc:
+            credit_id, type_credit, ref, date_credit, montant_initial, _ = credit
+            key = f"{type_credit}_{credit_id}"
+            montant_paye_ligne, solde_restant, statut, tag = status_map.get(key, (0.0, float(montant_initial or 0), "✗ Impayé", "impaye"))
+
+            tree_credits.insert('', 'end', iid=key, values=(
+                credit_id,
+                type_credit,
+                date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
+                f"{float(montant_initial or 0):,.2f}",
+                f"{montant_paye_ligne:,.2f}",
+                f"{solde_restant:,.2f}",
+                statut
+            ), tags=(tag,))
+
+        if label_montant_restant is not None:
+            label_montant_restant.configure(text=f"{total_restant:,.2f} Ar")
+
+        return total_initial, total_paye_global, total_restant
 
     def _get_societe_info(self):
         """Récupère les informations de la société depuis la table tb_infosociete.
@@ -1242,6 +1123,243 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 f.write('\n'.join(content))
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération ticket créance: {e}")
+
+    def _get_username_by_id(self, iduser=1):
+        """Récupère username depuis tb_users."""
+        if not self.conn:
+            return "Utilisateur"
+        try:
+            self.cursor.execute("SELECT username FROM tb_users WHERE iduser = %s", (iduser,))
+            row = self.cursor.fetchone()
+            return row[0] if row and row[0] else "Utilisateur"
+        except Exception:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            return "Utilisateur"
+
+    def _get_client_name(self, idclient):
+        """Récupère le nom client par idclient."""
+        if not self.conn:
+            return "CLIENT"
+        try:
+            self.cursor.execute("SELECT nomcli FROM tb_client WHERE idclient = %s", (idclient,))
+            row = self.cursor.fetchone()
+            return row[0] if row and row[0] else "CLIENT"
+        except Exception:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            return "CLIENT"
+
+    def _generer_ticket_pdf_creance(self, societe, username, articles, montant, mode_nom, refpmt, client_nom, montant_total, open_after=False):
+        """Génère un ticket PDF (modèle page_pmtcredit) pour validation d'ajout de créance."""
+        try:
+            fd, path = tempfile.mkstemp(prefix='ticket_creance_', suffix='.pdf')
+            os.close(fd)
+
+            total_height = (160 + (len(articles) * 10)) * mm
+            c = canvas.Canvas(path, pagesize=(80 * mm, total_height))
+            y = total_height - 10 * mm
+
+            if societe:
+                c.setFont("Helvetica-Bold", 11)
+                c.drawCentredString(40 * mm, y, str(societe[0]).upper())
+                y -= 5 * mm
+                c.setFont("Helvetica", 8)
+                c.drawCentredString(40 * mm, y, f"{societe[1] or ''}")
+                y -= 4 * mm
+                c.drawCentredString(40 * mm, y, f"{societe[2] or ''}")
+                y -= 4 * mm
+                c.drawCentredString(40 * mm, y, f"Tel: {societe[3] or ''}")
+                y -= 2 * mm
+            else:
+                c.setFont("Helvetica-Bold", 10)
+                c.drawCentredString(40 * mm, y, "MA SOCIETE")
+                y -= 4 * mm
+
+            y -= 4 * mm
+            c.line(5 * mm, y, 75 * mm, y)
+            y -= 6 * mm
+
+            c.setFont("Helvetica-Bold", 9)
+            c.drawCentredString(40 * mm, y, f"VALIDATION CREANCE N° {refpmt}")
+            y -= 6 * mm
+
+            c.setFont("Helvetica", 8)
+            c.drawString(5 * mm, y, f"Facture: {refpmt}")
+            c.drawRightString(75 * mm, y, datetime.now().strftime("%d/%m/%Y %H:%M"))
+            y -= 4 * mm
+            c.drawString(5 * mm, y, f"Client: {client_nom}")
+
+            y -= 10 * mm
+            c.setFont("Helvetica-Bold", 7)
+            c.drawString(5 * mm, y, "Code")
+            c.drawString(20 * mm, y, "Designation")
+            c.drawRightString(48 * mm, y, "Qte")
+            c.drawRightString(62 * mm, y, "P.U")
+            c.drawRightString(77 * mm, y, "Total")
+            y -= 2 * mm
+            c.line(5 * mm, y, 75 * mm, y)
+            y -= 4 * mm
+
+            c.setFont("Helvetica", 6.5)
+            for art in articles:
+                code = str(art[0])[:8] if art[0] else ""
+                designation = f"{art[1]} ({art[2]})" if art[2] else str(art[1])
+                designation = designation[:20]
+                c.drawString(5 * mm, y, code)
+                c.drawString(20 * mm, y, designation)
+                c.drawRightString(48 * mm, y, str(art[3]))
+                c.drawRightString(62 * mm, y, f"{art[4]:,.0f}".replace(',', ' '))
+                c.drawRightString(77 * mm, y, f"{art[5]:,.0f}".replace(',', ' '))
+                y -= 8 * mm
+
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(5 * mm, y, "MONTANT CREANCE :")
+            c.drawRightString(75 * mm, y, f"{montant:,.2f} Ar".replace(',', ' ').replace('.', ','))
+            
+
+            y -= 8 * mm
+            if num2words:
+                c.setFont("Helvetica-Oblique", 6)
+                try:
+                    lettres = num2words(int(montant), lang='fr').upper()
+                    if len(lettres) > 45:
+                        c.drawString(5 * mm, y, f"Arrete a: {lettres[:45]}")
+                        y -= 3 * mm
+                        c.drawString(5 * mm, y, f"{lettres[45:]} ARIARY")
+                    else:
+                        c.drawString(5 * mm, y, f"Arrete a: {lettres} ARIARY")
+                except Exception:
+                    pass
+
+            y -= 10 * mm
+            c.line(5 * mm, y + 2 * mm, 75 * mm, y + 2 * mm)
+            c.setFont("Helvetica", 7)
+            c.drawString(5 * mm, y, f"Mode de paiement: {mode_nom}")
+            y -= 5 * mm
+            c.setFont("Helvetica-Bold", 8)
+            c.drawString(5 * mm, y, f"Recu par: {username}")
+
+            c.showPage()
+            c.save()
+
+            if open_after:
+                if os.name == 'nt':
+                    os.startfile(path)
+                else:
+                    subprocess.Popen(['xdg-open', path])
+            return path
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Erreur génération PDF créance: {e}")
+            return None
+
+    def _generer_ticket_pdf_paiement_credit(self, societe, username, articles, montant, mode_nom, refpmt, client_nom, date_paiement, open_after=False):
+        """Génère un ticket PDF personnalisé pour paiement global de crédit client."""
+        try:
+            fd, path = tempfile.mkstemp(prefix='ticket_pmt_credit_', suffix='.pdf')
+            os.close(fd)
+
+            total_height = (165 + (len(articles) * 10)) * mm
+            c = canvas.Canvas(path, pagesize=(80 * mm, total_height))
+            y = total_height - 10 * mm
+
+            if societe:
+                c.setFont("Helvetica-Bold", 11)
+                c.drawCentredString(40 * mm, y, str(societe[0]).upper())
+                y -= 5 * mm
+                c.setFont("Helvetica", 8)
+                c.drawCentredString(40 * mm, y, f"{societe[1] or ''}")
+                y -= 4 * mm
+                c.drawCentredString(40 * mm, y, f"{societe[2] or ''}")
+                y -= 4 * mm
+                c.drawCentredString(40 * mm, y, f"Tel: {societe[3] or ''}")
+                y -= 2 * mm
+            else:
+                c.setFont("Helvetica-Bold", 10)
+                c.drawCentredString(40 * mm, y, "MA SOCIETE")
+                y -= 4 * mm
+
+            y -= 4 * mm
+            c.line(5 * mm, y, 75 * mm, y)
+            y -= 6 * mm
+
+            c.setFont("Helvetica-Bold", 10)
+            c.drawCentredString(40 * mm, y, "PAIEMENT CREDIT")
+            y -= 5 * mm
+            c.setFont("Helvetica-Bold", 9)
+            c.drawCentredString(40 * mm, y, f"Ref : {refpmt}")
+            y -= 6 * mm
+
+            c.setFont("Helvetica", 8)
+            c.drawString(5 * mm, y, f"Date paiement : {date_paiement.strftime('%d/%m/%Y %H:%M')}")
+            y -= 4 * mm
+            c.drawString(5 * mm, y, f"Nom client : {client_nom}")
+
+            y -= 10 * mm
+            c.setFont("Helvetica-Bold", 7)
+            c.drawString(5 * mm, y, "Code")
+            c.drawString(20 * mm, y, "Designation")
+            c.drawRightString(48 * mm, y, "Qte")
+            c.drawRightString(62 * mm, y, "P.U")
+            c.drawRightString(77 * mm, y, "Total")
+            y -= 2 * mm
+            c.line(5 * mm, y, 75 * mm, y)
+            y -= 4 * mm
+
+            c.setFont("Helvetica", 6.5)
+            for art in articles:
+                code = str(art[0])[:8] if art[0] else ""
+                designation = f"{art[1]} ({art[2]})" if art[2] else str(art[1])
+                designation = designation[:20]
+                c.drawString(5 * mm, y, code)
+                c.drawString(20 * mm, y, designation)
+                c.drawRightString(48 * mm, y, str(art[3]))
+                c.drawRightString(62 * mm, y, f"{art[4]:,.0f}".replace(',', ' '))
+                c.drawRightString(77 * mm, y, f"{art[5]:,.0f}".replace(',', ' '))
+                y -= 8 * mm
+
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(5 * mm, y, "MONTANT PAYE :")
+            c.drawRightString(75 * mm, y, f"{montant:,.2f} Ar".replace(',', ' ').replace('.', ','))
+
+            y -= 8 * mm
+            if num2words:
+                c.setFont("Helvetica-Oblique", 6)
+                try:
+                    lettres = num2words(int(montant), lang='fr').upper()
+                    if len(lettres) > 45:
+                        c.drawString(5 * mm, y, f"Arrete a: {lettres[:45]}")
+                        y -= 3 * mm
+                        c.drawString(5 * mm, y, f"{lettres[45:]} ARIARY")
+                    else:
+                        c.drawString(5 * mm, y, f"Arrete a: {lettres} ARIARY")
+                except Exception:
+                    pass
+
+            y -= 10 * mm
+            c.line(5 * mm, y + 2 * mm, 75 * mm, y + 2 * mm)
+            c.setFont("Helvetica", 7)
+            c.drawString(5 * mm, y, f"Mode de paiement: {mode_nom}")
+            y -= 5 * mm
+            c.setFont("Helvetica-Bold", 8)
+            c.drawString(5 * mm, y, f"Recu par: {username}")
+
+            c.showPage()
+            c.save()
+
+            if open_after:
+                if os.name == 'nt':
+                    os.startfile(path)
+                else:
+                    subprocess.Popen(['xdg-open', path])
+            return path
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Erreur génération PDF paiement crédit: {e}")
+            return None
 
     def _generate_ticket_80mm_payment(self, idclient, montant, idmode, date_pmt, filename):
         """Génère un ticket 80mm pour un paiement de crédit."""
@@ -1400,6 +1518,15 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                     messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
                     return
                 
+                # Resynchroniser la sequence (corrige duplicate key sur id)
+                self.cursor.execute("""
+                    SELECT setval(
+                        pg_get_serial_sequence('tb_autrecreance', 'id'),
+                        COALESCE((SELECT MAX(id) FROM tb_autrecreance), 0) + 1,
+                        false
+                    )
+                """)
+
                 # Insérer la créance dans tb_autrecreance
                 self.cursor.execute("""
                     INSERT INTO tb_autrecreance (idclient, dateregistre, numfact, montant)
@@ -1409,15 +1536,28 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 
                 messagebox.showinfo("Succès", f"Créance de {montant:,.2f} Ar enregistrée avec succès!")
                 
-                # Générer et imprimer le ticket 80mm
-                ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_creance_{idclient}_{datetime.now().strftime("%Y%m%d%H%M%S")}.txt')
-                os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
-                self._generate_ticket_80mm_creance(idclient, num_fact, montant, ticket_filename)
-                
-                # Demander si l'utilisateur veut imprimer
-                result = messagebox.askyesno("Imprimer", "Voulez-vous imprimer le ticket créance sur X80?")
-                if result:
-                    self._print_ticket_80mm(ticket_filename)
+                # Générer le ticket PDF créance avec le modèle de page_pmtcredit
+                username = self._get_username_by_id(1)
+                societe_data = self._get_societe_info()
+                societe_tuple = (
+                    societe_data.get('name', ''),
+                    societe_data.get('addr', ''),
+                    societe_data.get('ville', ''),
+                    societe_data.get('tel', ''),
+                )
+                articles = [("", "Creance manuelle", "", 1, float(montant), float(montant))]
+                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le ticket PDF de créance ?")
+                self._generer_ticket_pdf_creance(
+                    societe=societe_tuple,
+                    username=username,
+                    articles=articles,
+                    montant=float(montant),
+                    mode_nom="Credit",
+                    refpmt=num_fact,
+                    client_nom=self._get_client_name(idclient),
+                    montant_total=float(montant),
+                    open_after=result
+                )
                 
                 creance_window.destroy()
                 

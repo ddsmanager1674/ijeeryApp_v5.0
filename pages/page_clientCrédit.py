@@ -90,6 +90,13 @@ class PageClientCrédit(ctk.CTkFrame):
             if conn:
                 cursor = conn.cursor()
                 cursor.execute("""
+                    SELECT setval(
+                        pg_get_serial_sequence('tb_autrecreance', 'id'),
+                        COALESCE((SELECT MAX(id) FROM tb_autrecreance), 0) + 1,
+                        false
+                    )
+                """)
+                cursor.execute("""
                     INSERT INTO tb_autrecreance (idclient, dateregistre, numfact, montant)
                     VALUES (%s, %s, %s, %s)
                 """, (id_client, datetime.now(), num_fact, montant))
