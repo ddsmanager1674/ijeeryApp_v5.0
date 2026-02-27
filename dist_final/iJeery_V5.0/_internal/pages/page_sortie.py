@@ -703,163 +703,7 @@ class PageSortie(ctk.CTkFrame):
                 # puis le solde du magasin actif est divisé par le qtunite de chaque ligne.
                 # ✅ Requête consolidée (9 sources + coefficient hiérarchique)
                 query = """
-                WITH mouvements_bruts AS (
-                    -- Réceptions
-                    SELECT
-                        lf.idarticle,
-                        lf.idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        lf.qtlivrefrs as quantite,
-                        'reception' as type_mouvement
-                    FROM tb_livraisonfrs lf
-                    INNER JOIN tb_unite u ON lf.idarticle = u.idarticle AND lf.idunite = u.idunite
-                    WHERE lf.deleted = 0
-
-                    UNION ALL
-
-                    -- Ventes
-                    SELECT
-                        vd.idarticle,
-                        v.idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        vd.qtvente as quantite,
-                        'vente' as type_mouvement
-                    FROM tb_ventedetail vd
-                    INNER JOIN tb_vente v ON vd.idvente = v.id AND v.deleted = 0 AND v.statut = 'VALIDEE'
-                    INNER JOIN tb_unite u ON vd.idarticle = u.idarticle AND vd.idunite = u.idunite
-                    WHERE vd.deleted = 0
-
-                    UNION ALL
-
-                    -- Transferts entrants
-                    SELECT
-                        t.idarticle,
-                        t.idmagentree as idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        t.qttransfert as quantite,
-                        'transfert_in' as type_mouvement
-                    FROM tb_transfertdetail t
-                    INNER JOIN tb_unite u ON t.idarticle = u.idarticle AND t.idunite = u.idunite
-                    WHERE t.deleted = 0
-
-                    UNION ALL
-
-                    -- Transferts sortants
-                    SELECT
-                        t.idarticle,
-                        t.idmagsortie as idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        t.qttransfert as quantite,
-                        'transfert_out' as type_mouvement
-                    FROM tb_transfertdetail t
-                    INNER JOIN tb_unite u ON t.idarticle = u.idarticle AND t.idunite = u.idunite
-                    WHERE t.deleted = 0
-
-                    UNION ALL
-
-                    -- Sorties
-                    SELECT
-                        sd.idarticle,
-                        sd.idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        sd.qtsortie as quantite,
-                        'sortie' as type_mouvement
-                    FROM tb_sortiedetail sd
-                    INNER JOIN tb_unite u ON sd.idarticle = u.idarticle AND sd.idunite = u.idunite
-
-                    UNION ALL
-
-                    -- Inventaires (une seule fois par article = unité de base)
-                    SELECT
-                        u.idarticle,
-                        i.idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        i.qtinventaire as quantite,
-                        'inventaire' as type_mouvement
-                    FROM tb_inventaire i
-                    INNER JOIN tb_unite u ON i.codearticle = u.codearticle
-                    WHERE u.idunite IN (
-                        SELECT DISTINCT ON (idarticle) idunite
-                        FROM tb_unite
-                        WHERE deleted = 0
-                        ORDER BY idarticle, qtunite ASC
-                    )
-
-                    UNION ALL
-
-                    -- Avoirs
-                    SELECT
-                        ad.idarticle,
-                        ad.idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        ad.qtavoir as quantite,
-                        'avoir' as type_mouvement
-                    FROM tb_avoir a
-                    INNER JOIN tb_avoirdetail ad ON a.id = ad.idavoir
-                    INNER JOIN tb_unite u ON ad.idarticle = u.idarticle AND ad.idunite = u.idunite
-                    WHERE a.deleted = 0 AND ad.deleted = 0
-
-                    UNION ALL
-
-                    -- Consommation interne
-                    SELECT
-                        cd.idarticle,
-                        cd.idmag,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        cd.qtconsomme as quantite,
-                        'consommation_interne' as type_mouvement
-                    FROM tb_consommationinterne_details cd
-                    INNER JOIN tb_unite u ON cd.idarticle = u.idarticle AND cd.idunite = u.idunite
-
-                    UNION ALL
-
-                    -- Échanges entrée
-                    SELECT
-                        dce.idarticle,
-                        dce.idmagasin,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        dce.quantite_entree as quantite,
-                        'echange_entree' as type_mouvement
-                    FROM tb_detailchange_entree dce
-                    INNER JOIN tb_unite u ON dce.idarticle = u.idarticle AND dce.idunite = u.idunite
-
-                    UNION ALL
-
-                    -- Échanges sortie
-                    SELECT
-                        dcs.idarticle,
-                        dcs.idmagasin,
-                        COALESCE(u.qtunite, 1) as qtunite_source,
-                        dcs.quantite_sortie as quantite,
-                        'echange_sortie' as type_mouvement
-                    FROM tb_detailchange_sortie dcs
-                    INNER JOIN tb_unite u ON dcs.idarticle = u.idarticle AND dcs.idunite = u.idunite
-                ),
-
-                solde_base_par_mag AS (
-                    SELECT
-                        idarticle,
-                        idmag,
-                        SUM(
-                            CASE type_mouvement
-                                WHEN 'reception'             THEN  quantite * qtunite_source
-                                WHEN 'transfert_in'          THEN  quantite * qtunite_source
-                                WHEN 'inventaire'            THEN  quantite * qtunite_source
-                                WHEN 'avoir'                 THEN  quantite * qtunite_source
-                                WHEN 'echange_entree'        THEN  quantite * qtunite_source
-                                WHEN 'vente'                 THEN -quantite * qtunite_source
-                                WHEN 'sortie'                THEN -quantite * qtunite_source
-                                WHEN 'transfert_out'         THEN -quantite * qtunite_source
-                                WHEN 'consommation_interne'  THEN -quantite * qtunite_source
-                                WHEN 'echange_sortie'        THEN -quantite * qtunite_source
-                                ELSE 0
-                            END
-                        ) as solde_base
-                    FROM mouvements_bruts
-                    GROUP BY idarticle, idmag
-                ),
-
-                unite_hierarchie AS (
+                WITH unite_hierarchie AS (
                     SELECT idarticle, idunite, niveau, qtunite, designationunite
                     FROM tb_unite
                     WHERE deleted = 0
@@ -876,6 +720,115 @@ class PageSortie(ctk.CTkFrame):
                             OVER (PARTITION BY idarticle ORDER BY niveau ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
                         ) as coeff_hierarchique
                     FROM unite_hierarchie
+                ),
+                base_unite_par_article AS (
+                    SELECT DISTINCT ON (idarticle) idarticle, idunite
+                    FROM tb_unite
+                    WHERE deleted = 0
+                    ORDER BY idarticle, qtunite ASC, idunite ASC
+                ),
+                rec AS (
+                    SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite
+                    FROM tb_livraisonfrs lf
+                    WHERE lf.deleted = 0
+                    GROUP BY lf.idarticle, lf.idunite, lf.idmag
+                ),
+                ven AS (
+                    SELECT vd.idarticle, vd.idunite, v.idmag, SUM(vd.qtvente) AS quantite
+                    FROM tb_ventedetail vd
+                    INNER JOIN tb_vente v ON vd.idvente = v.id AND v.deleted = 0 AND v.statut = 'VALIDEE'
+                    WHERE vd.deleted = 0
+                    GROUP BY vd.idarticle, vd.idunite, v.idmag
+                ),
+                tin AS (
+                    SELECT t.idarticle, t.idunite, t.idmagentree AS idmag, SUM(t.qttransfert) AS quantite
+                    FROM tb_transfertdetail t
+                    WHERE t.deleted = 0
+                    GROUP BY t.idarticle, t.idunite, t.idmagentree
+                ),
+                tout AS (
+                    SELECT t.idarticle, t.idunite, t.idmagsortie AS idmag, SUM(t.qttransfert) AS quantite
+                    FROM tb_transfertdetail t
+                    WHERE t.deleted = 0
+                    GROUP BY t.idarticle, t.idunite, t.idmagsortie
+                ),
+                sor AS (
+                    SELECT sd.idarticle, sd.idunite, sd.idmag, SUM(sd.qtsortie) AS quantite
+                    FROM tb_sortiedetail sd
+                    GROUP BY sd.idarticle, sd.idunite, sd.idmag
+                ),
+                inv AS (
+                    SELECT bu.idarticle, bu.idunite, i.idmag, SUM(i.qtinventaire) AS quantite
+                    FROM tb_inventaire i
+                    INNER JOIN tb_unite u ON i.codearticle = u.codearticle
+                    INNER JOIN base_unite_par_article bu ON bu.idarticle = u.idarticle AND bu.idunite = u.idunite
+                    GROUP BY bu.idarticle, bu.idunite, i.idmag
+                ),
+                avo AS (
+                    SELECT ad.idarticle, ad.idunite, ad.idmag, SUM(ad.qtavoir) AS quantite
+                    FROM tb_avoir a
+                    INNER JOIN tb_avoirdetail ad ON a.id = ad.idavoir
+                    WHERE a.deleted = 0 AND ad.deleted = 0
+                    GROUP BY ad.idarticle, ad.idunite, ad.idmag
+                ),
+                conso AS (
+                    SELECT cd.idarticle, cd.idunite, cd.idmag, SUM(cd.qtconsomme) AS quantite
+                    FROM tb_consommationinterne_details cd
+                    GROUP BY cd.idarticle, cd.idunite, cd.idmag
+                ),
+                ech_in AS (
+                    SELECT dce.idarticle, dce.idunite, dce.idmagasin AS idmag, SUM(dce.quantite_entree) AS quantite
+                    FROM tb_detailchange_entree dce
+                    GROUP BY dce.idarticle, dce.idunite, dce.idmagasin
+                ),
+                ech_out AS (
+                    SELECT dcs.idarticle, dcs.idunite, dcs.idmagasin AS idmag, SUM(dcs.quantite_sortie) AS quantite
+                    FROM tb_detailchange_sortie dcs
+                    GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin
+                ),
+                mouvements_agreges AS (
+                    SELECT idarticle, idunite, idmag, quantite, 'reception' AS type_mouvement FROM rec
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'vente' AS type_mouvement FROM ven
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'transfert_in' AS type_mouvement FROM tin
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'transfert_out' AS type_mouvement FROM tout
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'sortie' AS type_mouvement FROM sor
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'inventaire' AS type_mouvement FROM inv
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'avoir' AS type_mouvement FROM avo
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'consommation_interne' AS type_mouvement FROM conso
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'echange_entree' AS type_mouvement FROM ech_in
+                    UNION ALL
+                    SELECT idarticle, idunite, idmag, quantite, 'echange_sortie' AS type_mouvement FROM ech_out
+                ),
+                solde_base_par_mag AS (
+                    SELECT
+                        ma.idarticle,
+                        ma.idmag,
+                        SUM(
+                            CASE ma.type_mouvement
+                                WHEN 'reception'             THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'transfert_in'          THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'inventaire'            THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'avoir'                 THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'echange_entree'        THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'vente'                 THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'sortie'                THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'transfert_out'         THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'consommation_interne'  THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                WHEN 'echange_sortie'        THEN -ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
+                                ELSE 0
+                            END
+                        ) as solde_base
+                    FROM mouvements_agreges ma
+                    LEFT JOIN unite_coeff uc ON uc.idarticle = ma.idarticle AND uc.idunite = ma.idunite
+                    GROUP BY ma.idarticle, ma.idmag
                 ),
 
                 -- ✅ Récupérer SEULEMENT le dernier prix pour chaque (idarticle, idunite)
@@ -1537,10 +1490,10 @@ class PageSortie(ctk.CTkFrame):
         
         # 1. Insérer en-tête de sortie avec iduser
         sql_sortie = """
-            INSERT INTO tb_sortie (refsortie, iduser, dateregistre, description, deleted)
-            VALUES (%s, %s, %s, %s, 0) RETURNING id
+            INSERT INTO tb_sortie (refsortie, iduser, description, deleted)
+            VALUES (%s, %s, %s, 0) RETURNING id
         """
-        cursor.execute(sql_sortie, (ref_sortie, iduser, date_sortie, motif_sortie))
+        cursor.execute(sql_sortie, (ref_sortie, iduser, motif_sortie))
         idsortie = cursor.fetchone()[0]
 
         # 2. Insérer les détails

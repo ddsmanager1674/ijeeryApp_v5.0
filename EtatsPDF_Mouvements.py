@@ -272,7 +272,7 @@ class EtatPDFMouvements:
         # Infos opération (1/3 du bloc droit)
         operation_info = Paragraph(
             f"<b>Référence :</b> {reference}<br/>"
-            f"<b>Date et heure:</b> {date_operation} {datetime.now().strftime('%H:%M')}<br/>"
+            f"<b>Date et heure:</b> {date_operation} <br/>" # datetime.now().strftime('%H:%M')}<br/>"
             f"<b>Magasin :</b> {magasin}<br/>"
             f"<b>Opérateur :</b> {operateur}",
             ParagraphStyle(
@@ -635,11 +635,11 @@ class EtatPDFMouvements:
         try:
             cur = self.conn.cursor()
             cur.execute("""
-                SELECT t.id, t.dateregistre, t.reftransfert, m1.designationmag, m2.designationmag,
+                SELECT t.idtransfert, t.dateregistre, t.reftransfert, m1.designationmag, m2.designationmag,
                        CONCAT(usr.prenomuser, ' ', usr.nomuser) as operateur
                 FROM tb_transfert t
-                LEFT JOIN tb_magasin m1 ON t.idmag_source = m1.idmag
-                LEFT JOIN tb_magasin m2 ON t.idmag_destination = m2.idmag
+                LEFT JOIN tb_magasin m1 ON t.idmagsortie = m1.idmag
+                LEFT JOIN tb_magasin m2 ON t.idmagentree = m2.idmag
                 LEFT JOIN tb_users usr ON t.iduser = usr.iduser
                 WHERE t.reftransfert = %s AND t.deleted = 0 LIMIT 1
             """, (reftransfert,))
@@ -675,7 +675,7 @@ class EtatPDFMouvements:
             
             return self._build_pdf_a5(
                 output_path, "BON DE TRANSFERT", ref,
-                date_transfert.strftime("%d/%m/%Y") if date_transfert else "N/A",
+                date_transfert.strftime("%d/%m/%Y %H:%M") if date_transfert else "N/A",
                 magasins, operateur or "N/A",
                 table_data, f"Transfert: {magasins}",
                 "Magasinier Source", "Magasinier Destination"
