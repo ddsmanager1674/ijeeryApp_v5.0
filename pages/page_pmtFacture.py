@@ -641,7 +641,9 @@ class PagePmtFacture(ctk.CTkToplevel):
                     stocks_initiaux[cle_stock] = stock_calcule
                     stocks_reserves[cle_stock] = stock_calcule
 
-                stock_reel = stocks_reserves[cle_stock]
+                stock_reel = round(stocks_reserves[cle_stock], 2)
+                
+
                 print(
                     f"  Article #{det_idx} - {designation}: "
                     f"demandé={qtvente}, stock_reel={stock_reel}"

@@ -1711,7 +1711,7 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
                     a.designation,
                     uc.designationunite,
                     COALESCE(p.prix, 0) AS prix,
-                    ROUND(COALESCE(sb.solde_global, 0) / NULLIF(COALESCE(uc.coeff_hierarchique, 1), 0)) AS stock_total
+                    COALESCE(sb.solde_global, 0) / NULLIF(COALESCE(uc.coeff_hierarchique, 1), 0) AS stock_total
                 FROM tb_article a
                 INNER JOIN tb_unite u ON a.idarticle = u.idarticle
                 LEFT JOIN unite_coeff uc ON uc.idarticle = u.idarticle AND uc.idunite = u.idunite
@@ -1735,7 +1735,7 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
                         row[3] or "", # désignation
                         row[4] or "", # unité
                         self.formater_nombre(row[5]), # prix (déjà calculé en SQL)
-                        self.formater_nombre(row[6])  # stock (déjà lu dans tb_stock)
+                        self.formater_nombre( max(0, row[6]))  # stock (déjà lu dans tb_stock)
                     ), tags=(zebra_tag,))
 
             except Exception as e:
