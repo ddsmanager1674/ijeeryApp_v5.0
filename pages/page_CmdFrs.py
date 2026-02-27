@@ -302,7 +302,7 @@ class PageCommandeFrs(ctk.CTkFrame):
         frame_tree.pack(fill="both", expand=True, padx=20, pady=5) # pady réduit
         
         # Treeview : Hauteur réduite à 6 lignes pour gagner de l'espace
-        colonnes = ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Total")
+        colonnes = ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Fournisseur")
         self.tree = ttk.Treeview(frame_tree, columns=colonnes, show="headings", height=6)
         self._configure_table_alternating_colors(self.tree)
         # Ajoutez l'en-tête pour Péremption
@@ -583,7 +583,7 @@ class PageCommandeFrs(ctk.CTkFrame):
             item_id = self.tree.get_children()[index]
         
             # Assure-toi que l'ordre ici correspond EXACTEMENT aux colonnes du Treeview :
-            # ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Total")
+            # ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Fournisseur")
             self.tree.item(item_id, values=(
                 self.article_selectionne['nomart'],     # Article
                 self.article_selectionne['unite'],      # Unité
@@ -591,7 +591,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                 self.formater_nombre(punitcmd),         # Prix Unit.
                 self.formater_nombre(qtlivre),          # Qté Livrée
                 date_p,                                  # Péremption
-                self.formater_nombre(total)             # Total
+                self.items_commande[index].get('nomfrs', '')  # Fournisseur
             ))
 
             if self.idcom_charge:
@@ -770,7 +770,20 @@ class PageCommandeFrs(ctk.CTkFrame):
             try:
                 cursor = conn.cursor()
                 query = """
-                    SELECT c.idcom, c.refcom, c.datecom, f.nomfrs, c.descriptioncom,
+                    SELECT c.idcom, c.refcom, c.datecom,
+                           COALESCE(
+                               NULLIF(
+                                   (
+                                       SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
+                                       FROM tb_commandedetail d2
+                                       LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
+                                       WHERE d2.idcom = c.idcom
+                                   ),
+                                   ''
+                               ),
+                               'Fournisseur non précisé'
+                           ) AS fournisseurs_liste,
+                           c.descriptioncom,
                            (SELECT COUNT(*) 
                             FROM tb_commandedetail d 
                             WHERE d.idcom = c.idcom) as total_lignes,
@@ -778,14 +791,23 @@ class PageCommandeFrs(ctk.CTkFrame):
                             FROM tb_commandedetail d 
                             WHERE d.idcom = c.idcom AND d.qtcmd = d.qtlivre) as lignes_completes
                     FROM tb_commande c
-                    LEFT JOIN tb_fournisseur f ON c.idfrs = f.idfrs
                     WHERE c.deleted = 0
                 """
                 params = []
                 if filtre:
                     query += """ AND (
                         LOWER(c.refcom) LIKE LOWER(%s) OR 
-                        LOWER(f.nomfrs) LIKE LOWER(%s)
+                        LOWER(
+                            COALESCE(
+                                (
+                                    SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
+                                    FROM tb_commandedetail d2
+                                    LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
+                                    WHERE d2.idcom = c.idcom
+                                ),
+                                ''
+                            )
+                        ) LIKE LOWER(%s)
                     )"""
                     params = [f"%{filtre}%", f"%{filtre}%"]
                 
@@ -864,10 +886,11 @@ class PageCommandeFrs(ctk.CTkFrame):
             # CORRECTION: Ajouter la colonne dateperemption
             query_details = """
                 SELECT d.id, d.idarticle, a.designation, u.designationunite, d.idunite, 
-                   d.qtcmd, d.qtlivre, d.punitcmd, d.total, d.dateperemption
+                   d.qtcmd, d.qtlivre, d.punitcmd, d.total, d.dateperemption, d.idfrs, f.nomfrs
                 FROM tb_commandedetail d
                 INNER JOIN tb_article a ON d.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON d.idunite = u.idunite
+                LEFT JOIN tb_fournisseur f ON d.idfrs = f.idfrs
                 WHERE d.idcom = %s
             """
             cursor.execute(query_details, (idcom,))
@@ -887,8 +910,8 @@ class PageCommandeFrs(ctk.CTkFrame):
                 self.combo_fournisseur.set(commande[4])
             
             for detail in details:
-                # CORRECTION: Récupérer 10 valeurs au lieu de 9
-                idcomdetail, idarticle, designation, unite, idunite, qtcmd, qtlivre, punitcmd, total_db, dateperemption = detail
+                # Détail avec fournisseur porté par la ligne
+                idcomdetail, idarticle, designation, unite, idunite, qtcmd, qtlivre, punitcmd, total_db, dateperemption, idfrs_detail, nomfrs_detail = detail
                 punitcmd = punitcmd if punitcmd else 0
             
                 # Utiliser le total de la base de données s'il existe, sinon le calculer
@@ -907,6 +930,8 @@ class PageCommandeFrs(ctk.CTkFrame):
                     'idcomdetail': idcomdetail,
                     'idarticle': idarticle,
                     'idunite': idunite,
+                    'idfrs': idfrs_detail if idfrs_detail else commande[3],
+                    'nomfrs': nomfrs_detail if nomfrs_detail else (commande[4] if commande[4] else ""),
                     'qtcmd': qtcmd,
                     'qtlivre': qtlivre,
                     'punitcmd': punitcmd,
@@ -914,7 +939,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                     'dateperemption': date_peremption_str
                 })
             
-                # Ajout au Treeview - CORRECTION: Afficher les 7 colonnes dans le bon ordre
+                # Ajout au Treeview - Afficher les 7 colonnes dans le bon ordre
                 self.tree.insert("", "end", values=(
                     designation,                        # Article
                     unite,                             # Unité
@@ -922,7 +947,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                     self.formater_nombre(punitcmd),    # Prix Unit.
                     self.formater_nombre(qtlivre),     # Qté Livrée
                     date_peremption_str,               # Péremption
-                    self.formater_nombre(total)        # Total
+                    nomfrs_detail if nomfrs_detail else (commande[4] if commande[4] else "")  # Fournisseur
                 ))
             self._refresh_table_alternating_colors(self.tree)
             
@@ -1092,6 +1117,12 @@ class PageCommandeFrs(ctk.CTkFrame):
         if not hasattr(self, 'article_selectionne') or not self.article_selectionne:
             messagebox.showwarning("Attention", "Veuillez sélectionner un article.")
             return
+        
+        frs_nom = self.combo_fournisseur.get()
+        idfrs = self.fournisseurs.get(frs_nom)
+        if not idfrs:
+            messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur.")
+            return
 
         try:
             qtcmd = self.parser_nombre(self.entry_qtcmd.get())
@@ -1110,8 +1141,8 @@ class PageCommandeFrs(ctk.CTkFrame):
             # Calculer le total avec qtcmd (pas qtlivre)
             total = qtcmd * punitcmd
 
-            # Ajout au Treeview (Affichage) - CORRECTION: ordre exact des colonnes
-            # ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Total")
+            # Ajout au Treeview (Affichage) : ordre exact des colonnes
+            # ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Fournisseur")
             self.tree.insert("", "end", values=(
                 self.article_selectionne['nomart'],      # Article
                 self.article_selectionne['unite'],       # Unité
@@ -1119,7 +1150,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                 self.formater_nombre(punitcmd),          # Prix Unit.
                 self.formater_nombre(qtlivre),           # Qté Livrée
                 date_p,                                   # Péremption
-                self.formater_nombre(total)              # Total
+                frs_nom                                   # Fournisseur
             ))
             self._refresh_table_alternating_colors(self.tree)
 
@@ -1128,6 +1159,8 @@ class PageCommandeFrs(ctk.CTkFrame):
                 'idcomdetail': None,  # Crucial pour savoir que c'est un INSERT
                 'idarticle': self.article_selectionne['idarticle'],
                 'idunite': self.article_selectionne['idunite'],
+                'idfrs': idfrs,
+                'nomfrs': frs_nom,
                 'qtcmd': qtcmd,
                 'punitcmd': punitcmd,
                 'qtlivre': qtlivre,
@@ -1229,12 +1262,11 @@ class PageCommandeFrs(ctk.CTkFrame):
                 # 1. Mise à jour de la commande principale
                 query_commande = """
                     UPDATE tb_commande 
-                    SET refcom = %s, idfrs = %s, descriptioncom = %s, totcmd = %s
+                    SET refcom = %s, idfrs = NULL, descriptioncom = %s, totcmd = %s
                     WHERE idcom = %s
                 """
                 cursor.execute(query_commande, (
                     self.entry_ref.get(), 
-                    idfrs, 
                     description, 
                     total_commande,
                     self.idcom_charge
@@ -1256,12 +1288,12 @@ class PageCommandeFrs(ctk.CTkFrame):
                 # 3. Insertion/Mise à jour des lignes
                 query_update = """
                     UPDATE tb_commandedetail 
-                    SET idarticle = %s, idunite = %s, qtcmd = %s, qtlivre = %s, punitcmd = %s, total = %s, dateperemption = %s
+                    SET idarticle = %s, idunite = %s, idfrs = %s, qtcmd = %s, qtlivre = %s, punitcmd = %s, total = %s, dateperemption = %s
                     WHERE id = %s
                 """
                 query_insert = """
-                    INSERT INTO tb_commandedetail (idcom, idarticle, idunite, qtcmd, qtlivre, punitcmd, total, dateperemption)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
             
                 for item in self.items_commande:
@@ -1287,6 +1319,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                         cursor.execute(query_update, (
                             item['idarticle'], 
                             item['idunite'], 
+                            item.get('idfrs'),
                             item['qtcmd'], 
                             item['qtlivre'], 
                             item['punitcmd'], 
@@ -1300,6 +1333,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                             self.idcom_charge, 
                             item['idarticle'], 
                             item['idunite'], 
+                            item.get('idfrs'),
                             item['qtcmd'], 
                             item['qtlivre'], 
                             item['punitcmd'],
@@ -1323,7 +1357,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                     self.entry_ref.get(), 
                     datetime.now(),  # CORRECTION: Utiliser .date() au lieu de strftime
                     self.iduser, 
-                    idfrs, 
+                    None,
                     description,
                     datetime.now(), #par défaut datmodif  = dateEntré
                     total_commande
@@ -1332,8 +1366,8 @@ class PageCommandeFrs(ctk.CTkFrame):
             
                 # 2. Insertion des détails
                 query_detail = """
-                    INSERT INTO tb_commandedetail (idcom, idarticle, idunite, qtcmd, qtlivre, punitcmd, total, dateperemption)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
                 for item in self.items_commande:
                     total_ligne = item['qtcmd'] * item['punitcmd']
@@ -1356,6 +1390,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                         idcom, 
                         item['idarticle'], 
                         item['idunite'], 
+                        item.get('idfrs'),
                         item['qtcmd'], 
                         item['qtlivre'], 
                         item['punitcmd'],

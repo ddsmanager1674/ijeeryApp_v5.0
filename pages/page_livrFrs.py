@@ -153,7 +153,7 @@ class PageBonReception(ctk.CTkFrame):
         label_titre_tableau.pack(pady=(5, 5))
         
         # Treeview
-        colonnes = ("Article", "Unité", "Qté Livrée", "Prix Unit.", "Montant")
+        colonnes = ("Article", "Unité", "Fournisseur", "Qté Livrée", "Prix Unit.", "Montant")
         self.tree = ttk.Treeview(frame_tree, columns=colonnes, show="headings", height=12)
         
         for col in colonnes:
@@ -162,6 +162,8 @@ class PageBonReception(ctk.CTkFrame):
                 self.tree.column(col, width=300)
             elif col == "Unité":
                 self.tree.column(col, width=120)
+            elif col == "Fournisseur":
+                self.tree.column(col, width=180)
             else:
                 self.tree.column(col, width=150)
         
@@ -328,12 +330,23 @@ class PageBonReception(ctk.CTkFrame):
                 cursor = conn.cursor()
                 # Récupérer les commandes avec au moins un article livré (qtlivre > 0)
                 query = """
-                    SELECT DISTINCT c.idcom, c.refcom, c.datemodif, f.nomfrs,
+                    SELECT DISTINCT c.idcom, c.refcom, c.datemodif,
+                           COALESCE(
+                               NULLIF(
+                                   (
+                                       SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
+                                       FROM tb_commandedetail d2
+                                       LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
+                                       WHERE d2.idcom = c.idcom
+                                   ),
+                                   ''
+                               ),
+                               'Fournisseur non précisé'
+                           ) AS fournisseurs_liste,
                            (SELECT COUNT(*) 
                             FROM tb_commandedetail d 
                             WHERE d.idcom = c.idcom AND d.qtlivre > 0) as nb_articles_livres
                     FROM tb_commande c
-                    LEFT JOIN tb_fournisseur f ON c.idfrs = f.idfrs
                     WHERE c.deleted = 0
                     AND EXISTS (
                         SELECT 1 FROM tb_commandedetail d 
@@ -344,7 +357,17 @@ class PageBonReception(ctk.CTkFrame):
                 if filtre:
                     query += """ AND (
                         LOWER(c.refcom) LIKE LOWER(%s) OR 
-                        LOWER(f.nomfrs) LIKE LOWER(%s)
+                        LOWER(
+                            COALESCE(
+                                (
+                                    SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
+                                    FROM tb_commandedetail d2
+                                    LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
+                                    WHERE d2.idcom = c.idcom
+                                ),
+                                ''
+                            )
+                        ) LIKE LOWER(%s)
                     )"""
                     params = [f"%{filtre}%", f"%{filtre}%"]
                 
@@ -424,10 +447,13 @@ class PageBonReception(ctk.CTkFrame):
             # Récupérer les articles avec qtlivre > 0
             query_details = """
                 SELECT d.id, d.idarticle, a.designation, u.designationunite, 
-                       d.idunite, d.qtlivre, d.punitcmd
+                       d.idunite, d.qtlivre, d.punitcmd, COALESCE(f_d.nomfrs, f_c.nomfrs, '') AS nomfrs
                 FROM tb_commandedetail d
+                INNER JOIN tb_commande c ON d.idcom = c.idcom
                 INNER JOIN tb_article a ON d.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON d.idunite = u.idunite
+                LEFT JOIN tb_fournisseur f_d ON d.idfrs = f_d.idfrs
+                LEFT JOIN tb_fournisseur f_c ON c.idfrs = f_c.idfrs
                 WHERE d.idcom = %s AND d.qtlivre > 0
             """
             cursor.execute(query_details, (idcom,))
@@ -452,13 +478,14 @@ class PageBonReception(ctk.CTkFrame):
             
             # Remplir le treeview
             for detail in details:
-                idcomdetail, idarticle, designation, unite, idunite, qtlivre, punitcmd = detail
+                idcomdetail, idarticle, designation, unite, idunite, qtlivre, punitcmd, nomfrs_ligne = detail
                 punitcmd = punitcmd if punitcmd else 0
                 montant = (qtlivre or 0) * punitcmd
                 
                 self.tree.insert("", "end", values=(
                     designation,
                     unite,
+                    nomfrs_ligne or "",
                     self.formater_nombre(qtlivre if qtlivre else 0),
                     self.formater_nombre(punitcmd),
                     self.formater_nombre(montant)
@@ -468,6 +495,7 @@ class PageBonReception(ctk.CTkFrame):
                     'idcomdetail': idcomdetail,
                     'idarticle': idarticle,
                     'idunite': idunite,
+                    'fournisseur': nomfrs_ligne or "",
                     'qtlivre': qtlivre or 0,
                     'punitcmd': punitcmd
                 })
@@ -561,12 +589,18 @@ class PageBonReception(ctk.CTkFrame):
                     filename = os.path.join(etats_dir, f"BR_{self.entry_ref.get().replace('-', '_')}_A5.pdf")
 
                     # Construire table_data à partir des détails récupérés
-                    cols = ("Code", "Désignation", "Unité", "Qté")
+                    cols = ("Code", "Désignation", "Unité", "Qté", "Fournisseur")
                     rows = []
                     total_general = 0
                     for detail in data.get('details', []):
                         qte = detail.get('qtlivre', 0) or 0
-                        rows.append((detail.get('code', ''), detail.get('designation', ''), detail.get('unite', ''), qte))
+                        rows.append((
+                            detail.get('code', ''),
+                            detail.get('designation', ''),
+                            detail.get('unite', ''),
+                            qte,
+                            detail.get('fournisseur', '')
+                        ))
 
                     table_data = (cols, rows)
 
@@ -593,7 +627,7 @@ class PageBonReception(ctk.CTkFrame):
                             magasin=data['reception'].get('magasin', ''),
                             operateur=operateur,
                             table_data=table_data,
-                            description="Bon de réception",
+                            description= numero_facture,
                             responsable_1="Le Responsable",
                             responsable_2=data['reception'].get('fournisseur', 'Fournisseur')
                         )
@@ -758,6 +792,7 @@ class PageBonReception(ctk.CTkFrame):
                         'code': unite_info[0],
                         'designation': designation[0],
                         'unite': unite_info[1],
+                        'fournisseur': item.get('fournisseur', ''),
                         'qtlivre': item['qtlivre'],
                         'punitcmd': item['punitcmd']
                     })
@@ -833,7 +868,7 @@ class PageBonReception(ctk.CTkFrame):
             # --- 4. Tableau des Détails (Colonnes ajustées pour Portrait) ---
             # Répartition des 370 points de largeur disponible environ
             table_data = [
-                ['Code', 'Désignation', 'Unité', 'Qté', 'P.U', 'Montant']
+                ['Code', 'Désignation', 'Unité', 'Qté', 'P.U', 'Montant', 'Fournisseur']
             ]
         
             total_general = 0
@@ -847,13 +882,14 @@ class PageBonReception(ctk.CTkFrame):
                     detail['unite'],
                     self.formater_nombre(detail['qtlivre']),
                     self.formater_nombre(detail['punitcmd']),
-                    self.formater_nombre(montant)
+                    self.formater_nombre(montant),
+                    Paragraph(detail.get('fournisseur', ''), styles['Normal'])
                 ])
         
-            table_data.append(['', '', '', '', 'TOTAL:', self.formater_nombre(total_general)])
+            table_data.append(['', '', '', '', '', 'TOTAL:', self.formater_nombre(total_general)])
 
-            # Ajustement des largeurs : Total = ~370
-            table_details = Table(table_data, colWidths=[40, 130, 45, 45, 55, 55])
+            # Ajustement des largeurs avec colonne Fournisseur
+            table_details = Table(table_data, colWidths=[35, 95, 35, 35, 45, 45, 80])
             table_details.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
