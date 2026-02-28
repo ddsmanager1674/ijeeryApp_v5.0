@@ -22,6 +22,9 @@ except ImportError as e:
             ctk.CTkLabel(self, text="Erreur: PageInfoArticle introuvable").pack()
 
 class PageArticle(ctk.CTkFrame):
+    FONT_FAMILY = "Tahoma"
+    FONT_SIZE = 10
+
     def __init__(self, parent):
         super().__init__(parent)
         self.parent = parent
@@ -60,43 +63,47 @@ class PageArticle(ctk.CTkFrame):
             return None
 
     def create_widgets(self):
+        base_font = ctk.CTkFont(family=self.FONT_FAMILY, size=self.FONT_SIZE)
+        btn_font = ctk.CTkFont(family=self.FONT_FAMILY, size=self.FONT_SIZE)
+        dark_text = "#1f2937"
+
         # --- SECTION FORMULAIRE ---
         form_frame = ctk.CTkFrame(self)
         form_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         form_frame.grid_columnconfigure(1, weight=1)
         
-        ctk.CTkLabel(form_frame, text="Désignation:").grid(row=0, column=0, padx=5, pady=2, sticky="w")
-        self.entry_designation = ctk.CTkEntry(form_frame)
+        ctk.CTkLabel(form_frame, text="Désignation:", font=base_font, text_color=dark_text).grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        self.entry_designation = ctk.CTkEntry(form_frame, font=base_font, text_color=dark_text)
         self.entry_designation.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
         
-        ctk.CTkLabel(form_frame, text="Catégorie:").grid(row=1, column=0, padx=5, pady=2, sticky="w")
-        self.combo_categorie = ctk.CTkComboBox(form_frame, state="readonly")
+        ctk.CTkLabel(form_frame, text="Catégorie:", font=base_font, text_color=dark_text).grid(row=1, column=0, padx=5, pady=2, sticky="w")
+        self.combo_categorie = ctk.CTkComboBox(form_frame, state="readonly", font=base_font)
         self.combo_categorie.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
 
-        ctk.CTkLabel(form_frame, text="Magasin:").grid(row=2, column=0, padx=5, pady=2, sticky="w")
-        self.combo_magasin = ctk.CTkComboBox(form_frame, state="readonly")
+        ctk.CTkLabel(form_frame, text="Magasin:", font=base_font, text_color=dark_text).grid(row=2, column=0, padx=5, pady=2, sticky="w")
+        self.combo_magasin = ctk.CTkComboBox(form_frame, state="readonly", font=base_font)
         self.combo_magasin.grid(row=2, column=1, padx=5, pady=2, sticky="ew")
         
-        ctk.CTkLabel(form_frame, text="Alerte:").grid(row=3, column=0, padx=5, pady=2, sticky="w")
-        self.entry_alert = ctk.CTkEntry(form_frame)
+        ctk.CTkLabel(form_frame, text="Alerte:", font=base_font, text_color=dark_text).grid(row=3, column=0, padx=5, pady=2, sticky="w")
+        self.entry_alert = ctk.CTkEntry(form_frame, font=base_font, text_color=dark_text)
         self.entry_alert.insert(0, "0")
         self.entry_alert.grid(row=3, column=1, padx=5, pady=2, sticky="ew")
 
-        ctk.CTkLabel(form_frame, text="Alerte Dépôt:").grid(row=4, column=0, padx=5, pady=2, sticky="w")
-        self.entry_alert_depot = ctk.CTkEntry(form_frame)
+        ctk.CTkLabel(form_frame, text="Alerte Dépôt:", font=base_font, text_color=dark_text).grid(row=4, column=0, padx=5, pady=2, sticky="w")
+        self.entry_alert_depot = ctk.CTkEntry(form_frame, font=base_font, text_color=dark_text)
         self.entry_alert_depot.insert(0, "0")
         self.entry_alert_depot.grid(row=4, column=1, padx=5, pady=2, sticky="ew")
         
         btn_frame = ctk.CTkFrame(form_frame)
         btn_frame.grid(row=5, column=0, columnspan=2, pady=10)
         
-        self.btn_ajouter = ctk.CTkButton(btn_frame, text="Ajouter", command=self.ajouter_article, width=100)
+        self.btn_ajouter = ctk.CTkButton(btn_frame, text="Ajouter", command=self.ajouter_article, width=100, font=btn_font, text_color=dark_text)
         self.btn_ajouter.pack(side="left", padx=5)
-        self.btn_modifier = ctk.CTkButton(btn_frame, text="Modifier", command=self.modifier_article, width=100)
+        self.btn_modifier = ctk.CTkButton(btn_frame, text="Modifier", command=self.modifier_article, width=100, font=btn_font, text_color=dark_text)
         self.btn_modifier.pack(side="left", padx=5)
-        self.btn_supprimer = ctk.CTkButton(btn_frame, text="Supprimer", command=self.supprimer_article, width=100, fg_color="#c62828")
+        self.btn_supprimer = ctk.CTkButton(btn_frame, text="Supprimer", command=self.supprimer_article, width=100, fg_color="#c62828", font=btn_font)
         self.btn_supprimer.pack(side="left", padx=5)
-        self.btn_nettoyer = ctk.CTkButton(btn_frame, text="Nettoyer", command=self.nettoyer_formulaire, width=100)
+        self.btn_nettoyer = ctk.CTkButton(btn_frame, text="Nettoyer", command=self.nettoyer_formulaire, width=100, font=btn_font, text_color=dark_text)
         self.btn_nettoyer.pack(side="left", padx=5)
         
         # --- CADRE PHOTO (Colonne 1) ---
@@ -107,18 +114,18 @@ class PageArticle(ctk.CTkFrame):
         photo_frame.pack(padx=5, pady=5)
         photo_frame.grid_propagate(False)
         
-        self.photo_label = ctk.CTkLabel(photo_frame, text="Aucune Image", width=200, height=200, fg_color="gray25", corner_radius=10)
+        self.photo_label = ctk.CTkLabel(photo_frame, text="Aucune Image", width=200, height=200, fg_color="gray25", corner_radius=10, font=base_font)
         self.photo_label.pack(expand=True, fill="both", padx=5, pady=5)
         
-        self.btn_ajout_photo = ctk.CTkButton(photo_container, text="📸 Ajouter Photo", command=self.ajouter_photo, width=220)
+        self.btn_ajout_photo = ctk.CTkButton(photo_container, text="📸 Ajouter Photo", command=self.ajouter_photo, width=220, font=btn_font, text_color=dark_text)
         self.btn_ajout_photo.pack(pady=5)
 
         # --- SECTION RECHERCHE ---
         search_frame = ctk.CTkFrame(self)
         search_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=(5, 0), sticky="ew")
         
-        ctk.CTkLabel(search_frame, text="🔍 Rechercher article:").pack(side="left", padx=10)
-        self.entry_search = ctk.CTkEntry(search_frame, placeholder_text="Saisissez un designation...")
+        ctk.CTkLabel(search_frame, text="🔍 Rechercher article:", font=base_font, text_color=dark_text).pack(side="left", padx=10)
+        self.entry_search = ctk.CTkEntry(search_frame, placeholder_text="Saisissez un designation...", font=base_font, text_color=dark_text)
         self.entry_search.pack(side="left", fill="x", expand=True, padx=10, pady=5)
         self.entry_search.bind("<KeyRelease>", self.filter_articles)
 
@@ -129,8 +136,8 @@ class PageArticle(ctk.CTkFrame):
         tree_container.grid_rowconfigure(0, weight=1)
 
         style = ttk.Style()
-        style.configure("Treeview", rowheight=22, background="#FFFFFF", foreground="#000000", fieldbackground="#FFFFFF", borderwidth=0, font=('Segoe UI', 8))
-        style.configure("Treeview.Heading", background="#E8E8E8", foreground="#000000", font=('Segoe UI', 8, 'bold'))
+        style.configure("Treeview", rowheight=22, background="#FFFFFF", foreground="#1f2937", fieldbackground="#FFFFFF", borderwidth=0, font=(self.FONT_FAMILY, self.FONT_SIZE))
+        style.configure("Treeview.Heading", background="#E8E8E8", foreground="#1f2937", font=(self.FONT_FAMILY, self.FONT_SIZE, 'bold'))
         
         self.tree = ttk.Treeview(tree_container, columns=("ID", "Désignation", "Catégorie", "Magasin", "Alerte", "Alerte Dépôt"), show="headings")
         self.tree.tag_configure("even", background="#FFFFFF", foreground="#000000")
