@@ -3130,8 +3130,8 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
 
         articles_table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
         articles_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-            ('BACKGROUND', (0, -2), (-1, -1), colors.lightgrey),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.transparent),
+            ('BACKGROUND', (0, -2), (-1, -1), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
@@ -3139,6 +3139,8 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
             ('FONTSIZE', (0, -2), (-1, -1), 9),
             ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
             ('LINEABOVE', (0, -2), (-1, -2), 1, colors.black),
+            # Bordure noire en bas du tableau (sous les montants TOTAL Ar et Fmg)
+            ('LINEBELOW', (0, -1), (-1, -1), 1, colors.black),
             ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
             ('ALIGN', (0, 0), (2, 0), 'LEFT'),
             ('ALIGN', (2, -2), (2, -1), 'RIGHT'),
