@@ -382,6 +382,7 @@ class App(ctk.CTk):
             "PageSortie": PageSortie,
             "PageStock": PageStock,
             "PageStockAlerte": PageStockAlerte,
+            "PageGestionPeremption": PageGestionPeremption,
             "PageStockLivraison" : PageStockLivraison,
             "PageSuiviCommande" : PageSuiviCommande,
             "PageTransfert": PageTransfert,
@@ -1367,6 +1368,12 @@ class App(ctk.CTk):
                                       fg_color="#034787", text_color="white", hover_color="#0565c9",
                                       font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageStockAlerte"]))
             btn_alerte.pack(pady=2, padx=5, fill="x")
+        # menu péremption directement après alerte
+        if "Péremption d'article" in self.authorized_menus or "Peremption Article" in self.authorized_menus:
+            btn_peremp = ctk.CTkButton(self.admin_submenu_frame, text="🛡️ Péremption d'article", corner_radius=10, height=40,
+                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
+                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping.get("PageGestionPeremption")))
+            btn_peremp.pack(pady=2, padx=5, fill="x")
             
         if "Stock Livraison" in self.authorized_menus:
             btn_sl = ctk.CTkButton(self.admin_submenu_frame, text="🚚 Stock Livraion", corner_radius=10, height=40,

@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, StringVar
 import psycopg2
 import json
 from datetime import datetime, timedelta
@@ -56,19 +56,36 @@ class PageGestionPeremption(ctk.CTkFrame):
         self.search_timer = None
         self.entry_recherche.bind("<KeyRelease>", self.on_search_change)
 
+        # Filtre d'état de péremption
+        self.var_filter = StringVar(value="Tous")
+        try:
+            self.combo_filter = ttk.Combobox(frame_outils,
+                                            values=["Tous", "Périmé", "<1 mois", "<2 mois", ">2 mois"],
+                                            textvariable=self.var_filter,
+                                            state="readonly", width=14)
+            self.combo_filter.bind("<<ComboboxSelected>>", lambda e: self.apply_filter())
+            self.combo_filter.pack(side="left", padx=8)
+        except Exception:
+            opt = ctk.CTkOptionMenu(frame_outils,
+                                     values=["Tous", "Périmé", "<1 mois", "<2 mois", ">2 mois"],
+                                     command=lambda v: self.apply_filter())
+            opt.set("Tous")
+            opt.pack(side="left", padx=8)
+
         btn_refresh = ctk.CTkButton(frame_outils, text="🔄 Actualiser", 
                                    command=self.charger_donnees,
                                    fg_color="#2e7d32", hover_color="#1b5e20",
                                    width=120)
         btn_refresh.pack(side="left", padx=10, pady=10)
 
-        # Légende visuelle
+        # Légende visuelle (haut)
         legend_frame = ctk.CTkFrame(frame_outils, fg_color="transparent")
         legend_frame.pack(side="right", padx=10)
         
         ctk.CTkLabel(legend_frame, text="Rouge: Périmé", text_color="#e53935", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")).pack(side="right", padx=10)
-        ctk.CTkLabel(legend_frame, text="Orange: < 1 mois", text_color="#fb8c00", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")).pack(side="right", padx=10)
-        ctk.CTkLabel(legend_frame, text="Vert: < 2 mois", text_color="#43a047", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")).pack(side="right", padx=10)
+        ctk.CTkLabel(legend_frame, text="Orange: < 1 mois (liquidation)", text_color="#fb8c00", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")).pack(side="right", padx=10)
+        ctk.CTkLabel(legend_frame, text="Vert: < 2 mois (bon état)", text_color="#43a047", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")).pack(side="right", padx=10)
+        ctk.CTkLabel(legend_frame, text="Noir: > 2 mois", text_color="#000000", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")).pack(side="right", padx=10)
 
         # Conteneur pour le tableau avec scrollbar horizontal
         frame_container = ctk.CTkFrame(self)
@@ -88,6 +105,12 @@ class PageGestionPeremption(ctk.CTkFrame):
         
         frame_container.grid_rowconfigure(0, weight=1)
         frame_container.grid_columnconfigure(0, weight=1)
+
+        # légende basique sous le tableau
+        foot_legend = ctk.CTkFrame(self)
+        foot_legend.pack(fill="x", padx=20, pady=(0,10))
+        foot_text = "Rouge: périmé  |  Orange: <1 mois (liquidation)  |  Vert: <2 mois (bon état)  |  Noir: >2 mois"
+        ctk.CTkLabel(foot_legend, text=foot_text, font=ctk.CTkFont(family="Segoe UI", size=10)).pack()
 
         # Configuration des tags de couleur
         self.tree.tag_configure('perime', foreground="#e53935", font=("Arial", 9, "bold"))
@@ -337,6 +360,8 @@ class PageGestionPeremption(ctk.CTkFrame):
                         self.cellules_data[cell_key]['col_index'] = i + 4
 
             self.titre.configure(text=f"🛡️ Suivi de Péremption par Article - {len(articles_valides)} articles")
+            # appliquer le filtre sélectionné après chargement
+            self.apply_filter()
 
         except Exception as e:
             messagebox.showerror("Erreur de chargement", f"Erreur SQL : {e}")
@@ -344,6 +369,29 @@ class PageGestionPeremption(ctk.CTkFrame):
         finally:
             cursor.close()
             conn.close()
+
+    def apply_filter(self):
+        """Applique le filtre de péremption sélectionné en montrant/masquant les lignes."""
+        filt = None
+        try:
+            filt = self.var_filter.get()
+        except Exception:
+            filt = "Tous"
+        for item in self.tree.get_children():
+            tags = self.tree.item(item, 'tags')
+            show = True
+            if filt == 'Périmé':
+                show = 'perime' in tags
+            elif filt == '<1 mois':
+                show = 'urgent' in tags
+            elif filt == '<2 mois':
+                show = 'proche' in tags
+            elif filt == '>2 mois':
+                show = 'normal' in tags
+            if show:
+                self.tree.reattach(item, '', 'end')
+            else:
+                self.tree.detach(item)
 
     def on_double_click(self, event):
         """Gère le double-clic sur une cellule"""
