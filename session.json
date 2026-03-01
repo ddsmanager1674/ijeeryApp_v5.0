@@ -221,6 +221,10 @@
             "PageSortie"
         ],
         [
+            "Stock Alerte",
+            "PageStockAlerte"
+        ],
+        [
             "Stock Article",
             "PageStock"
         ],

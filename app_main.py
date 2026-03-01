@@ -82,6 +82,7 @@ from pages.page_sauvegarde import PageSauvegarde
 from pages.page_sortie import PageSortie
 from pages.page_stock import PageStock
 from pages.page_StockLivraison import PageStockLivraison
+from pages.page_StockAlerte import PageStockAlerte
 from pages.page_SuiviCommande import PageSuiviCommande
 from pages.page_transfert import PageTransfert
 from pages.page_transfertBanque import PageTransfertBanque
@@ -380,6 +381,7 @@ class App(ctk.CTk):
             "PageSauvegarde": PageSauvegarde,
             "PageSortie": PageSortie,
             "PageStock": PageStock,
+            "PageStockAlerte": PageStockAlerte,
             "PageStockLivraison" : PageStockLivraison,
             "PageSuiviCommande" : PageSuiviCommande,
             "PageTransfert": PageTransfert,
@@ -1359,6 +1361,12 @@ class App(ctk.CTk):
                                       fg_color="#034787", text_color="white", hover_color="#0565c9",
                                       font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageStock"]))
             btn_stock.pack(pady=2, padx=5, fill="x")
+            
+        if "Stock Alerte" in self.authorized_menus:
+            btn_alerte = ctk.CTkButton(self.admin_submenu_frame, text="⚠️ Stock Alerte", corner_radius=10, height=40,
+                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
+                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageStockAlerte"]))
+            btn_alerte.pack(pady=2, padx=5, fill="x")
             
         if "Stock Livraison" in self.authorized_menus:
             btn_sl = ctk.CTkButton(self.admin_submenu_frame, text="🚚 Stock Livraion", corner_radius=10, height=40,
