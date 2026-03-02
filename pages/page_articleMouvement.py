@@ -396,17 +396,10 @@ class PageArticleMouvement(ctk.CTkFrame):
                     
                     # Obtenir les valeurs actuelles
                     current_values = list(self.tree.item(item_id, 'values'))
-                    
-                    # Mettre à jour la colonne Stock (index 8) avec l'unité
-                    unite_display = pending_info.get('unite_display', '')
-                    stock_with_unite = stock_value
-                    
-                    # Ajouter l'unité au stock si ce n'est pas une valeur spéciale (- ou En cours...)
-                    if stock_value and stock_value not in ['-', 'En cours...'] and unite_display:
-                        stock_with_unite = f"{stock_value} {unite_display}"
+            
                     
                     if len(current_values) > 8:
-                        current_values[8] = stock_with_unite
+                        current_values[8] = stock_value
                         
                         # Mettre à jour via after() pour être thread-safe
                         self.after(0, lambda cvals=current_values, iid=item_id: self.tree.item(iid, values=cvals))
@@ -432,6 +425,45 @@ class PageArticleMouvement(ctk.CTkFrame):
             return f"{str_entiere},{str_decimale}"
         except:
             return "0,00"
+    
+    def _adjust_column_widths(self):
+        """Ajuste automatiquement la largeur des colonnes selon leur contenu"""
+        import tkinter.font as tkFont
+        
+        # Créer une police pour mesurer la largeur du texte
+        font = tkFont.Font(font=('Segoe UI', 8))
+        
+        # Colonnes à ajuster (exclure les colonnes cachées)
+        visible_columns = [
+            col for col in self.tree['columns'] 
+            if col not in ["#", "idArticle", "idUnite", "idMagasin"]
+        ]
+        
+        for col in visible_columns:
+            # Obtenir le texte du heading
+            heading_text = self.tree.heading(col)['text']
+            max_width = font.measure(heading_text) + 15
+            
+            # Itérer sur les premiers items visibles (optimisation performance)
+            all_items = self.tree.get_children()
+            sample_items = all_items[:50]  # Examiner seulement les 50 premiers
+            
+            for item_id in sample_items:
+                item_values = self.tree.item(item_id, 'values')
+                col_index = list(self.tree['columns']).index(col)
+                
+                if col_index < len(item_values):
+                    cell_text = str(item_values[col_index])
+                    cell_width = font.measure(cell_text) + 15
+                    max_width = max(max_width, cell_width)
+            
+            # Limiter la largeur entre un minimum et un maximum raisonnable
+            min_width = 60
+            max_width_limit = 400
+            final_width = max(min_width, min(max_width, max_width_limit))
+            
+            # Appliquer la largeur calculée
+            self.tree.column(col, width=int(final_width))
     
     def get_unite_hierarchy(self, conn, idarticle):
         """Récupère la hiérarchie complète des unités pour un article"""
@@ -787,7 +819,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                  background=[('selected', '#0d47a1')])
         
         # Treeview
-        columns = ("#", "Date", "Référence", "Type", "Désignation", "Unité", "Entrée", "Sortie", "Stock", "Magasin", "Utilisateur", "idArticle", "idUnite", "idMagasin")
+        columns = ("#", "Date", "Référence", "Type", "Désignation", "Unité", "Entrée", "Sortie", "Stock", "Magasin", "Description", "idArticle", "idUnite", "idMagasin")
         self.tree = ttk.Treeview(
             tree_frame,
             columns=columns,
@@ -802,7 +834,7 @@ class PageArticleMouvement(ctk.CTkFrame):
         
         # Configuration des colonnes
         column_widths = {
-            "#": 40,
+            "#": 0,
             "Date": 160,
             "Référence": 120,
             "Type": 120,
@@ -810,23 +842,23 @@ class PageArticleMouvement(ctk.CTkFrame):
             "Unité": 100,
             "Entrée": 100,
             "Sortie": 100,
-            "Stock": 180,
+            "Stock": 120,
             "Magasin": 70,
-            "Utilisateur": 100,
+            "Description": 250,
             "idArticle": 0,  # Hidden
             "idUnite": 0,    # Hidden
             "idMagasin": 0   # Hidden
         }
         
         for col in columns:
-            # Masquer les colonnes d'ID
-            if col in ["idArticle", "idUnite", "idMagasin"]:
+            # Masquer les colonnes (largeur 0)
+            if col in ["#", "idArticle", "idUnite", "idMagasin"]:
                 self.tree.heading(col, text=col)
                 self.tree.column(col, width=0, stretch="no")
             else:
                 self.tree.heading(col, text=col)
                 width = column_widths.get(col, 100)
-                self.tree.column(col, width=width, anchor="center" if width > 0 else "w")
+                self.tree.column(col, width=width, anchor="w")  # Aligner à gauche
         
         self.tree.grid(row=0, column=0, sticky="nsew")
         
@@ -903,12 +935,16 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(lf.idmag, -1)
+                    COALESCE(lf.idmag, -1),
+                    COALESCE('[FRS: ' || frs.nomfrs || ' , ref. Commande: ' || c.refcom || '] ' || COALESCE(lf.reflivfrs, ''), '')
                 FROM tb_livraisonfrs lf
                 INNER JOIN tb_unite u ON lf.idunite = u.idunite
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN tb_magasin m ON lf.idmag = m.idmag
                 LEFT JOIN tb_users usr ON lf.iduser = usr.iduser
+                LEFT JOIN tb_commande c ON lf.idcom = c.idcom
+                LEFT JOIN tb_commandedetail cd ON c.idcom = cd.idcom AND cd.idarticle = a.idarticle
+                LEFT JOIN tb_fournisseur frs ON cd.idfrs = frs.idfrs
                 WHERE DATE(lf.dateregistre) BETWEEN %s AND %s
                 AND lf.deleted = 0
             """
@@ -941,7 +977,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(sd.idmag, -1)
+                    COALESCE(sd.idmag, -1),
+                    COALESCE(sd.motif, '')
                 FROM tb_sortie s
                 INNER JOIN tb_sortiedetail sd ON s.id = sd.idsortie
                 INNER JOIN tb_unite u ON sd.idunite = u.idunite
@@ -980,13 +1017,16 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(vd.idmag, -1)
+                    COALESCE(vd.idmag, -1),
+                    '[CL: ' || COALESCE(cl.nomcli, 'N/A') || '] vente ' || COALESCE(mp.modedepaiement, 'N/A') || ' validée!'
                 FROM tb_vente v
                 INNER JOIN tb_ventedetail vd ON v.id = vd.idvente
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN tb_magasin m ON vd.idmag = m.idmag
                 LEFT JOIN tb_users usr ON v.iduser = usr.iduser
+                LEFT JOIN tb_client cl ON v.idclient = cl.idclient
+                LEFT JOIN tb_modepaiement mp ON v.idmode = mp.idmode
                 WHERE DATE(v.dateregistre) BETWEEN %s AND %s
                 AND v.deleted = 0 AND vd.deleted = 0
                 AND v.statut = 'VALIDEE'
@@ -1021,7 +1061,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(td.idmagsortie, -1)
+                    COALESCE(td.idmagsortie, -1),
+                    COALESCE(td.description, '')
                 FROM tb_transfert t
                 INNER JOIN tb_transfertdetail td ON t.idtransfert = td.idtransfert
                 INNER JOIN tb_unite u ON td.idunite = u.idunite
@@ -1059,7 +1100,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(td.idmagentree, -1)
+                    COALESCE(td.idmagentree, -1),
+                    COALESCE(td.description, '')
                 FROM tb_transfert t
                 INNER JOIN tb_transfertdetail td ON t.idtransfert = td.idtransfert
                 INNER JOIN tb_unite u ON td.idunite = u.idunite
@@ -1099,7 +1141,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(i.idmag, -1)
+                    COALESCE(i.idmag, -1),
+                    COALESCE(i.observation, '')
                 FROM tb_inventaire i
                 INNER JOIN tb_unite u ON i.codearticle = u.codearticle
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
@@ -1136,7 +1179,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(ad.idmag, -1)
+                    COALESCE(ad.idmag, -1),
+                    COALESCE(av.observation, '')
                 FROM tb_avoir av
                 INNER JOIN tb_avoirdetail ad ON av.id = ad.idavoir
                 INNER JOIN tb_unite u ON ad.idunite = u.idunite
@@ -1175,7 +1219,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(cid.idmag, -1)
+                    COALESCE(cid.idmag, -1),
+                    COALESCE(cid.observation, '')
                 FROM tb_consommationinterne ci
                 INNER JOIN tb_consommationinterne_details cid ON ci.id = cid.idconsommation
                 INNER JOIN tb_unite u ON cid.idunite = u.idunite
@@ -1214,7 +1259,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(dcs.idmagasin, -1)
+                    COALESCE(dcs.idmagasin, -1),
+                    COALESCE(chg.note, '')
                 FROM tb_changement chg
                 INNER JOIN tb_detailchange_sortie dcs ON chg.idchg = dcs.idchg
                 INNER JOIN tb_unite u ON dcs.idunite = u.idunite
@@ -1251,7 +1297,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.codearticle,
                     a.idarticle,
                     u.idunite as idunite_dup,
-                    COALESCE(dce.idmagasin, -1)
+                    COALESCE(dce.idmagasin, -1),
+                    COALESCE(chg.note, '')
                 FROM tb_changement chg
                 INNER JOIN tb_detailchange_entree dce ON chg.idchg = dce.idchg
                 INNER JOIN tb_unite u ON dce.idunite = u.idunite
@@ -1356,6 +1403,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                 idunite = mouv[8]
                 idarticle = mouv[10]  # Index 10: a.idarticle
                 idmag = mouv[12]      # Index 12: idmag
+                description = mouv[13] if mouv[13] else "-"  # Index 13: description
 
                 # Récupérer la désignation de l'unité
                 cursor.execute("SELECT designationunite FROM tb_unite WHERE idunite = %s", (idunite,))
@@ -1388,7 +1436,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                     '-' if sortie == 0 else self.formater_nombre(sortie),
                     stock_value,  # Valeur temporaire
                     magasin_display,
-                    username,
+                    description,  # Description
                     str(idarticle),  # Hidden: idArticle
                     str(idunite),    # Hidden: idUnite
                     str(idmag)       # Hidden: idMagasin
@@ -1409,6 +1457,9 @@ class PageArticleMouvement(ctk.CTkFrame):
             self.label_total.configure(text=f"Nombre total de documents: {len(rows_to_display)}")
             
             cursor.close()
+            
+            # Ajuster la largeur des colonnes selon le contenu
+            self._adjust_column_widths()
             
             # Lancer le calcul des stocks en arrière-plan dans un thread
             self._relancer_calcul_stocks_filtres()
@@ -1503,6 +1554,9 @@ class PageArticleMouvement(ctk.CTkFrame):
                 pending_info = original_pending[orig_idx].copy()
                 pending_info['index'] = new_idx
                 self.rows_pending.append(pending_info)
+        
+        # Ajuster la largeur des colonnes selon le contenu filtré
+        self._adjust_column_widths()
         
         # Relancer le calcul des stocks SEULEMENT pour les lignes filtrées
         self._relancer_calcul_stocks_filtres()
