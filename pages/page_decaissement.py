@@ -28,13 +28,25 @@ class PageDecaissement(ctk.CTkToplevel):
     def __init__(self, master, username="Système"):
         super().__init__(master)
         self.title("Nouveau Décaissement")
+        # taille et centrage
         self.geometry("600x450")
         self.transient(master)
         self.grab_set()
+        self.center_window()
 
         self.master_app = master
-        self.current_user = username
-        self.categories = {} 
+        # Charger utilisateur/session
+        loaded_username, loaded_user_id = self._load_user_session()
+        # priorité: session -> paramètre -> défaut
+        if loaded_username:
+            self.current_user = loaded_username
+        elif username and username != "Système":
+            self.current_user = username
+        else:
+            self.current_user = username
+        self.current_user_id = loaded_user_id
+
+        self.categories = {}
         # Protection contre les double-clics
         self._processing = False
         self._finalized = False
@@ -44,10 +56,40 @@ class PageDecaissement(ctk.CTkToplevel):
         if self.conn:
             self.cursor = self.conn.cursor()
             self.create_widgets()
+            # actualiser le label opérateur
+            try:
+                self.lbl_user.configure(text=f"Opérateur : {self.current_user}")
+            except Exception:
+                pass
             self.charger_categories()
         else:
             messagebox.showerror("Erreur", "Connexion échouée")
             self.destroy()
+
+    def center_window(self):
+        """Centre cette fenêtre sur l'écran."""
+        self.update_idletasks()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _load_user_session(self):
+        """Récupère (username, user_id) depuis session.json si possible."""
+        try:
+            session_path = get_config_path('session.json')
+            if session_path and os.path.exists(session_path):
+                with open(session_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    username = data.get('username') or data.get('user')
+                    user_id = data.get('user_id') or data.get('id') or data.get('iduser')
+                    return username, user_id
+        except Exception as e:
+            print(f"DEBUG: impossible de charger session.json: {e}")
+        return None, None
 
     def connect_db(self):
         """Établit la connexion à la base de données à partir du fichier config.json"""
@@ -79,34 +121,47 @@ class PageDecaissement(ctk.CTkToplevel):
             return None
 
     def create_widgets(self):
-        """Crée et positionne les widgets de l'interface utilisateur."""
-        self.grid_columnconfigure((0, 1, 2), weight=1)
-        for i in range(5):
-            self.grid_rowconfigure(i, weight=1)
+        """Crée et positionne les widgets de l'interface utilisateur avec un design épuré."""
+        # cadre principal
+        main = ctk.CTkFrame(self, fg_color="#f0f0f0", corner_radius=10)
+        main.pack(expand=True, fill="both", padx=20, pady=20)
 
-        ctk.CTkLabel(self, text="Catégorie:").grid(row=0, column=0, padx=10, pady=10, sticky='e')
-        self.combo_categorie = ctk.CTkComboBox(self, width=250, values=[], state="readonly")
-        self.combo_categorie.grid(row=0, column=1, padx=10, pady=10, sticky='ew')
+        header = ctk.CTkLabel(main, text="NOUVEAU DÉCAISSEMENT", font=ctk.CTkFont(size=18, weight="bold"))
+        header.pack(pady=(0,15))
 
-        self.bouton_ajouter_categorie = ctk.CTkButton(self, text="+", width=40, command=self.ouvrir_fenetre_categorie)
-        self.bouton_ajouter_categorie.grid(row=0, column=2, padx=5, pady=10, sticky='w')
+        form = ctk.CTkFrame(main)
+        form.pack(fill="x", pady=10)
+        form.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(self, text="Montant:").grid(row=1, column=0, padx=10, pady=10, sticky='e')
-        self.entry_montant = ctk.CTkEntry(self, width=250)
-        self.entry_montant.grid(row=1, column=1, columnspan=2, padx=10, pady=10, sticky='ew')
+        # catégorie
+        ctk.CTkLabel(form, text="Catégorie:", anchor="w").grid(row=0, column=0, padx=5, pady=8, sticky='w')
+        self.combo_categorie = ctk.CTkComboBox(form, width=200, values=[], state="readonly")
+        self.combo_categorie.grid(row=0, column=1, padx=5, pady=8, sticky='ew')
+        self.bouton_ajouter_categorie = ctk.CTkButton(form, text="+", width=30, command=self.ouvrir_fenetre_categorie)
+        self.bouton_ajouter_categorie.grid(row=0, column=2, padx=5, pady=8)
 
-        ctk.CTkLabel(self, text="Description:").grid(row=2, column=0, padx=10, pady=10, sticky='e')
-        self.entry_description = ctk.CTkEntry(self, width=250)
-        self.entry_description.grid(row=2, column=1, columnspan=2, padx=10, pady=10, sticky='ew')
+        # montant
+        ctk.CTkLabel(form, text="Montant:", anchor="w").grid(row=1, column=0, padx=5, pady=8, sticky='w')
+        self.entry_montant = ctk.CTkEntry(form, width=200)
+        self.entry_montant.grid(row=1, column=1, columnspan=2, padx=5, pady=8, sticky='ew')
+        self.entry_montant.bind("<KeyRelease>", lambda e: self.format_montant())
+        self.entry_montant.bind("<FocusOut>", lambda e: self.format_montant())
 
-        self.bouton_enregistrer = ctk.CTkButton(self, text="Enregistrer", fg_color="green", hover_color="#006400", command=self._on_enregistrer_click)
-        self.bouton_enregistrer.grid(row=4, column=1, pady=20, padx=(10, 5), sticky='e')
+        # description
+        ctk.CTkLabel(form, text="Description:", anchor="w").grid(row=2, column=0, padx=5, pady=8, sticky='w')
+        self.entry_description = ctk.CTkEntry(form, width=200)
+        self.entry_description.grid(row=2, column=1, columnspan=2, padx=5, pady=8, sticky='ew')
 
-        self.bouton_annuler = ctk.CTkButton(self, text="Annuler", fg_color="red", hover_color="#8B0000", command=self.annuler)
-        self.bouton_annuler.grid(row=4, column=2, pady=20, padx=(5, 10), sticky='w')
-        
-        self.lbl_user = ctk.CTkLabel(self, text=f"Opérateur : {self.current_user}", font=("Arial", 10))
-        self.lbl_user.grid(row=5, column=0, columnspan=3, pady=5)
+        # boutons
+        button_frame = ctk.CTkFrame(main, fg_color="transparent")
+        button_frame.pack(pady=15)
+        self.bouton_enregistrer = ctk.CTkButton(button_frame, text="Enregistrer", fg_color="#007AFF", hover_color="#005BB5", width=120, command=self._on_enregistrer_click)
+        self.bouton_enregistrer.pack(side="left", padx=10)
+        self.bouton_annuler = ctk.CTkButton(button_frame, text="Annuler", fg_color="#FF3B30", hover_color="#C1271A", width=120, command=self.annuler)
+        self.bouton_annuler.pack(side="left", padx=10)
+
+        self.lbl_user = ctk.CTkLabel(main, text=f"Opérateur : {self.current_user}", font=ctk.CTkFont(size=10))
+        self.lbl_user.pack(pady=(10,0))
 
     def ouvrir_fenetre_categorie(self):
         """Ouvre la fenêtre de catégorie et gère le retour en toute sécurité."""
@@ -118,6 +173,24 @@ class PageDecaissement(ctk.CTkToplevel):
                 self.charger_categories()
         except Exception as e:
             print(f"Erreur lors de la mise à jour : {e}")
+
+    def format_montant(self):
+        """Formate le montant en milliers (format français) et positionne le curseur en fin."""
+        current = self.entry_montant.get()
+        if not current:
+            return
+        cleaned = current.replace('.', '').replace(',', '').replace(' ', '')
+        if not cleaned or not cleaned.isdigit():
+            # conserver ce qui était entré
+            return
+        formatted = ''
+        for i, digit in enumerate(reversed(cleaned)):
+            if i > 0 and i % 3 == 0:
+                formatted = '.' + formatted
+            formatted = digit + formatted
+        self.entry_montant.delete(0, 'end')
+        self.entry_montant.insert(0, formatted)
+        self.entry_montant.icursor(len(formatted))
 
     def _on_enregistrer_click(self):
         """Wrapper pour empêcher les double-clics rapides sur le bouton Enregistrer."""
@@ -381,37 +454,42 @@ class PageDecaissement(ctk.CTkToplevel):
                 messagebox.showwarning("Attention", "Tous les champs doivent être remplis")
                 return
 
-            mtpaye = float(mtpaye_str)
+            # retirer séparateurs et convertir
+            mtpaye = float(mtpaye_str.replace('.', ''))
             typeoperation_id = self.get_type_operation()
             datepmt = datetime.now()
         
             print(f"DEBUG: current_user = '{self.current_user}'")
         
-            # Récupérer l'ID numérique de l'utilisateur
-            self.cursor.execute("SELECT iduser, username FROM tb_users")
-            all_users = self.cursor.fetchall()
-            print(f"DEBUG: Utilisateurs dans la base: {all_users}")
-        
-            self.cursor.execute(
-                "SELECT iduser FROM tb_users WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))", 
-                (self.current_user,)
-            )
-            result = self.cursor.fetchone()
-        
-            if result:
-                iduser = result[0]
-                print(f"DEBUG: iduser trouvé = {iduser}")
+            # si on a déjà l'id depuis la session, on l'utilise directement
+            if getattr(self, 'current_user_id', None):
+                iduser = self.current_user_id
+                print(f"DEBUG: iduser depuis session = {iduser}")
             else:
-                print(f"ATTENTION: Utilisateur '{self.current_user}' introuvable")
-                self.cursor.execute("SELECT iduser FROM tb_users WHERE iduser = 1")
-                default_user = self.cursor.fetchone()
-            
-                if default_user:
-                    iduser = 1
-                    print(f"DEBUG: Utilisation de l'utilisateur par défaut (ID=1)")
+                # Récupérer l'ID numérique de l'utilisateur
+                self.cursor.execute("SELECT iduser, username FROM tb_users")
+                all_users = self.cursor.fetchall()
+                print(f"DEBUG: Utilisateurs dans la base: {all_users}")
+        
+                self.cursor.execute(
+                    "SELECT iduser FROM tb_users WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))", 
+                    (self.current_user,)
+                )
+                result = self.cursor.fetchone()
+                if result:
+                    iduser = result[0]
+                    print(f"DEBUG: iduser trouvé = {iduser}")
                 else:
-                    messagebox.showerror("Erreur", f"Aucun utilisateur trouvé dans la base de données")
-                    return
+                    print(f"ATTENTION: Utilisateur '{self.current_user}' introuvable")
+                    self.cursor.execute("SELECT iduser FROM tb_users WHERE iduser = 1")
+                    default_user = self.cursor.fetchone()
+                    if default_user:
+                        iduser = 1
+                        print(f"DEBUG: Utilisation de l'utilisateur par défaut (ID=1)")
+                    else:
+                        messagebox.showerror("Erreur", f"Aucun utilisateur trouvé dans la base de données")
+                        return
+        
             
             # INSERTION AVEC L'ID UTILISATEUR ET IDMODE = 1 (Espèces)
             query = """
