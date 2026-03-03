@@ -193,6 +193,10 @@
             "PageValidationSalaire"
         ],
         [
+            "Péremption d'article",
+            "PageGestionPeremption"
+        ],
+        [
             "Prix d'article",
             "PagePrixListe"
         ],

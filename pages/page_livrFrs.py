@@ -153,7 +153,7 @@ class PageBonReception(ctk.CTkFrame):
         label_titre_tableau.pack(pady=(5, 5))
         
         # Treeview
-        colonnes = ("Article", "Unité", "Fournisseur", "Qté Livrée", "Prix Unit.", "Montant")
+        colonnes = ("Article", "Unité", "Date péremption", "Fournisseur", "Qté Livrée", "Prix Unit.", "Montant")
         self.tree = ttk.Treeview(frame_tree, columns=colonnes, show="headings", height=12)
         
         for col in colonnes:
@@ -161,6 +161,8 @@ class PageBonReception(ctk.CTkFrame):
             if col == "Article":
                 self.tree.column(col, width=300)
             elif col == "Unité":
+                self.tree.column(col, width=120)
+            elif col == "Date péremption":
                 self.tree.column(col, width=120)
             elif col == "Fournisseur":
                 self.tree.column(col, width=180)
@@ -446,8 +448,15 @@ class PageBonReception(ctk.CTkFrame):
             
             # Récupérer les articles avec qtlivre > 0
             query_details = """
-                SELECT d.id, d.idarticle, a.designation, u.designationunite, 
-                       d.idunite, d.qtlivre, d.punitcmd, COALESCE(f_d.nomfrs, f_c.nomfrs, '') AS nomfrs
+                SELECT d.id,
+                       d.idarticle,
+                       a.designation,
+                       u.designationunite,
+                       d.idunite,
+                       d.qtlivre,
+                       d.punitcmd,
+                       d.dateperemption,
+                       COALESCE(f_d.nomfrs, f_c.nomfrs, '') AS nomfrs
                 FROM tb_commandedetail d
                 INNER JOIN tb_commande c ON d.idcom = c.idcom
                 INNER JOIN tb_article a ON d.idarticle = a.idarticle
@@ -478,26 +487,31 @@ class PageBonReception(ctk.CTkFrame):
             
             # Remplir le treeview
             for detail in details:
-                idcomdetail, idarticle, designation, unite, idunite, qtlivre, punitcmd, nomfrs_ligne = detail
+                # unpack includes new dateperemption field (index 7)
+                (idcomdetail, idarticle, designation, unite,
+                 idunite, qtlivre, punitcmd, dateper, nomfrs_ligne) = detail
                 punitcmd = punitcmd if punitcmd else 0
                 montant = (qtlivre or 0) * punitcmd
-                
+                date_display = dateper.strftime('%d/%m/%Y') if dateper else '-'
+
                 self.tree.insert("", "end", values=(
                     designation,
                     unite,
+                    date_display,
                     nomfrs_ligne or "",
                     self.formater_nombre(qtlivre if qtlivre else 0),
                     self.formater_nombre(punitcmd),
                     self.formater_nombre(montant)
                 ))
-                
+
                 self.items_livraison.append({
                     'idcomdetail': idcomdetail,
                     'idarticle': idarticle,
                     'idunite': idunite,
                     'fournisseur': nomfrs_ligne or "",
                     'qtlivre': qtlivre or 0,
-                    'punitcmd': punitcmd
+                    'punitcmd': punitcmd,
+                    'dateperemption': dateper
                 })
             
             self.calculer_total()
@@ -522,38 +536,31 @@ class PageBonReception(ctk.CTkFrame):
 
         conn = self.connect_db()
         if not conn: return
-    
+
         try:
             cursor = conn.cursor()
             numero_facture = self.entry_factfrs.get().strip()
-            
-            # --- LOGIQUE POUR DATE VIDE ---
-            # Si vous voulez que la date soit optionnelle, vous pouvez ajouter une condition.
-            # Ici, on récupère la date, mais on peut décider qu'elle est NULL 
-            # selon un critère (ex: si une checkbox est décochée).
-            # Sinon, par défaut, on prend la date du calendrier.
+
             date_peremption = None  # Widget non créé
-            
-            # Exemple : Si vous voulez permettre le NULL via un dialogue ou autre, 
-            # vous mettriez date_peremption = None
-            # ------------------------------
 
             if not numero_facture:
                 messagebox.showwarning("Attention", "Veuillez saisir le N° Facture Fournisseur.")
                 return
-            
+
             dateregistre = datetime.now()
             idmag = self.magasins.get(self.combo_magasin.get())
-    
+
             query_insert = """
                 INSERT INTO tb_livraisonfrs 
                 (reflivfrs, idcom, idarticle, idunite, qtlivrefrs, dateregistre, 
-                 typemouvement, idmag, factfrs, iduser, dateperemption)
+                typemouvement, idmag, factfrs, iduser, dateperemption)
                 VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s)
             """
-    
+
+            # Garder trace des items insérés pour les lots (idlivfrs généré)
+            items_avec_peremption = []
+
             for item in self.items_livraison:
-                # On envoie date_peremption. Si c'est None, psycopg2 insérera NULL automatiquement.
                 cursor.execute(query_insert, (
                     self.entry_ref.get(),
                     self.idcom_selectionne,
@@ -564,34 +571,83 @@ class PageBonReception(ctk.CTkFrame):
                     idmag,
                     numero_facture,
                     self.iduser,
-                    date_peremption  
+                    item.get('dateperemption')
                 ))
-                
-            # Widget entry_peremption non créé - toujours NULL
+
+                # ── Si l'item possède une date de péremption, on mémorise pour insertion lot
+                item_date_per = item.get('dateperemption') or date_peremption
+                if item_date_per:
+                    items_avec_peremption.append({
+                        'idarticle': item['idarticle'],
+                        'idunite':   item['idunite'],
+                        'qtlivre':   item['qtlivre'],
+                        'dateperemption': item_date_per,
+                    })
+
             date_peremption = None
-    
+
+            # ── Insertion dans tb_lot_peremption pour chaque item avec péremption ──
+            # Fait AVANT le commit pour rester dans la même transaction.
+            # Si l'insertion de lot échoue, toute la livraison est annulée.
+            if items_avec_peremption:
+                for item_per in items_avec_peremption:
+                    # Priorité = MAX existant pour cet article/unité/magasin + 1
+                    cursor.execute(
+                        """
+                        SELECT COALESCE(MAX(priorite), 0)
+                        FROM tb_lot_peremption
+                        WHERE id_article = %s
+                        AND id_unite   = %s
+                        AND idmag      = %s
+                        AND deleted    = 0
+                        """,
+                        (item_per['idarticle'], item_per['idunite'], idmag)
+                    )
+                    max_prio = cursor.fetchone()[0]
+
+                    cursor.execute(
+                        """
+                        INSERT INTO tb_lot_peremption
+                            (id_article, id_unite, idmag, quantite,
+                            date_peremption, priorite, date_entree,
+                            type_source, note)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'LIVRAISON', %s)
+                        """,
+                        (
+                            item_per['idarticle'],
+                            item_per['idunite'],
+                            idmag,
+                            item_per['qtlivre'],
+                            item_per['dateperemption'],
+                            max_prio + 1,
+                            dateregistre.date(),
+                            f"BL {self.entry_ref.get()} — fact. {numero_facture}",
+                        )
+                    )
+
             conn.commit()
             self.derniere_reflivfrs_enregistree = self.entry_ref.get()
-            
-            # CORRECTION: Réinitialiser le formulaire après un enregistrement réussi
-            messagebox.showinfo("Succès", f"Enregistrement effectué avec succès.\nRéférence: {self.derniere_reflivfrs_enregistree}")
 
-            # Générer automatiquement le Bon de Réception PDF en utilisant le builder central
+            messagebox.showinfo("Succès",
+                f"Enregistrement effectué avec succès.\n"
+                f"Référence: {self.derniere_reflivfrs_enregistree}"
+                + (f"\n{len(items_avec_peremption)} lot(s) de péremption créé(s)."
+                if items_avec_peremption else ""))
+
+            # ── Génération PDF (logique inchangée) ───────────────────────────
             try:
                 data = self.get_data_bon_reception()
                 if data:
-                    # Préparer le dossier de sortie
                     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                    etats_dir = os.path.join(project_dir, "Etats Impression")
+                    etats_dir   = os.path.join(project_dir, "Etats Impression")
                     if not os.path.exists(etats_dir):
                         os.makedirs(etats_dir)
 
-                    filename = os.path.join(etats_dir, f"BR_{self.entry_ref.get().replace('-', '_')}_A5.pdf")
+                    filename = os.path.join(etats_dir,
+                        f"BR_{self.entry_ref.get().replace('-', '_')}_A5.pdf")
 
-                    # Construire table_data à partir des détails récupérés
                     cols = ("Code", "Désignation", "Unité", "Qté", "Fournisseur")
                     rows = []
-                    total_general = 0
                     for detail in data.get('details', []):
                         qte = detail.get('qtlivre', 0) or 0
                         rows.append((
@@ -601,58 +657,48 @@ class PageBonReception(ctk.CTkFrame):
                             qte,
                             detail.get('fournisseur', '')
                         ))
-
                     table_data = (cols, rows)
 
-                    # Opérateur
-                    operateur = data.get('utilisateur', {}).get('prenomuser', '') + ' ' + data.get('utilisateur', {}).get('nomuser', '')
+                    operateur = (data.get('utilisateur', {}).get('prenomuser', '') + ' ' +
+                                data.get('utilisateur', {}).get('nomuser', ''))
                     if not operateur.strip():
                         operateur = str(self.iduser)
 
-                    # Importer et appeler le builder centralisé
                     try:
                         from EtatsPDF_Mouvements import EtatPDFMouvements
-
                         etat = EtatPDFMouvements()
-                        try:
-                            etat.connect_db()
-                        except Exception:
-                            pass
+                        try: etat.connect_db()
+                        except Exception: pass
 
                         success = etat._build_pdf_a5(
                             output_path=filename,
                             titre_entete="BON DE RÉCEPTION",
                             reference=self.entry_ref.get(),
-                            date_operation=data['reception'].get('dateregistre', datetime.now().strftime('%d/%m/%Y')),
+                            date_operation=data['reception'].get('dateregistre',
+                                            datetime.now().strftime('%d/%m/%Y')),
                             magasin=data['reception'].get('magasin', ''),
                             operateur=operateur,
                             table_data=table_data,
-                            description= numero_facture,
+                            description=numero_facture,
                             responsable_1="Le Responsable",
                             responsable_2=data['reception'].get('fournisseur', 'Fournisseur')
                         )
 
-                        try:
-                            etat.close_db()
-                        except Exception:
-                            pass
+                        try: etat.close_db()
+                        except Exception: pass
 
                         if success:
-                            try:
-                                self.open_file(filename)
-                            except Exception:
-                                pass
+                            try: self.open_file(filename)
+                            except Exception: pass
 
                     except Exception as e:
-                        # Ne pas interrompre le flux principal si la génération échoue
                         print(f"Erreur génération PDF automatique Bon de Réception: {e}")
 
             except Exception as e:
                 print(f"Erreur préparation données pour PDF automatique: {e}")
 
-            # Réinitialiser le formulaire pour vider le treeview
             self.reinitialiser_formulaire()
-    
+
         except Exception as e:
             conn.rollback()
             messagebox.showerror("Erreur", f"Erreur lors de l'enregistrement: {str(e)}")
