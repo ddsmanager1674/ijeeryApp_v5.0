@@ -895,6 +895,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 # idmode sélectionné pour cet ensemble de paiements
                 selected_mode_global = mode_combo_global.get() if mode_names else None
                 idmode_sel_global = mode_map.get(selected_mode_global) if selected_mode_global else None
+                observation = f"Paiement crédit client : {self._get_client_name(idclient)}" + (f" (Desc: {observation})" if observation else "")
                 
                 date_pmt = datetime.now()
                 ref_ticket = f"PMTC-{idclient}-{date_pmt.strftime('%Y%m%d%H%M%S')}"

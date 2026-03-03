@@ -529,9 +529,8 @@ class PagePmtFacture(ctk.CTkToplevel):
         description_credit = ""
         if nom_mode_pmt.lower() == "crédit":
             date_echeance = self.cal_echeance.get_date() # Objet datetime.date
-            description_credit = (self.entry_description_credit.get() or "").strip()
-            if not description_credit:
-                description_credit = f"Acceptation du crédit pour la facture {self.refvente}"
+            #description_credit = (self.entry_description_credit.get() or "").strip()
+            description_credit = f"Acceptation du crédit pour la facture {self.refvente} [CL: {self.client}] - Échéance: {date_echeance.strftime('%d/%m/%Y')}"
 
         conn = self.connect_db()
         if not conn: return

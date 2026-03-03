@@ -86,7 +86,8 @@ class PageCaisse(ctk.CTkFrame):
             ("Fournisseur", "#64b5f6"),
             ("Personnel", "#9e9e9e"),
             ("Dépenses", "#f44336"),
-            ("Encaissement", "#4caf50")
+            ("Encaissement", "#4caf50"),
+            ("Paiement Crédit", "#29b6f6")
         ]
         
         for doc, color in docs_config:
@@ -436,24 +437,19 @@ class PageCaisse(ctk.CTkFrame):
         d_str, f_str = date_d.strftime('%Y-%m-%d'), date_f.strftime('%Y-%m-%d')
         
         # Réinitialiser les montants
-        self.montants_docs = {"Client": 0, "Avoir": 0, "Fournisseur": 0, "Personnel": 0, "Dépenses": 0, "Encaissement": 0}
+        self.montants_docs = {"Client": 0, "Avoir": 0, "Fournisseur": 0, "Personnel": 0, "Dépenses": 0, "Encaissement": 0, "Paiement Crédit": 0}
         self.montants_modes = {}
         
         try:
             # Calculer par type de document (Encaissement - Décaissement)
             
-            # Clients (Encaissements) - inclut tb_pmtfacture + tb_pmtcredit
+            # Clients (Encaissements) - tb_pmtfacture
             query_clients = """
                 SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
-                FROM (
-                    SELECT idtypeoperation, mtpaye FROM tb_pmtfacture 
-                    WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idtypeoperation, mtpaye FROM tb_pmtcredit 
-                    WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                ) as clients
+                FROM tb_pmtfacture 
+                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
             """
-            self.cursor.execute(query_clients, [d_str, f_str, d_str, f_str])
+            self.cursor.execute(query_clients, [d_str, f_str])
             result = self.cursor.fetchone()
             self.montants_docs["Client"] = float(result[0]) if result and result[0] else 0
             
@@ -476,6 +472,16 @@ class PageCaisse(ctk.CTkFrame):
             self.cursor.execute(query_fournisseurs, [d_str, f_str])
             result = self.cursor.fetchone()
             self.montants_docs["Fournisseur"] = float(result[0]) if result and result[0] else 0
+            
+            # Paiement Crédit (tb_pmtcredit)
+            query_pmtcredit = """
+                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
+                FROM tb_pmtcredit 
+                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+            """
+            self.cursor.execute(query_pmtcredit, [d_str, f_str])
+            result = self.cursor.fetchone()
+            self.montants_docs["Paiement Crédit"] = float(result[0]) if result and result[0] else 0
             
             # Personnel (avances + salaires)
             query_pers = """
@@ -645,8 +651,8 @@ class PageCaisse(ctk.CTkFrame):
                     print(f"❌ Erreur sur tb_pmtfacture: {e}")
                     self.conn.rollback()
 
-            # 2. tb_pmtcredit (CLIENTS - paiements de crédits clients)
-            if type_doc in ["Tous", "Client"]:
+            # 2. tb_pmtcredit (PAIEMENT CRÉDIT - paiements de crédits clients)
+            if type_doc in ["Tous", "Paiement Crédit"]:
                 query_pmtcredit = f"""
                     SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
                         COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')

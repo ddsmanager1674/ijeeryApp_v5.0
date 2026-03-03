@@ -99,6 +99,11 @@ from pages.page_listeMouvement import PageListeMouvement
 
 from tkinter import messagebox # Import messagebox for logout confirmation
 
+
+from theme import FONTS, FONT_TUPLE, load_roboto, apply_global_font
+
+
+
 def charger_page_dynamique(nom_module, nom_classe, parent_frame, iduser):
     """Charge une classe depuis un fichier .py externe"""
     try:
@@ -218,9 +223,19 @@ class DatabaseManager:
 class App(ctk.CTk):
     def __init__(self, session_data):
         super().__init__()
+
+        load_roboto()           # ← charge les .ttf dans Windows
+        apply_global_font(self) # ← force Roboto sur tous les widgets
+
+        
         self.title("iJerry - Tableau de Bord")
         self.geometry("1200x760")
         self.minsize(900, 560)
+
+        
+
+        
+        # ... reste inchangé
 
         # Responsive state
         self._base_window_width = 1200
