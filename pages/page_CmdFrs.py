@@ -197,13 +197,17 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.entry_ref = ctk.CTkEntry(frame_haut, width=200, state="readonly")
         self.entry_ref.grid(row=0, column=1, padx=10, pady=10)
         
-        # Fournisseur
+        # Fournisseur (Entry + Bouton Recherche)
         ctk.CTkLabel(frame_haut, text="Fournisseur:").grid(row=0, column=2, padx=10, pady=10, sticky="w")
-        self.combo_fournisseur = ctk.CTkComboBox(frame_haut, width=300, state="readonly")
-        self.combo_fournisseur.grid(row=0, column=3, padx=10, pady=10)
+        self.entry_fournisseur = ctk.CTkEntry(frame_haut, width=250, state="readonly")
+        self.entry_fournisseur.grid(row=0, column=3, padx=10, pady=10, sticky="w")
         
-        self.combo_fournisseur.configure(command=self.on_fournisseur_change)
+        btn_search_frs = ctk.CTkButton(frame_haut, text="🔍", width=30,
+                                       command=self.ouvrir_recherche_fournisseur)
+        btn_search_frs.grid(row=0, column=3, columnspan=1, padx=(270, 10), pady=10, sticky="e")
         self.fournisseur_id = None  # Initialisation
+        self.fournisseur_contact = None  # Contact du fournisseur
+        self.fournisseur_adresse = None  # Adresse du fournisseur
 
             
         # Bouton Charger Commande (pour la modification)
@@ -376,8 +380,12 @@ class PageCommandeFrs(ctk.CTkFrame):
             self.btn_modifier_ligne.configure(state="normal")
             self.btn_annuler_selection.configure(state="normal")
             
-    def on_fournisseur_change(self, selection):
-        """Extrait l'ID du fournisseur (ex: '1 - Nom' -> '1')"""
+    def on_fournisseur_change(self, selection=None):
+        """(Obsolète) conserve la compatibilité si un appel externe fournit une valeur
+        mais la sélection est désormais gérée par l'entry et le bouton.  
+        Cette méthode tente simplement de déduire un ID si une chaîne est passée."""
+        if not selection:
+            return
         try:
             if " - " in selection:
                 self.fournisseur_id = selection.split(" - ")[0].strip()
@@ -681,27 +689,189 @@ class PageCommandeFrs(ctk.CTkFrame):
             if conn: conn.close()
     
     def charger_fournisseurs(self):
-        """Charge la liste des fournisseurs"""
+        """Charge la liste des fournisseurs et initialise le premier"""
         conn = self.connect_db()
         if not conn:
             return
             
         try:
             cursor = conn.cursor()
-            query = "SELECT idfrs, nomfrs FROM tb_fournisseur WHERE deleted = 0 ORDER BY nomfrs"
+            query = """SELECT idfrs, nomfrs, contactfrs, adressefrs 
+                      FROM tb_fournisseur 
+                      WHERE deleted = 0 
+                      ORDER BY nomfrs"""
             cursor.execute(query)
             
-            self.fournisseurs = {row[1]: row[0] for row in cursor.fetchall()}
-            self.combo_fournisseur.configure(values=list(self.fournisseurs.keys()))
+            # Stocker les fournisseurs avec toutes les infos
+            self.fournisseurs = {}
+            rows = cursor.fetchall()
+            for row in rows:
+                idfrs, nomfrs, contactfrs, adressefrs = row
+                self.fournisseurs[idfrs] = {
+                    'nom': nomfrs,
+                    'contact': contactfrs or '',
+                    'adresse': adressefrs or ''
+                }
             
-            if self.fournisseurs:
-                self.combo_fournisseur.set(list(self.fournisseurs.keys())[0])
+            # Initialiser avec le premier fournisseur
+            if rows:
+                first_id = rows[0][0]
+                first_name = rows[0][1]
+                self.entry_fournisseur.configure(state="normal")
+                self.entry_fournisseur.delete(0, "end")
+                self.entry_fournisseur.insert(0, first_name)
+                self.entry_fournisseur.configure(state="readonly")
+                self.fournisseur_id = first_id
+                self.fournisseur_contact = rows[0][2] or ''
+                self.fournisseur_adresse = rows[0][3] or ''
             
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors du chargement des fournisseurs: {str(e)}")
         finally:
             if 'cursor' in locals() and cursor: cursor.close()
             if conn: conn.close()
+
+    def ouvrir_recherche_fournisseur(self):
+        """Ouvre une fenêtre pour rechercher et sélectionner un fournisseur"""
+        fenetre = ctk.CTkToplevel(self)
+        fenetre.title("Rechercher un fournisseur")
+        fenetre.geometry("800x400")
+        fenetre.grab_set()
+
+        main_frame = ctk.CTkFrame(fenetre)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        titre = ctk.CTkLabel(main_frame, text="Sélectionner un fournisseur", 
+                            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
+        titre.pack(pady=(0, 10))
+
+        # Cadre de recherche
+        search_frame = ctk.CTkFrame(main_frame)
+        search_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(search_frame, text="🔍 Rechercher:").pack(side="left", padx=5)
+        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Nom ou contact...", width=300)
+        entry_search.pack(side="left", padx=5, fill="x", expand=True)
+
+        # Cadre pour le tableau
+        tree_frame = ctk.CTkFrame(main_frame)
+        tree_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Colonnes: ID (caché), Nom, Contact, Adresse
+        colonnes = ("ID", "Nom", "Contact", "Adresse")
+        tree = ttk.Treeview(tree_frame, columns=colonnes, show='headings', height=12)
+        self._configure_table_alternating_colors(tree)
+        
+        tree.heading("ID", text="ID")
+        tree.heading("Nom", text="Nom")
+        tree.heading("Contact", text="Contact")
+        tree.heading("Adresse", text="Adresse")
+        
+        tree.column("ID", width=0, stretch=False)  # Caché
+        tree.column("Nom", width=150, anchor='w')
+        tree.column("Contact", width=150, anchor='w')
+        tree.column("Adresse", width=300, anchor='w')
+
+        scrollbar = ctk.CTkScrollbar(tree_frame, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        label_count = ctk.CTkLabel(main_frame, text="Nombre de fournisseurs : 0")
+        label_count.pack(pady=5)
+
+        def charger_fournisseurs_liste(filtre=""):
+            """Charge et affiche les fournisseurs dans le tableau"""
+            for item in tree.get_children():
+                tree.delete(item)
+            
+            conn = self.connect_db()
+            if not conn:
+                return
+            
+            try:
+                cursor = conn.cursor()
+                query = """SELECT idfrs, nomfrs, contactfrs, adressefrs 
+                          FROM tb_fournisseur 
+                          WHERE deleted = 0"""
+                params = []
+                
+                if filtre:
+                    query += """ AND (
+                        LOWER(nomfrs) LIKE LOWER(%s) OR 
+                        LOWER(contactfrs) LIKE LOWER(%s)
+                    )"""
+                    params = [f"%{filtre}%", f"%{filtre}%"]
+                
+                query += " ORDER BY nomfrs"
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                for row in rows:
+                    idfrs, nomfrs, contactfrs, adressefrs = row
+                    tree.insert('', 'end', values=(
+                        idfrs,
+                        nomfrs or '',
+                        contactfrs or '',
+                        adressefrs or ''
+                    ))
+                
+                self._refresh_table_alternating_colors(tree)
+                label_count.configure(text=f"Nombre de fournisseurs : {len(rows)}")
+                
+            except Exception as e:
+                messagebox.showerror("Erreur", f"Erreur lors du chargement: {str(e)}")
+            finally:
+                if 'cursor' in locals() and cursor: cursor.close()
+                if conn: conn.close()
+
+        def rechercher(*args):
+            """Affiche les résultats de recherche"""
+            charger_fournisseurs_liste(entry_search.get())
+        
+        entry_search.bind('<KeyRelease>', rechercher)
+
+        def valider_selection():
+            """Valide la sélection et met à jour l'entry_fournisseur"""
+            selection = tree.selection()
+            if not selection:
+                messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur")
+                return
+            
+            values = tree.item(selection[0])['values']
+            frs_id = values[0]
+            frs_nom = values[1]
+            frs_contact = values[2]
+            frs_adresse = values[3]
+            
+            # Mettre à jour les attributs
+            self.fournisseur_id = frs_id
+            self.fournisseur_contact = frs_contact
+            self.fournisseur_adresse = frs_adresse
+            
+            # Mettre à jour l'entry
+            self.entry_fournisseur.configure(state="normal")
+            self.entry_fournisseur.delete(0, "end")
+            self.entry_fournisseur.insert(0, frs_nom)
+            self.entry_fournisseur.configure(state="readonly")
+            
+            fenetre.destroy()
+
+        tree.bind('<Double-Button-1>', lambda e: valider_selection())
+        
+        # Boutons
+        btn_frame = ctk.CTkFrame(main_frame)
+        btn_frame.pack(fill="x")
+        
+        btn_annuler = ctk.CTkButton(btn_frame, text="❌ Annuler", command=fenetre.destroy, 
+                                   fg_color="#d32f2f", hover_color="#b71c1c")
+        btn_annuler.pack(side="left", padx=5, pady=5)
+        
+        btn_valider = ctk.CTkButton(btn_frame, text="✅ Valider", command=valider_selection, 
+                                   fg_color="#2e7d32", hover_color="#1b5e20")
+        btn_valider.pack(side="right", padx=5, pady=5)
+        
+        # Charger la liste complète à l'ouverture
+        charger_fournisseurs_liste()
 
     def ouvrir_recherche_commande(self):
         """Ouvre une fenêtre pour rechercher et charger une commande existante"""
@@ -907,7 +1077,11 @@ class PageCommandeFrs(ctk.CTkFrame):
             self.entry_ref.configure(state="readonly")
         
             if commande[4]:
-                self.combo_fournisseur.set(commande[4])
+                self.entry_fournisseur.configure(state="normal")
+                self.entry_fournisseur.delete(0, "end")
+                self.entry_fournisseur.insert(0, commande[4])
+                self.entry_fournisseur.configure(state="readonly")
+                self.fournisseur_id = commande[3]  # Stocker l'ID du fournisseur
             
             for detail in details:
                 # Détail avec fournisseur porté par la ligne
@@ -1118,8 +1292,9 @@ class PageCommandeFrs(ctk.CTkFrame):
             messagebox.showwarning("Attention", "Veuillez sélectionner un article.")
             return
         
-        frs_nom = self.combo_fournisseur.get()
-        idfrs = self.fournisseurs.get(frs_nom)
+        frs_nom = self.entry_fournisseur.get()
+        idfrs = self.fournisseur_id
+        
         if not idfrs:
             messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur.")
             return
@@ -1240,8 +1415,8 @@ class PageCommandeFrs(ctk.CTkFrame):
             messagebox.showwarning("Attention", "La commande ne contient aucune ligne.")
             return
 
-        frs_nom = self.combo_fournisseur.get()
-        idfrs = self.fournisseurs.get(frs_nom)
+        frs_nom = self.entry_fournisseur.get()
+        idfrs = self.fournisseur_id
     
         if not idfrs:
             messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur.")
@@ -1477,7 +1652,12 @@ class PageCommandeFrs(ctk.CTkFrame):
         if not conn: return
     
         info_societe = None
-        fournisseur_info = {"nom": self.combo_fournisseur.get(), "contact": "N/A", "adresse": "N/A"}
+        # préparer informations fournisseur à partir de l'entry ou variables
+        fournisseur_info = {
+            "nom": self.entry_fournisseur.get() if hasattr(self, 'entry_fournisseur') else "",
+            "contact": self.fournisseur_contact if hasattr(self, 'fournisseur_contact') else "N/A",
+            "adresse": self.fournisseur_adresse if hasattr(self, 'fournisseur_adresse') else "N/A"
+        }
 
         try:
             cursor = conn.cursor()
@@ -1499,7 +1679,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                 )
 
             # Récupération des infos fournisseur détaillées
-            idfrs = self.fournisseurs.get(self.combo_fournisseur.get())
+            idfrs = self.fournisseur_id
             if idfrs:
                 cursor.execute("SELECT nomfrs, contactfrs, adressefrs FROM tb_fournisseur WHERE idfrs = %s", (idfrs,))
                 row_frs = cursor.fetchone()

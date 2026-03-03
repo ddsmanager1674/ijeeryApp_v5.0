@@ -426,46 +426,6 @@ class PageArticleMouvement(ctk.CTkFrame):
         except:
             return "0,00"
     
-    def _update_label_total(self):
-        """Met à jour le label avec les informations dynamiques de filtrage"""
-        # Récupérer les filtres actuels
-        type_mouvement = self.combo_type.get()
-        magasin_selection = self.combo_magasin.get()
-        
-        # Calculer les sommes du tableau visible
-        somme_entree = 0.0
-        somme_sortie = 0.0
-        
-        for item_id in self.tree.get_children():
-            values = self.tree.item(item_id, 'values')
-            if len(values) >= 8:
-                # Index 6: Entrée, Index 7: Sortie
-                entree_str = str(values[6])
-                sortie_str = str(values[7])
-                
-                # Convertir en nombre (remplacer les espaces et virgules)
-                if entree_str != "-":
-                    try:
-                        entree_val = float(entree_str.replace(' ', '').replace(',', '.'))
-                        somme_entree += entree_val
-                    except:
-                        pass
-                
-                if sortie_str != "-":
-                    try:
-                        sortie_val = float(sortie_str.replace(' ', '').replace(',', '.'))
-                        somme_sortie += sortie_val
-                    except:
-                        pass
-        
-        # Formater les sommes
-        somme_entree_formatted = self.formater_nombre(somme_entree)
-        somme_sortie_formatted = self.formater_nombre(somme_sortie)
-        
-        # Mettre à jour le label
-        label_text = f"Mouvement : {type_mouvement}, Magasin: {magasin_selection} | Entrée : {somme_entree_formatted} ; Sortie : {somme_sortie_formatted}"
-        self.label_total.configure(text=label_text)
-    
     def _adjust_column_widths(self):
         """Ajuste automatiquement la largeur des colonnes selon leur contenu"""
         import tkinter.font as tkFont
@@ -1494,11 +1454,9 @@ class PageArticleMouvement(ctk.CTkFrame):
             # Sauvegarder la liste complète pour le filtrage côté client
             self.full_display_rows = rows_to_display
             self._original_rows_pending = list(self.rows_pending)  # Sauvegarder les rows_pending originaux
+            self.label_total.configure(text=f"Nombre total de documents: {len(rows_to_display)}")
             
             cursor.close()
-            
-            # Mettre à jour le label avec les informations dynamiques
-            self._update_label_total()
             
             # Ajuster la largeur des colonnes selon le contenu
             self._adjust_column_widths()
@@ -1552,8 +1510,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                 item_id = self.tree.insert("", "end", values=row, tags=(tag,))
                 self.tree_items.append(item_id)
             
-            # Mettre à jour le label avec les informations dynamiques
-            self._update_label_total()
+            self.label_total.configure(text=f"Nombre total de documents: {len(rows)}")
             
             # Restaurer les rows_pending originaux
             self.rows_pending = list(original_pending)
@@ -1584,8 +1541,14 @@ class PageArticleMouvement(ctk.CTkFrame):
             item_id = self.tree.insert("", "end", values=row, tags=(tag,))
             self.tree_items.append(item_id)
 
-            # Mettre à jour le label avec les informations dynamiques
-            self._update_label_total()
+        self.label_total.configure(text=f"Nombre total de documents: {len(filtered)} (filtré)")
+        
+        # Créer une nouvelle liste rows_pending SEULEMENT pour les lignes filtrées
+        filtered_pending = [original_pending[idx] for idx in filtered_indices if idx < len(original_pending)]
+        
+        # Mettre à jour les indices dans rows_pending pour correspondre aux nouveaux item_ids
+        self.rows_pending = []
+        for new_idx, orig_idx in enumerate(filtered_indices):
             if orig_idx < len(original_pending):
                 # Copier l'entrée et mettre à jour l'index
                 pending_info = original_pending[orig_idx].copy()
