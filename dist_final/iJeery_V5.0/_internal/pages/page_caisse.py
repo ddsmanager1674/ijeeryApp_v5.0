@@ -60,6 +60,9 @@ class PageCaisse(ctk.CTkFrame):
         
         # Mapping inverse pour retrouver l'ID rapidement
         self.mode_bd_to_id = {}
+        
+        # Liste pour stocker les données du tableau avant filtrage
+        self.donnees_tableau = []
 
         # Connexion à la base de données
         self.conn = self.connect_db()
@@ -115,7 +118,7 @@ class PageCaisse(ctk.CTkFrame):
         # self.label_solde_global.pack(side="left", padx=20)
 
         self.frame_filtre = ctk.CTkFrame(self.frame_top, fg_color="#f5f5f5")
-        self.frame_filtre.pack(side="left", padx=20)
+        self.frame_filtre.pack(side="left", padx=20, fill="x", expand=True)
 
         self.entry_debut = DateEntry(self.frame_filtre, width=12, background='darkblue', date_pattern='dd/mm/yyyy')
         self.entry_debut.pack(side="left", padx=5)
@@ -132,6 +135,22 @@ class PageCaisse(ctk.CTkFrame):
             command=self.toggle_cumul
         )
         self.check_cumul.pack(side="left", padx=10)
+        
+        # Label Recherche avec icone
+        self.label_recherche = ctk.CTkLabel(
+            self.frame_filtre, text="Recherche 🔍 :", 
+            text_color="#000", font=("Arial", 10)
+        )
+        self.label_recherche.pack(side="left", padx=(20, 5))
+        
+        # Barre de recherche
+        self.entry_recherche = ctk.CTkEntry(
+            self.frame_filtre,
+            placeholder_text="Entrer un element à recherché dans le tableau de caisse",
+            height=32
+        )
+        self.entry_recherche.pack(side="left", padx=5, fill="x", expand=True)
+        self.entry_recherche.bind("<KeyRelease>", self.filtrer_tableau_recherche)
 
         # ---- TREEVIEW ----
         self.colonnes = ("Date", "Référence", "Description", "Encaissement", "Décaissement", "Cumul", "Mode", "Utilisateur")
@@ -262,6 +281,44 @@ class PageCaisse(ctk.CTkFrame):
         else:
             self.filtre_mode_actif = mode
         self.appliquer_filtres()
+    
+    def filtrer_tableau_recherche(self, event=None):
+        """Filtre le tableau en temps réel selon le texte de recherche"""
+        recherche = self.entry_recherche.get().strip().lower()
+        
+        # Vider le tableau
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        if not recherche:
+            # Si la recherche est vide, réafficher toutes les données
+            for i, row in enumerate(self.donnees_tableau):
+                tag = 'even' if (i % 2) else 'odd'
+                try:
+                    self.tree.insert("", "end", values=row, tags=(tag,))
+                except TypeError:
+                    self.tree.insert("", "end", values=row)
+            return
+        
+        # Filtrer les lignes qui contiennent le texte de recherche
+        lignes_filtrees = []
+        for row in self.donnees_tableau:
+            # Vérifier si le texte de recherche est dans l'une des colonnes
+            match = False
+            for cell in row:
+                if recherche in str(cell).lower():
+                    match = True
+                    break
+            if match:
+                lignes_filtrees.append(row)
+        
+        # Réafficher les lignes filtrées
+        for i, row in enumerate(lignes_filtrees):
+            tag = 'even' if (i % 2) else 'odd'
+            try:
+                self.tree.insert("", "end", values=row, tags=(tag,))
+            except TypeError:
+                self.tree.insert("", "end", values=row)
 
     def toggle_cumul(self):
         """Toggle la visibilité de la colonne Cumul et recalcule les données."""
@@ -767,6 +824,7 @@ class PageCaisse(ctk.CTkFrame):
             
             all_ops.sort(key=get_datetime, reverse=True)
             self.donnees_pour_pdf = []
+            self.donnees_tableau = []
             self.total_enc_periode = 0
             self.total_dec_periode = 0
 
@@ -818,6 +876,7 @@ class PageCaisse(ctk.CTkFrame):
                     self.tree.insert("", "end", values=vals)
 
                 self.donnees_pour_pdf.append(list(vals))
+                self.donnees_tableau.append(vals)
 
             self.label_total_enc.configure(text=f"Total Encaissement: {self.format_montant(self.total_enc_periode)} Ar")
             self.label_total_dec.configure(text=f"Total Décaissement: {self.format_montant(self.total_dec_periode)} Ar")

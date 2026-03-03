@@ -4,7 +4,14 @@ from tkcalendar import DateEntry
 import psycopg2
 import json
 from datetime import datetime
+import sys
+import os
+import threading
 from resource_utils import get_config_path, get_session_path, safe_file_read
+
+# Ajouter le répertoire parent au chemin pour importer stock_manager
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from stock_manager import StockManager
 
 
 class FenetreRechercheArticle(ctk.CTkToplevel):
@@ -225,6 +232,12 @@ class PageArticleMouvement(ctk.CTkFrame):
         # Variables d'affichage
         self.selected_idarticle = None
         self.selected_article_name = None
+        
+        # Variables pour le chargement des stocks en arrière-plan
+        self.stock_thread = None
+        self.thread_stop_event = threading.Event()
+        self.rows_pending = []  # Liste des lignes en attente de calcul de stock
+        self.tree_items = []    # Liste des item_ids du treeview (synchronisée avec rows_pending)
 
         # Création interface
         self.create_widgets()
@@ -284,6 +297,121 @@ class PageArticleMouvement(ctk.CTkFrame):
             messagebox.showerror("Erreur d'encodage", f"Problème d'encodage du fichier de configuration : {err}")
             return None
     
+    def get_stock_reel(self, idarticle, idunite, idmagasin, datetime_cible, stock_manager=None, close_conn=True):
+        """
+        Récupère le stock réel à une date/heure précise en utilisant StockManager.
+        Retourne la valeur formatée ou '-' si impossible.
+        
+        Args:
+            idarticle, idunite, idmagasin, datetime_cible: paramètres du stock
+            stock_manager: StockManager instance optionnel (si None, en crée un nouveau)
+            close_conn: si True, ferme la connexion après (ignoré si stock_manager est passé)
+        """
+        try:
+            # Si idmagasin est -1, on ne peut pas calculer (tous les magasins)
+            if idmagasin == -1 or idmagasin is None:
+                return '-'
+            
+            # Créer ou utiliser le StockManager fourni
+            created_sm = False
+            if stock_manager is None:
+                with open(get_config_path('config.json')) as f:
+                    config = json.load(f)
+                    db_config = config['database']
+                
+                stock_manager = StockManager(
+                    host=db_config['host'],
+                    port=db_config['port'],
+                    dbname=db_config['database'],
+                    user=db_config['user'],
+                    password=db_config['password']
+                )
+                created_sm = True
+            
+            # Appeler la fonction pour obtenir le stock à la date précise
+            resultat = stock_manager.get_stock_a_date_precise(
+                idarticle=idarticle,
+                idunite=idunite,
+                idmagasin=idmagasin,
+                datetime_cible=datetime_cible
+            )
+            
+            # Fermer la connexion seulement si on l'a créée
+            if created_sm and close_conn:
+                stock_manager.fermer_connexion()
+            
+            if resultat and 'stock_dans_unite' in resultat:
+                stock_value = float(resultat['stock_dans_unite'])
+                return self.formater_nombre(stock_value)
+            else:
+                return '-'
+        
+        except Exception as e:
+            print(f"ERREUR lors du calcul du stock: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return '-'
+    
+    def _charger_stocks_background(self):
+        """
+        Calcule les stocks en arrière-plan dans un thread séparé.
+        Met à jour progressivement les lignes du treeview.
+        Réutilise une seule connexion pour tous les calculs.
+        """
+        try:
+            # Créer une connexion unique que on réutilisera pour tous les calculs
+            with open(get_config_path('config.json')) as f:
+                config = json.load(f)
+                db_config = config['database']
+            
+            stock_manager = StockManager(
+                host=db_config['host'],
+                port=db_config['port'],
+                dbname=db_config['database'],
+                user=db_config['user'],
+                password=db_config['password']
+            )
+            
+            # Boucler sur les lignes en attente
+            for pending_info in self.rows_pending:
+                # Vérifier si on doit arrêter le thread
+                if self.thread_stop_event.is_set():
+                    break
+                
+                idx = pending_info['index']
+                
+                # Vérifier que l'index est valide
+                if idx < len(self.tree_items):
+                    item_id = self.tree_items[idx]
+                    
+                    # Calculer le stock réel (réutilisant la même connexion)
+                    stock_value = self.get_stock_reel(
+                        idarticle=pending_info['idarticle'],
+                        idunite=pending_info['idunite'],
+                        idmagasin=pending_info['idmagasin'],
+                        datetime_cible=pending_info['datetime_cible'],
+                        stock_manager=stock_manager,
+                        close_conn=False  # Ne pas fermer, on la réutilise
+                    )
+                    
+                    # Obtenir les valeurs actuelles
+                    current_values = list(self.tree.item(item_id, 'values'))
+            
+                    
+                    if len(current_values) > 8:
+                        current_values[8] = stock_value
+                        
+                        # Mettre à jour via after() pour être thread-safe
+                        self.after(0, lambda cvals=current_values, iid=item_id: self.tree.item(iid, values=cvals))
+            
+            # Fermer la connexion une seule fois à la fin
+            stock_manager.fermer_connexion()
+        
+        except Exception as e:
+            print(f"ERREUR lors du calcul des stocks en arrière-plan: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
     def formater_nombre(self, nombre):
         """Formate un nombre avec séparateur de milliers (1 000,00)"""
         try:
@@ -297,6 +425,85 @@ class PageArticleMouvement(ctk.CTkFrame):
             return f"{str_entiere},{str_decimale}"
         except:
             return "0,00"
+    
+    def _update_label_total(self):
+        """Met à jour le label avec les informations dynamiques de filtrage"""
+        # Récupérer les filtres actuels
+        type_mouvement = self.combo_type.get()
+        magasin_selection = self.combo_magasin.get()
+        
+        # Calculer les sommes du tableau visible
+        somme_entree = 0.0
+        somme_sortie = 0.0
+        
+        for item_id in self.tree.get_children():
+            values = self.tree.item(item_id, 'values')
+            if len(values) >= 8:
+                # Index 6: Entrée, Index 7: Sortie
+                entree_str = str(values[6])
+                sortie_str = str(values[7])
+                
+                # Convertir en nombre (remplacer les espaces et virgules)
+                if entree_str != "-":
+                    try:
+                        entree_val = float(entree_str.replace(' ', '').replace(',', '.'))
+                        somme_entree += entree_val
+                    except:
+                        pass
+                
+                if sortie_str != "-":
+                    try:
+                        sortie_val = float(sortie_str.replace(' ', '').replace(',', '.'))
+                        somme_sortie += sortie_val
+                    except:
+                        pass
+        
+        # Formater les sommes
+        somme_entree_formatted = self.formater_nombre(somme_entree)
+        somme_sortie_formatted = self.formater_nombre(somme_sortie)
+        
+        # Mettre à jour le label
+        label_text = f"Mouvement : {type_mouvement}, Magasin: {magasin_selection} | Entrée : {somme_entree_formatted} ; Sortie : {somme_sortie_formatted}"
+        self.label_total.configure(text=label_text)
+    
+    def _adjust_column_widths(self):
+        """Ajuste automatiquement la largeur des colonnes selon leur contenu"""
+        import tkinter.font as tkFont
+        
+        # Créer une police pour mesurer la largeur du texte
+        font = tkFont.Font(font=('Segoe UI', 8))
+        
+        # Colonnes à ajuster (exclure les colonnes cachées)
+        visible_columns = [
+            col for col in self.tree['columns'] 
+            if col not in ["#", "idArticle", "idUnite", "idMagasin"]
+        ]
+        
+        for col in visible_columns:
+            # Obtenir le texte du heading
+            heading_text = self.tree.heading(col)['text']
+            max_width = font.measure(heading_text) + 15
+            
+            # Itérer sur les premiers items visibles (optimisation performance)
+            all_items = self.tree.get_children()
+            sample_items = all_items[:50]  # Examiner seulement les 50 premiers
+            
+            for item_id in sample_items:
+                item_values = self.tree.item(item_id, 'values')
+                col_index = list(self.tree['columns']).index(col)
+                
+                if col_index < len(item_values):
+                    cell_text = str(item_values[col_index])
+                    cell_width = font.measure(cell_text) + 15
+                    max_width = max(max_width, cell_width)
+            
+            # Limiter la largeur entre un minimum et un maximum raisonnable
+            min_width = 60
+            max_width_limit = 400
+            final_width = max(min_width, min(max_width, max_width_limit))
+            
+            # Appliquer la largeur calculée
+            self.tree.column(col, width=int(final_width))
     
     def get_unite_hierarchy(self, conn, idarticle):
         """Récupère la hiérarchie complète des unités pour un article"""
@@ -652,7 +859,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                  background=[('selected', '#0d47a1')])
         
         # Treeview
-        columns = ("Date", "Référence", "Type", "Désignation", "Unité", "Entrée", "Sortie", "Magasin", "Utilisateur")
+        columns = ("#", "Date", "Référence", "Type", "Désignation", "Unité", "Entrée", "Sortie", "Stock", "Magasin", "Description", "idArticle", "idUnite", "idMagasin")
         self.tree = ttk.Treeview(
             tree_frame,
             columns=columns,
@@ -667,6 +874,7 @@ class PageArticleMouvement(ctk.CTkFrame):
         
         # Configuration des colonnes
         column_widths = {
+            "#": 0,
             "Date": 160,
             "Référence": 120,
             "Type": 120,
@@ -674,13 +882,23 @@ class PageArticleMouvement(ctk.CTkFrame):
             "Unité": 100,
             "Entrée": 100,
             "Sortie": 100,
-            "Magasin": 150,
-            "Utilisateur": 120
+            "Stock": 120,
+            "Magasin": 70,
+            "Description": 250,
+            "idArticle": 0,  # Hidden
+            "idUnite": 0,    # Hidden
+            "idMagasin": 0   # Hidden
         }
         
         for col in columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=column_widths.get(col, 100), anchor="center")
+            # Masquer les colonnes (largeur 0)
+            if col in ["#", "idArticle", "idUnite", "idMagasin"]:
+                self.tree.heading(col, text=col)
+                self.tree.column(col, width=0, stretch="no")
+            else:
+                self.tree.heading(col, text=col)
+                width = column_widths.get(col, 100)
+                self.tree.column(col, width=width, anchor="w")  # Aligner à gauche
         
         self.tree.grid(row=0, column=0, sticky="nsew")
         
@@ -754,12 +972,19 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(lf.idmag, -1),
+                    COALESCE('[FRS: ' || frs.nomfrs || ' , ref. Commande: ' || c.refcom || '] ' || COALESCE(lf.reflivfrs, ''), '')
                 FROM tb_livraisonfrs lf
                 INNER JOIN tb_unite u ON lf.idunite = u.idunite
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN tb_magasin m ON lf.idmag = m.idmag
                 LEFT JOIN tb_users usr ON lf.iduser = usr.iduser
+                LEFT JOIN tb_commande c ON lf.idcom = c.idcom
+                LEFT JOIN tb_commandedetail cd ON c.idcom = cd.idcom AND cd.idarticle = a.idarticle
+                LEFT JOIN tb_fournisseur frs ON cd.idfrs = frs.idfrs
                 WHERE DATE(lf.dateregistre) BETWEEN %s AND %s
                 AND lf.deleted = 0
             """
@@ -789,7 +1014,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(sd.idmag, -1),
+                    COALESCE(sd.motif, '')
                 FROM tb_sortie s
                 INNER JOIN tb_sortiedetail sd ON s.id = sd.idsortie
                 INNER JOIN tb_unite u ON sd.idunite = u.idunite
@@ -825,13 +1054,19 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(vd.idmag, -1),
+                    '[CL: ' || COALESCE(cl.nomcli, 'N/A') || '] vente ' || COALESCE(mp.modedepaiement, 'N/A') || ' validée!'
                 FROM tb_vente v
                 INNER JOIN tb_ventedetail vd ON v.id = vd.idvente
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN tb_magasin m ON vd.idmag = m.idmag
                 LEFT JOIN tb_users usr ON v.iduser = usr.iduser
+                LEFT JOIN tb_client cl ON v.idclient = cl.idclient
+                LEFT JOIN tb_modepaiement mp ON v.idmode = mp.idmode
                 WHERE DATE(v.dateregistre) BETWEEN %s AND %s
                 AND v.deleted = 0 AND vd.deleted = 0
                 AND v.statut = 'VALIDEE'
@@ -863,7 +1098,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(td.idmagsortie, -1),
+                    COALESCE(td.description, '')
                 FROM tb_transfert t
                 INNER JOIN tb_transfertdetail td ON t.idtransfert = td.idtransfert
                 INNER JOIN tb_unite u ON td.idunite = u.idunite
@@ -898,7 +1137,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(td.idmagentree, -1),
+                    COALESCE(td.description, '')
                 FROM tb_transfert t
                 INNER JOIN tb_transfertdetail td ON t.idtransfert = td.idtransfert
                 INNER JOIN tb_unite u ON td.idunite = u.idunite
@@ -935,7 +1178,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(i.idmag, -1),
+                    COALESCE(i.observation, '')
                 FROM tb_inventaire i
                 INNER JOIN tb_unite u ON i.codearticle = u.codearticle
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
@@ -969,7 +1216,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(ad.idmag, -1),
+                    COALESCE(av.observation, '')
                 FROM tb_avoir av
                 INNER JOIN tb_avoirdetail ad ON av.id = ad.idavoir
                 INNER JOIN tb_unite u ON ad.idunite = u.idunite
@@ -1005,7 +1256,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(cid.idmag, -1),
+                    COALESCE(cid.observation, '')
                 FROM tb_consommationinterne ci
                 INNER JOIN tb_consommationinterne_details cid ON ci.id = cid.idconsommation
                 INNER JOIN tb_unite u ON cid.idunite = u.idunite
@@ -1041,7 +1296,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(dcs.idmagasin, -1),
+                    COALESCE(chg.note, '')
                 FROM tb_changement chg
                 INNER JOIN tb_detailchange_sortie dcs ON chg.idchg = dcs.idchg
                 INNER JOIN tb_unite u ON dcs.idunite = u.idunite
@@ -1075,7 +1334,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                     COALESCE(m.designationmag, 'N/A'),
                     COALESCE(usr.username, 'N/A'),
                     u.idunite,
-                    u.codearticle
+                    u.codearticle,
+                    a.idarticle,
+                    u.idunite as idunite_dup,
+                    COALESCE(dce.idmagasin, -1),
+                    COALESCE(chg.note, '')
                 FROM tb_changement chg
                 INNER JOIN tb_detailchange_entree dce ON chg.idchg = dce.idchg
                 INNER JOIN tb_unite u ON dce.idunite = u.idunite
@@ -1166,7 +1429,9 @@ class PageArticleMouvement(ctk.CTkFrame):
             
             # Unified flat display: insert each movement as a single row (no per-unit grouping)
             rows_to_display = []
-            for mouv in mouvements:
+            self.rows_pending = []  # Réinitialiser la liste des lignes en attente
+            
+            for idx, mouv in enumerate(mouvements, 1):
                 date_format = mouv[0].strftime('%d/%m/%Y %H:%M:%S') if mouv[0] else ""
                 reference = mouv[1] or ""
                 article_designation = mouv[2] or ""
@@ -1176,13 +1441,32 @@ class PageArticleMouvement(ctk.CTkFrame):
                 magasin_display = mouv[6] or ""
                 username = mouv[7] or ""
                 idunite = mouv[8]
+                idarticle = mouv[10]  # Index 10: a.idarticle
+                idmag = mouv[12]      # Index 12: idmag
+                description = mouv[13] if mouv[13] else "-"  # Index 13: description
 
                 # Récupérer la désignation de l'unité
                 cursor.execute("SELECT designationunite FROM tb_unite WHERE idunite = %s", (idunite,))
                 result = cursor.fetchone()
                 unite_display = result[0] if result else ""
 
+                # Préparation de la valeur temporaire pour Stock (affichera "En cours..." le temps du calcul)
+                stock_value = "En cours..."
+                
+                # Stocker les infos nécessaires pour le calcul du stock en arrière-plan
+                datetime_cible = mouv[0].strftime('%Y-%m-%d %H:%M:%S') if mouv[0] else ""
+                self.rows_pending.append({
+                    'index': idx - 1,  # Index dans la liste
+                    'idarticle': idarticle,
+                    'idunite': idunite,
+                    'idmagasin': int(idmag) if idmag != -1 else -1,
+                    'datetime_cible': datetime_cible,
+                    'unite_display': unite_display  # Ajouter la désignation de l'unité
+                })
+
+                
                 row_values = (
+                    str(idx),  # Index number
                     date_format,
                     reference,
                     type_doc_display,
@@ -1190,22 +1474,37 @@ class PageArticleMouvement(ctk.CTkFrame):
                     unite_display,
                     '-' if entree == 0 else self.formater_nombre(entree),
                     '-' if sortie == 0 else self.formater_nombre(sortie),
+                    stock_value,  # Valeur temporaire
                     magasin_display,
-                    username
+                    description,  # Description
+                    str(idarticle),  # Hidden: idArticle
+                    str(idunite),    # Hidden: idUnite
+                    str(idmag)       # Hidden: idMagasin
                 )
 
                 rows_to_display.append(row_values)
 
-            # Insérer toutes les lignes dans le treeview
+            # Insérer toutes les lignes dans le treeview et stocker les item_ids
+            self.tree_items = []
             for idx, row in enumerate(rows_to_display):
                 tag = "even" if idx % 2 == 0 else "odd"
-                self.tree.insert("", "end", values=row, tags=(tag,))
+                item_id = self.tree.insert("", "end", values=row, tags=(tag,))
+                self.tree_items.append(item_id)
 
             # Sauvegarder la liste complète pour le filtrage côté client
             self.full_display_rows = rows_to_display
-            self.label_total.configure(text=f"Nombre total de documents: {len(rows_to_display)}")
+            self._original_rows_pending = list(self.rows_pending)  # Sauvegarder les rows_pending originaux
             
             cursor.close()
+            
+            # Mettre à jour le label avec les informations dynamiques
+            self._update_label_total()
+            
+            # Ajuster la largeur des colonnes selon le contenu
+            self._adjust_column_widths()
+            
+            # Lancer le calcul des stocks en arrière-plan dans un thread
+            self._relancer_calcul_stocks_filtres()
             
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur lors du chargement des mouvements: {err}")
@@ -1214,24 +1513,60 @@ class PageArticleMouvement(ctk.CTkFrame):
         finally:
             conn.close()
 
+    def _relancer_calcul_stocks_filtres(self):
+        """
+        Arrête le thread de calcul précédent et relance un nouveau avec les rows_pending actuels.
+        Cette méthode est appelée après load_mouvements() ou après un filtrage.
+        """
+        if self.rows_pending:
+            # Arrêter le thread précédent si en cours
+            if self.stock_thread and self.stock_thread.is_alive():
+                self.thread_stop_event.set()
+                self.stock_thread.join(timeout=1)
+            
+            # Créer un nouvel événement d'arrêt
+            self.thread_stop_event.clear()
+            
+            # Démarrer le nouveau thread
+            self.stock_thread = threading.Thread(
+                target=self._charger_stocks_background,
+                daemon=True
+            )
+            self.stock_thread.start()
+    
     def filter_tree_by_text(self, event=None):
         """Filtre le treeview côté client selon le texte saisi (toutes colonnes)."""
         search = self.entry_recherche_article.get().strip().lower()
         rows = getattr(self, 'full_display_rows', [])
+        original_pending = getattr(self, '_original_rows_pending', [])
 
         # Vider le treeview
         for item in self.tree.get_children():
             self.tree.delete(item)
 
         if not search:
+            # Réafficher tous les mouvements
+            self.tree_items = []
             for idx, row in enumerate(rows):
                 tag = "even" if idx % 2 == 0 else "odd"
-                self.tree.insert("", "end", values=row, tags=(tag,))
-            self.label_total.configure(text=f"Nombre total de documents: {len(rows)}")
+                item_id = self.tree.insert("", "end", values=row, tags=(tag,))
+                self.tree_items.append(item_id)
+            
+            # Mettre à jour le label avec les informations dynamiques
+            self._update_label_total()
+            
+            # Restaurer les rows_pending originaux
+            self.rows_pending = list(original_pending)
+            
+            # Relancer le calcul des stocks pour TOUS les mouvements
+            self._relancer_calcul_stocks_filtres()
             return
 
+        # Filtrer les lignes par texte
         filtered = []
-        for row in rows:
+        filtered_indices = []
+        
+        for row_idx, row in enumerate(rows):
             # Vérifier si le texte est présent dans une des colonnes
             match = False
             for cell in row:
@@ -1240,12 +1575,28 @@ class PageArticleMouvement(ctk.CTkFrame):
                     break
             if match:
                 filtered.append(row)
+                filtered_indices.append(row_idx)
 
+        # Réinsérer les lignes filtrées dans le treeview
+        self.tree_items = []
         for idx, row in enumerate(filtered):
             tag = "even" if idx % 2 == 0 else "odd"
-            self.tree.insert("", "end", values=row, tags=(tag,))
+            item_id = self.tree.insert("", "end", values=row, tags=(tag,))
+            self.tree_items.append(item_id)
 
-        self.label_total.configure(text=f"Nombre total de documents: {len(filtered)} (filtré)")
+            # Mettre à jour le label avec les informations dynamiques
+            self._update_label_total()
+            if orig_idx < len(original_pending):
+                # Copier l'entrée et mettre à jour l'index
+                pending_info = original_pending[orig_idx].copy()
+                pending_info['index'] = new_idx
+                self.rows_pending.append(pending_info)
+        
+        # Ajuster la largeur des colonnes selon le contenu filtré
+        self._adjust_column_widths()
+        
+        # Relancer le calcul des stocks SEULEMENT pour les lignes filtrées
+        self._relancer_calcul_stocks_filtres()
 
 
 # Test de la classe (optionnel)
