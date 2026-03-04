@@ -1535,29 +1535,52 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
             elements.append(infos_credit)
             elements.append(Spacer(1, 2 * mm))
 
-            columns = ["Reference", "Nom Client", "Montant Payé"]
+            columns = ["Reference", "Nom Client", "Montant"]
             row_data = [[refpmt, client_nom, self._formater_nombre(montant) + " Ar"]]
+
+            # Calculer le crédit restant du client après déduction du montant payé
+            try:
+                _, _, _, total_restant, _ = self._compute_credit_status_fifo(idclient)
+            except Exception:
+                total_restant = 0
+
+            # Ligne footer qui fusionne les deux premières colonnes et affiche le reste
+            footer_row = ["Reste de Crédit", "", self._formater_nombre(total_restant) + " Ar"]
+
             table_width = usable_width * 0.95
             col_widths = [table_width * 0.25, table_width * 0.43, table_width * 0.32]
-            table_data = [columns] + row_data
+            table_data = [columns] + row_data + [footer_row]
 
             credit_table = Table(table_data, colWidths=col_widths, repeatRows=1)
-            credit_table.setStyle(TableStyle([
+            style_list = [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8E8E8")),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("FONTSIZE", (0, 0), (-1, 0), 12),
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                ("ALIGN", (0, 1), (1, -1), "LEFT"),
-                ("ALIGN", (2, 1), (2, -1), "CENTER"),
-                ("ALIGN", (3, 1), (3, -1), "LEFT"),
+                ("ALIGN", (0, 1), (1, -2), "LEFT"),
+                ("ALIGN", (2, 1), (2, -2), "CENTER"),
                 ("FONTSIZE", (0, 1), (-1, -1), 8),
                 ("BOX", (0, 0), (-1, -1), 1, colors.black),
                 ("LINEBEFORE", (1, 0), (1, -1), 1, color_header),
                 ("LINEBEFORE", (2, 0), (2, -1), 1, color_header),
-                ("LINEBEFORE", (3, 0), (3, -1), 1, color_header),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ]))
+            ]
+
+            # Styles pour la ligne footer (dernière ligne)
+            last_row = len(table_data) - 1
+            style_list.extend([
+                ("SPAN", (0, last_row), (1, last_row)),
+                ("ALIGN", (0, last_row), (1, last_row), "RIGHT"),
+                ("ALIGN", (2, last_row), (2, last_row), "CENTER"),
+                ("FONTNAME", (0, last_row), (2, last_row), "Helvetica-Bold"),
+                ("FONTSIZE", (0, last_row), (2, last_row), 10),
+                ("BACKGROUND", (0, last_row), (2, last_row), colors.HexColor("#F5F5F5")),
+                # Ligne supérieure (top border) pour séparer le footer de la ligne précédente
+                ("LINEABOVE", (0, last_row), (2, last_row), 1, color_header),
+            ])
+
+            credit_table.setStyle(TableStyle(style_list))
             elements.append(credit_table)
             elements.append(Spacer(1, 3 * mm))
 
