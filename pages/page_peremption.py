@@ -107,12 +107,12 @@ SELECT
     lr.date_entree,
     lr.priorite,
     lr.note,
-    ROUND((lr.quantite / um.facteur_vers_base)::numeric, 4)                          AS qt_lot_unite,
+    ROUND((lr.quantite)::numeric, 4)                          AS qt_lot_unite,
     ROUND(
         (GREATEST(0.0, LEAST(
             lr.quantite,
             COALESCE(sm.stock_base_mag,0.0) - (lr.cumul_depuis_recents - lr.quantite)
-        )) / um.facteur_vers_base)::numeric
+        )))::numeric
     , 4)                                                                             AS qt_restante_unite,
     a.idarticle,
     TRUE                                                                             AS has_lot
@@ -728,8 +728,8 @@ class PageGestionPeremption(ctk.CTkFrame):
         ctk.CTkButton(bar, text="Actualiser", command=self.charger_donnees,
             fg_color="#2e7d32", hover_color="#1b5e20", width=110, height=30).pack(side="left")
 
-        # Checkbox
-        self.var_with_per = BooleanVar(value=False)
+        # Checkbox (cochée par défaut pour afficher directement les articles avec péremption)
+        self.var_with_per = BooleanVar(value=True)
         ctk.CTkCheckBox(bar,
             text="Avec peremption uniquement",
             variable=self.var_with_per,

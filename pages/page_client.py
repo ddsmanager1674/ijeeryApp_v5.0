@@ -43,6 +43,10 @@ class PageClient(ctk.CTkFrame):
             self.cursor = self.conn.cursor()
             self.create_table()
         
+        # Variables pour le tri interactif
+        self.sort_column = "Crédit en cours"  # Colonne par défaut
+        self.sort_ascending = False  # DESC par défaut
+        
         self.setup_ui()
         self.load_types() # Charger les types dans la combobox
         self.load_client()
@@ -190,9 +194,11 @@ class PageClient(ctk.CTkFrame):
         self.tree.tag_configure("even", background="#FFFFFF", foreground="#000000")
         self.tree.tag_configure("odd", background="#E6EFF8", foreground="#000000")
         
+        col_widths = {"Nom du Client": 120, "Contact": 110, "Adresse": 140,
+                      "NIF": 90, "Crédit en cours": 130, "Type": 110}
         for col in columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=120)
+            self.tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
+            self.tree.column(col, width=col_widths.get(col, 110))
         
         self.tree.pack(fill="both", expand=True, pady=10)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
@@ -213,24 +219,75 @@ class PageClient(ctk.CTkFrame):
                 FROM tb_client c
                 LEFT JOIN tb_typeclient t ON c.idtypeclient = t.idtypeclient
                 WHERE c.idtypeclient != 1
-                ORDER BY c.nomcli ASC
             """)
             clients = self.cursor.fetchall()
-            self.all_clients_data = clients  # Stocker les données complètes
             
-            for idx, cli in enumerate(clients):
-                tag = "even" if idx % 2 == 0 else "odd"
-                # calcul crédit restant
+            # Charger les crédits pour chaque client
+            clients_avec_credits = []
+            for cli in clients:
                 try:
                     _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
                 except Exception:
                     credit_restant = 0
-                credit_str = f" {self._formater_nombre(credit_restant)} Ar"
-                self.tree.insert("", "end", iid=cli[0], values=(
-                    cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]
-                ), tags=(tag,))
+                clients_avec_credits.append((cli, credit_restant))
+            
+            # Trier par crédit en cours (DESC par défaut)
+            clients_avec_credits.sort(key=lambda x: x[1], reverse=True)
+            self.all_clients_data = clients_avec_credits
+            
+            # Afficher les clients avec les crédits triés
+            self.display_clients(clients_avec_credits)
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
+
+    def display_clients(self, clients_avec_credits):
+        """Affiche les clients dans le treeview avec les tags alternés."""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        for idx, (cli, credit_restant) in enumerate(clients_avec_credits):
+            tag = "even" if idx % 2 == 0 else "odd"
+            credit_str = self._formater_nombre(credit_restant)
+            self.tree.insert("", "end", iid=cli[0], values=(
+                cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]
+            ), tags=(tag,))
+
+    def sort_by_column(self, column):
+        """Trie le treeview par la colonne cliquée. Active le tri bi-direction."""
+        # Déterminer le sens du tri
+        if self.sort_column == column:
+            # Si on clique sur la même colonne, inverser le sens
+            self.sort_ascending = not self.sort_ascending
+        else:
+            # Si on clique sur une nouvelle colonne, commencer en ascendant
+            self.sort_column = column
+            self.sort_ascending = True
+        
+        # Réindexer les données
+        if not self.all_clients_data:
+            return
+        
+        # Index des colonnes
+        col_index = {
+            "Nom du Client": 1,
+            "Contact": 2,
+            "Adresse": 3,
+            "NIF": 4,
+            "Crédit en cours": "credit"  # Special case
+        }
+        
+        if column == "Crédit en cours":
+            # Trier par montant de crédit (numérique)
+            sorted_data = sorted(self.all_clients_data, key=lambda x: x[1], reverse=not self.sort_ascending)
+        else:
+            # Trier par colonne texte
+            idx = col_index.get(column, 1)
+            sorted_data = sorted(self.all_clients_data, 
+                               key=lambda x: str(x[0][idx] or "").lower(),
+                               reverse=not self.sort_ascending)
+        
+        # Afficher les données triées
+        self.display_clients(sorted_data)
 
     def add_client(self):
         if not self.conn: return
@@ -321,27 +378,9 @@ class PageClient(ctk.CTkFrame):
         """Filtre les clients en temps réel basé sur la requête de recherche."""
         search_query = self.search_entry.get().lower().strip()
         
-        # Vider le treeview
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        
-        # Si la requête est vide, afficher tous les clients
-        if not search_query:
-            for idx, cli in enumerate(self.all_clients_data):
-                tag = "even" if idx % 2 == 0 else "odd"
-                try:
-                    _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
-                except Exception:
-                    credit_restant = 0
-                credit_str = self._formater_nombre(credit_restant)
-                self.tree.insert("", "end", iid=cli[0], values=(
-                    cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]
-                ), tags=(tag,))
-            return
-        
-        # Filtrer les clients
-        idx = 0
-        for cli in self.all_clients_data:
+        # Filtrer les données
+        filtered_data = []
+        for cli, credit_restant in self.all_clients_data:
             # cli = (idclient, nomcli, contactcli, adressecli, nifcli, credit, typeclient)
             # Chercher dans tous les champs
             nom = str(cli[1]).lower() if cli[1] else ""

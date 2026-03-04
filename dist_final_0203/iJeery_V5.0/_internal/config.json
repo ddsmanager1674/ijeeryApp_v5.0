@@ -1,9 +1,0 @@
-{
-    "database": {
-        "host": "192.168.88.18",
-        "user": "postgres",
-        "password": "root",
-        "database": "sarah_gros",
-        "port": 5432
-    }
-}
