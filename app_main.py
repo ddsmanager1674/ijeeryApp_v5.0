@@ -73,6 +73,7 @@ from pages.page_pmtSalaire import PageValidationSalaire
 from pages.page_presence import PagePresence
 from pages.page_prixListe import PagePrixListe
 from pages.page_prixSaisie import PagePrixSaisie
+from pages.page_prixRevient import PagePrixRevient
 from pages.page_proforma import PageCommandeCli
 from pages.page_reinit import DBInitializerApp
 from pages.page_salaireBase_ import PageSalaireBase
@@ -389,6 +390,7 @@ class App(ctk.CTk):
             "PageMenu": PageMenu,
             "PageMouvementStock": PageMouvementStock,
             "PagePrixListe" : PagePrixListe,
+            "PagePrixRevient" : PagePrixRevient,
             "PagePresence" : PagePresence,
             "PageSalaireBase" : PageSalaireBase,
             "PageSalaireEtatSB" : PageSalaireEtatSB,
@@ -1427,6 +1429,12 @@ class App(ctk.CTk):
                                           fg_color="#034787", text_color="white", hover_color="#0565c9",
                                           font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PagePrixListe"]))
             btn_pda.pack(pady=2, padx=5, fill="x")
+
+        if "Prix de revient" in self.authorized_menus:
+            btn_pr = ctk.CTkButton(self.admin_submenu_frame, text="📊 Prix de Revient", corner_radius=10, height=40,
+                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
+                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PagePrixRevient"]))
+            btn_pr.pack(pady=2, padx=5, fill="x")
             
         if "Livraison Client" in self.authorized_menus:
             btn_lc = ctk.CTkButton(self.admin_submenu_frame, text="🚚 Livraison client", corner_radius=10, height=40,

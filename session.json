@@ -201,6 +201,10 @@
             "PagePrixListe"
         ],
         [
+            "Prix de revient",
+            "PagePrixRevient"
+        ],
+        [
             "Prix Liste",
             "PagePrixListe"
         ],
