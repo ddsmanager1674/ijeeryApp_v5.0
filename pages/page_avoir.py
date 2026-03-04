@@ -2027,7 +2027,7 @@ class PageAvoir(ctk.CTkFrame):
 
         ref_avoir = self.entry_ref_avoir.get()
         date_str = self.entry_date_avoir.get()
-        description = self.entry_designation.get().strip()
+        description = self.entry_designation.get().strip() + " (Ref: " + ref_avoir + ")"
         client_nom = self.entry_client.get().strip()
 
         idclient = self.client_map.get(client_nom)
@@ -2132,7 +2132,7 @@ class PageAvoir(ctk.CTkFrame):
                     idmode = result_pmt[1]
 
             # ✅ INSERTION DANS tb_pmtavoir
-            observation_pmt = f"AVOIR - {client_nom} - {ref_avoir}"
+            observation_pmt = self.entry_designation.get().strip() + " [CL: " + client_nom + "]"
         
             sql_pmtavoir = """
                 INSERT INTO tb_pmtavoir 
@@ -2209,11 +2209,11 @@ class PageAvoir(ctk.CTkFrame):
                 print(f"✅ Impression A5 lancée : {filename_a5}")
             
             # Imprimer Ticket si configuré
-            if imprimer_ticket == 1:
-                filename_ticket = f"Ticket_Avoir_{data['avoir']['refavoir']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                self.generate_ticket_80mm(data, filename_ticket)
-                self.open_file(filename_ticket)
-                print(f"✅ Impression Ticket lancée : {filename_ticket}")
+            #if imprimer_ticket == 1:
+            #    filename_ticket = f"Ticket_Avoir_{data['avoir']['refavoir']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            #    self.generate_ticket_80mm(data, filename_ticket)
+            #    self.open_file(filename_ticket)
+            #    print(f"✅ Impression Ticket lancée : {filename_ticket}")
         
         except Exception as e:
             print(f"❌ Erreur lors de l'impression : {e}")
@@ -2454,7 +2454,8 @@ class PageAvoir(ctk.CTkFrame):
 
 
         magasin_vente = avoir.get('magasin_vente') or 'N/A'
-        droite_text = f"<b>AVOIR N°: {refavoir}</b><br/>{dateavoir_affiche}<br/><b>Magasin {magasin_vente}</b><br/><b>CLIENT: {client['nomcli']}</b><br/><br/><font size='8'>Op: {user_name}</font>"
+        refvente_associe = avoir.get('refvente_associe') or 'N/A'
+        droite_text = f"<b>AVOIR N°: {refavoir}</b><br/><b> Du Ref: {refvente_associe}</b><br/>{dateavoir_affiche}<br/><b>Magasin {magasin_vente}</b><br/><b>CLIENT: {client['nomcli']}</b><br/><font size='8'>Op: {user_name}</font>"
 
         gauche = Paragraph(gauche_text, style_p)
         droite = Paragraph(droite_text, style_p)
