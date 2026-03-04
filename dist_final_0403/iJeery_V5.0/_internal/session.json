@@ -1,0 +1,40 @@
+{
+    "user_id": 16,
+    "username": "floriane",
+    "fonction_id": 12,
+    "fonction_name": "Caissier",
+    "menus": [
+        [
+            "Caisse",
+            "PageCaisse"
+        ],
+        [
+            "CHAT INTERNE",
+            "PageChat"
+        ],
+        [
+            "Client",
+            "PageClient"
+        ],
+        [
+            "Client Crédi",
+            "PageClientCredit"
+        ],
+        [
+            "Facture Liste",
+            "PageFactureListe"
+        ],
+        [
+            "Liste Facture",
+            "PageFactureListe"
+        ],
+        [
+            "Paiement Client",
+            "PagePmtFacture"
+        ],
+        [
+            "TABLEAU DE BORD",
+            "page_home"
+        ]
+    ]
+}

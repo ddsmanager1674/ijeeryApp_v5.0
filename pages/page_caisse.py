@@ -235,11 +235,12 @@ class PageCaisse(ctk.CTkFrame):
         frame.pack_propagate(False)
         
         label_nom = ctk.CTkLabel(frame, text=nom.upper(), font=("Arial", 9, "bold"), 
-                                  text_color="#000" if couleur == "#ffeb3b" else "#fff")
+                                  text_color="#fff" if couleur == "#ffeb3b" else "#fff")
         label_nom.pack(pady=(5, 0))
         
+        
         label_montant = ctk.CTkLabel(frame, text="0", font=("Arial", 10, "bold"),
-                                      text_color="#000" if couleur == "#ffeb3b" else "#fff")
+                                      text_color="#fff" if couleur == "#ffeb3b" else "#fff")
         label_montant.pack()
         
         # Stocker les références
