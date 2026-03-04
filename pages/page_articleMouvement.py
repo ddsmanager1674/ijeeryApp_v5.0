@@ -426,6 +426,61 @@ class PageArticleMouvement(ctk.CTkFrame):
         except:
             return "0,00"
     
+    def _update_label_total(self):
+        """Met à jour le label_total avec format dynamique selon filtres et mouvements affichés"""
+        try:
+            # Récupérer les filtres
+            date_debut = self.date_debut.get_date().strftime('%d/%m/%Y')
+            date_fin = self.date_fin.get_date().strftime('%d/%m/%Y')
+            type_mouvement = self.combo_type.get()
+            nom_magasin = self.combo_magasin.get()
+            
+            # Calculer les totaux d'entrée et sortie à partir des items affichés dans le treeview
+            total_entree = 0.0
+            total_sortie = 0.0
+            
+            for item_id in self.tree.get_children():
+                values = self.tree.item(item_id, 'values')
+                
+                # Colonnes: 6=Entrée, 7=Sortie
+                if len(values) > 7:
+                    entree_str = str(values[6]).strip()
+                    sortie_str = str(values[7]).strip()
+                    
+                    # Convertir les nombres formatés (avec espaces et virgules) en float
+                    if entree_str and entree_str != '-':
+                        try:
+                            # Enlever les espaces, remplacer virgule par point
+                            entree_num = float(entree_str.replace(' ', '').replace(',', '.'))
+                            total_entree += entree_num
+                        except ValueError:
+                            pass
+                    
+                    if sortie_str and sortie_str != '-':
+                        try:
+                            # Enlever les espaces, remplacer virgule par point
+                            sortie_num = float(sortie_str.replace(' ', '').replace(',', '.'))
+                            total_sortie += sortie_num
+                        except ValueError:
+                            pass
+            
+            # Formater les totaux
+            total_entree_fmt = self.formater_nombre(total_entree)
+            total_sortie_fmt = self.formater_nombre(total_sortie)
+            
+            # Construire le texte du label
+            label_text = (
+                f"Du {date_debut} au {date_fin} | "
+                f"Mouvement : {type_mouvement} ; Magasin {nom_magasin} | "
+                f"Entrée : {total_entree_fmt}; Sortie : {total_sortie_fmt}"
+            )
+            
+            self.label_total.configure(text=label_text)
+        
+        except Exception as e:
+            print(f"ERREUR lors de la mise à jour du label_total: {str(e)}")
+            self.label_total.configure(text="Erreur lors du calcul des totaux")
+    
     def _adjust_column_widths(self):
         """Ajuste automatiquement la largeur des colonnes selon leur contenu"""
         import tkinter.font as tkFont
@@ -1454,9 +1509,11 @@ class PageArticleMouvement(ctk.CTkFrame):
             # Sauvegarder la liste complète pour le filtrage côté client
             self.full_display_rows = rows_to_display
             self._original_rows_pending = list(self.rows_pending)  # Sauvegarder les rows_pending originaux
-            self.label_total.configure(text=f"Nombre total de documents: {len(rows_to_display)}")
             
             cursor.close()
+            
+            # Mettre à jour le label avec infos dynamiques
+            self._update_label_total()
             
             # Ajuster la largeur des colonnes selon le contenu
             self._adjust_column_widths()
@@ -1510,10 +1567,11 @@ class PageArticleMouvement(ctk.CTkFrame):
                 item_id = self.tree.insert("", "end", values=row, tags=(tag,))
                 self.tree_items.append(item_id)
             
-            self.label_total.configure(text=f"Nombre total de documents: {len(rows)}")
-            
             # Restaurer les rows_pending originaux
             self.rows_pending = list(original_pending)
+            
+            # Mettre à jour le label avec infos dynamiques
+            self._update_label_total()
             
             # Relancer le calcul des stocks pour TOUS les mouvements
             self._relancer_calcul_stocks_filtres()
@@ -1541,7 +1599,8 @@ class PageArticleMouvement(ctk.CTkFrame):
             item_id = self.tree.insert("", "end", values=row, tags=(tag,))
             self.tree_items.append(item_id)
 
-        self.label_total.configure(text=f"Nombre total de documents: {len(filtered)} (filtré)")
+        # Mettre à jour le label avec infos dynamiques
+        self._update_label_total()
         
         # Créer une nouvelle liste rows_pending SEULEMENT pour les lignes filtrées
         filtered_pending = [original_pending[idx] for idx in filtered_indices if idx < len(original_pending)]
@@ -1560,6 +1619,9 @@ class PageArticleMouvement(ctk.CTkFrame):
         
         # Relancer le calcul des stocks SEULEMENT pour les lignes filtrées
         self._relancer_calcul_stocks_filtres()
+        
+        # Mettre à jour le label avec infos dynamiques (appelé à nouveau après le filtrage)
+        self._update_label_total()
 
 
 # Test de la classe (optionnel)
