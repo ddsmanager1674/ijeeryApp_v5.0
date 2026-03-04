@@ -845,8 +845,10 @@ class PageAvoir(ctk.CTkFrame):
         total_general = 0.0
         
         for detail in self.detail_avoir:
-            # S'assurer que le calcul utilise les clés présentes dans `self.detail_vente`
-            montant_ligne = detail.get('qtvente', 0) * detail.get('prixunit', 0)
+            qtvente = float(detail.get('qtvente', 0) or 0)
+            prixunit = float(detail.get('prixunit', 0) or 0)
+            remise = float(detail.get('remise', 0) or 0)
+            montant_ligne = qtvente * (prixunit - remise)
             total_general += montant_ligne
             
         total_lettres = nombre_en_lettres_fr(total_general)
@@ -1317,7 +1319,10 @@ class PageAvoir(ctk.CTkFrame):
         """Formate le dictionnaire de détail en tuple pour l'affichage dans le Treeview."""
         
         # Calcul du montant total
-        montant_total = detail['qtvente'] * detail['prixunit'] # <<< CALCUL DU MONTANT
+        qtvente = float(detail.get('qtvente', 0) or 0)
+        prixunit = float(detail.get('prixunit', 0) or 0)
+        remise = float(detail.get('remise', 0) or 0)
+        montant_total = qtvente * (prixunit - remise)  # Qt * (PU - remise)
         
         # Colonnes: ("ID_Article", "ID_Unite", "ID_Magasin", "Code Article", "Désignation", "Magasin", "Unité", "Prix Unitaire", "Quantité Vente", "Montant")
         return (
@@ -1661,7 +1666,7 @@ class PageAvoir(ctk.CTkFrame):
             sql_details = """
                 SELECT 
                     vd.idmag, m.designationmag, vd.idarticle, u.codearticle, a.designation, 
-                    vd.idunite, u.designationunite, vd.qtvente, vd.prixunit
+                    vd.idunite, u.designationunite, vd.qtvente, vd.prixunit, COALESCE(vd.remise, 0) as remise
                 FROM tb_ventedetail vd
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
@@ -1700,7 +1705,7 @@ class PageAvoir(ctk.CTkFrame):
             # 5. Charger les détails de la Vente comme base pour l'Avoir
             self.detail_avoir = []
             for detail in details:
-                idmag, designationmag, idarticle, codearticle, designation, idunite, designationunite, qtvente, prixunit = detail
+                idmag, designationmag, idarticle, codearticle, designation, idunite, designationunite, qtvente, prixunit, remise = detail
                 self.detail_avoir.append({
                     'idmag': idmag,
                     'designationmag': designationmag,
@@ -1711,6 +1716,7 @@ class PageAvoir(ctk.CTkFrame):
                     'nom_unite': designationunite,
                     'qtvente': qtvente,
                     'prixunit': prixunit,
+                    'remise': float(remise or 0),
                     'qt_origine': qtvente  # Quantité originale pour validation
                 })
             self.charger_details_treeview()
@@ -1895,7 +1901,7 @@ class PageAvoir(ctk.CTkFrame):
             # Récupère lignes de la vente
             sql_details = """
                 SELECT vd.idmag, m.designationmag, vd.idarticle, u.codearticle, a.designation,
-                       vd.idunite, u.designationunite, vd.qtvente, vd.prixunit
+                       vd.idunite, u.designationunite, vd.qtvente, vd.prixunit, COALESCE(vd.remise, 0) as remise
                 FROM tb_ventedetail vd
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
@@ -1928,7 +1934,7 @@ class PageAvoir(ctk.CTkFrame):
             # Charger les détails : copier les articles avec mêmes prix/unité; quantités modifiables
             self.detail_avoir = []
             for detail in details:
-                idmag, designationmag, idarticle, codearticle, designation, idunite, designationunite, qtvente, prixunit = detail
+                idmag, designationmag, idarticle, codearticle, designation, idunite, designationunite, qtvente, prixunit, remise = detail
                 self.detail_avoir.append({
                     'idmag': idmag,
                     'designationmag': designationmag,
@@ -1939,7 +1945,8 @@ class PageAvoir(ctk.CTkFrame):
                     'nom_unite': designationunite,
                     'qtvente': qtvente,      # qté initiale = qté vendue (modifiable)
                     'qt_origine': qtvente,   # conserve la qté d'origine pour validation
-                    'prixunit': prixunit
+                    'prixunit': prixunit,
+                    'remise': float(remise or 0)
                 })
 
             # Afficher dans treeview
@@ -2050,7 +2057,11 @@ class PageAvoir(ctk.CTkFrame):
                 return
 
             # ✅ CALCUL DU MONTANT TOTAL DE L'AVOIR
-            montant_total_avoir = sum(d['qtvente'] * d['prixunit'] for d in details_a_enregistrer)
+            montant_total_avoir = sum(
+                float(d.get('qtvente', 0) or 0) *
+                (float(d.get('prixunit', 0) or 0) - float(d.get('remise', 0) or 0))
+                for d in details_a_enregistrer
+            )
     
             # ✅ Date aujourdh'ui
             dateavoir = datetime.now()
@@ -2078,13 +2089,16 @@ class PageAvoir(ctk.CTkFrame):
             """
             params = []
             for d in details_a_enregistrer:
+                prixunit_net = float(d.get('prixunit', 0) or 0) - float(d.get('remise', 0) or 0)
+                if prixunit_net < 0:
+                    prixunit_net = 0.0
                 params.append((
                     id_avoir, 
                     d['idmag'], 
                     d['idarticle'], 
                     d['idunite'], 
                     d['qtvente'],
-                    d['prixunit']
+                    prixunit_net
                 ))
 
             cur.executemany(sql_detail, params)
@@ -2286,30 +2300,14 @@ class PageAvoir(ctk.CTkFrame):
                 'contactcli': avoir_result[9] or 'N/A',
             }
         
-            # Récupérer les détails de l'avoir
-            sql_details = """
-                SELECT 
-                    u.codearticle, a.designation, u.designationunite, 
-                    ad.qtavoir, ad.prixunit, 
-                    ad.qtavoir * ad.prixunit as montant_total, 
-                    m.designationmag
-                FROM tb_avoirdetail ad
-                INNER JOIN tb_article a ON ad.idarticle = a.idarticle
-                INNER JOIN tb_unite u ON ad.idunite = u.idunite
-                INNER JOIN tb_magasin m ON ad.idmag = m.idmag
-                WHERE ad.idavoir = %s
-                ORDER BY a.designation
-            """
-            cursor.execute(sql_details, (idavoir,))
-            data['details'] = cursor.fetchall()
-
-            # Référence facture associée (si disponible)
+            # Référence facture associée (priorité: tb_pmtavoir, fallback: tb_pmtfacture)
+            refvente_associe = None
             try:
                 cursor.execute(
                     """
                     SELECT refvente
-                    FROM tb_pmtfacture
-                    WHERE refavoir = %s
+                    FROM tb_pmtavoir
+                    WHERE refavoir = %s AND deleted = 0
                     ORDER BY id DESC
                     LIMIT 1
                     """,
@@ -2317,9 +2315,60 @@ class PageAvoir(ctk.CTkFrame):
                 )
                 ref_row = cursor.fetchone()
                 if ref_row and ref_row[0]:
-                    data['avoir']['refvente_associe'] = ref_row[0]
+                    refvente_associe = ref_row[0]
+                    data['avoir']['refvente_associe'] = refvente_associe
             except Exception:
                 pass
+
+            if not refvente_associe:
+                try:
+                    cursor.execute(
+                        """
+                        SELECT refvente
+                        FROM tb_pmtfacture
+                        WHERE refavoir = %s
+                        ORDER BY id DESC
+                        LIMIT 1
+                        """,
+                        (data['avoir']['refavoir'],)
+                    )
+                    ref_row = cursor.fetchone()
+                    if ref_row and ref_row[0]:
+                        refvente_associe = ref_row[0]
+                        data['avoir']['refvente_associe'] = refvente_associe
+                except Exception:
+                    pass
+
+            # Récupérer les détails de l'avoir
+            sql_details = """
+                SELECT 
+                    u.codearticle, a.designation, u.designationunite, 
+                    ad.qtavoir, ad.prixunit, 
+                    ad.qtavoir * ad.prixunit as montant_total, 
+                    m.designationmag,
+                    COALESCE(
+                        (
+                            SELECT vd.prixunit
+                            FROM tb_vente v
+                            INNER JOIN tb_ventedetail vd ON vd.idvente = v.id
+                            WHERE v.refvente = %s
+                              AND vd.idarticle = ad.idarticle
+                              AND vd.idunite = ad.idunite
+                              AND vd.idmag = ad.idmag
+                            ORDER BY ABS((vd.prixunit - COALESCE(vd.remise, 0)) - ad.prixunit) ASC, vd.id DESC
+                            LIMIT 1
+                        ),
+                        ad.prixunit
+                    ) as pu_ttc_brut
+                FROM tb_avoirdetail ad
+                INNER JOIN tb_article a ON ad.idarticle = a.idarticle
+                INNER JOIN tb_unite u ON ad.idunite = u.idunite
+                INNER JOIN tb_magasin m ON ad.idmag = m.idmag
+                WHERE ad.idavoir = %s
+                ORDER BY a.designation
+            """
+            cursor.execute(sql_details, (refvente_associe, idavoir))
+            data['details'] = cursor.fetchall()
 
             # Magasin de vente (si un seul magasin dans les lignes)
             try:
@@ -2437,14 +2486,19 @@ class PageAvoir(ctk.CTkFrame):
         num_articles = 0
         for detail in data['details']:
             # Adapter selon la structure (peut être tuple ou dict)
-            if isinstance(detail, (list, tuple)) and len(detail) >= 7:
-                code, designation, unite, qtavoir, prixunit, montant_total, magasin = detail[:7]
+            if isinstance(detail, (list, tuple)) and len(detail) >= 8:
+                code, designation, unite, qtavoir, prixunit_net, montant_total, magasin, pu_ttc_brut = detail[:8]
+                prixunit_affiche = pu_ttc_brut
+                montant = montant_total
+            elif isinstance(detail, (list, tuple)) and len(detail) >= 7:
+                code, designation, unite, qtavoir, prixunit_net, montant_total, magasin = detail[:7]
+                prixunit_affiche = prixunit_net
                 montant = montant_total
             else:
                 qtavoir = detail.get('qtavoir', detail.get('qte', 0))
                 designation = detail.get('designation', '')
                 unite = detail.get('unite', '')
-                prixunit = detail.get('prixunit', 0)
+                prixunit_affiche = detail.get('pu_ttc_brut', detail.get('prixunit', 0))
                 montant = detail.get('montant_ttc', detail.get('montant', 0))
 
             total_montant += montant
@@ -2453,7 +2507,7 @@ class PageAvoir(ctk.CTkFrame):
                 str(int(qtavoir)),
                 str(unite),
                 str(designation),
-                self.formater_nombre(prixunit),
+                self.formater_nombre(prixunit_affiche),
                 self.formater_nombre(montant)
             ])
 
