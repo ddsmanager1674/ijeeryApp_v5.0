@@ -40,12 +40,23 @@ class PageCaisse(ctk.CTkFrame):
         # Dictionnaires pour stocker les widgets des cadres
         self.cadres_docs = {}
         self.cadres_modes = {}
+        self.frames_docs = {}  # Stocke les frames pour les styles
+        self.frames_modes = {}  # Stocke les frames pour les styles
         
         # Variables pour les filtres actifs
         self.filtre_doc_actif = None
         self.filtre_mode_actif = None
         
-        # 🔑 CRUCIAL: Mapping entre noms UI (cadres) et noms BD exactes
+        # Dictionnaire pour stocker les couleurs originales
+        self.couleurs_docs = {}
+        self.couleurs_modes = {}
+        
+        # � FLAGS DE CONTRÔLE POUR ÉVITER LES BLOCAGES
+        self._traitement_filtre_en_cours = False
+        self._filtre_doc_en_attente = None
+        self._filtre_mode_en_attente = None
+        
+        # �🔑 CRUCIAL: Mapping entre noms UI (cadres) et noms BD exactes
         # Clé: Nom du cadre UI | Valeur: Nom exact en BD
         self.mode_ui_to_bd = {
             "Espèces": None,      # Sera rempli depuis la BD
@@ -231,15 +242,38 @@ class PageCaisse(ctk.CTkFrame):
                                       text_color="#000" if couleur == "#ffeb3b" else "#fff")
         label_montant.pack()
         
-        # Rendre le cadre cliquable
-        def on_click(event=None):
-            self.filtrer_par_doc(nom)
-        
-        frame.bind("<Button-1>", on_click)
-        label_nom.bind("<Button-1>", on_click)
-        label_montant.bind("<Button-1>", on_click)
-        
+        # Stocker les références
         self.cadres_docs[nom] = label_montant
+        self.frames_docs[nom] = (frame, couleur, label_nom, label_montant)
+        self.couleurs_docs[nom] = couleur
+        
+        # Rendre le cadre cliquable - Utiliser un lambda pour capturer `nom` correctement
+        def on_click_doc(event=None, doc_nom=nom):
+            self._traiter_clic_doc(doc_nom)
+        
+        def on_enter(event=None):
+            # Effet hover: légère assombrissement
+            if self.filtre_doc_actif != nom:
+                frame.configure(fg_color=self._assombrir_couleur(couleur, 0.8))
+        
+        def on_leave(event=None):
+            # Revenir à la couleur originale ou active
+            if self.filtre_doc_actif == nom:
+                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
+            else:
+                frame.configure(fg_color=couleur, border_width=0)
+        
+        frame.bind("<Button-1>", on_click_doc)
+        label_nom.bind("<Button-1>", on_click_doc)
+        label_montant.bind("<Button-1>", on_click_doc)
+        
+        frame.bind("<Enter>", on_enter)
+        label_nom.bind("<Enter>", on_enter)
+        label_montant.bind("<Enter>", on_enter)
+        
+        frame.bind("<Leave>", on_leave)
+        label_nom.bind("<Leave>", on_leave)
+        label_montant.bind("<Leave>", on_leave)
         
     def creer_cadre_mode(self, parent, nom, couleur):
         """Crée un cadre cliquable pour un mode de paiement"""
@@ -248,40 +282,187 @@ class PageCaisse(ctk.CTkFrame):
         frame.pack_propagate(False)
         
         label_nom = ctk.CTkLabel(frame, text=nom.upper(), font=("Arial", 10, "bold"),
-                                  text_color="#000" if couleur in ["#ffeb3b", "#fdd835", "#c0ca33"] else "#fff")
+                                  text_color="#fff" if couleur in ["#ffeb3b", "#fdd835", "#c0ca33"] else "#fff")
         label_nom.pack(pady=(5, 0))
         
         label_montant = ctk.CTkLabel(frame, text="0", font=("Arial", 11, "bold"),
-                                      text_color="#000" if couleur in ["#ffeb3b", "#fdd835", "#c0ca33"] else "#fff")
+                                      text_color="#fff" if couleur in ["#ffeb3b", "#fdd835", "#c0ca33"] else "#fff")
         label_montant.pack()
         
-        # Rendre le cadre cliquable
-        def on_click(event=None):
-            self.filtrer_par_mode(nom)
-        
-        frame.bind("<Button-1>", on_click)
-        label_nom.bind("<Button-1>", on_click)
-        label_montant.bind("<Button-1>", on_click)
-        
+        # Stocker les références
         self.cadres_modes[nom] = label_montant
+        self.frames_modes[nom] = (frame, couleur, label_nom, label_montant)
+        self.couleurs_modes[nom] = couleur
+        
+        # Rendre le cadre cliquable - Utiliser un lambda pour capturer `nom` correctement
+        def on_click_mode(event=None, mode_nom=nom):
+            self._traiter_clic_mode(mode_nom)
+        
+        def on_enter(event=None):
+            # Effet hover: légère assombrissement
+            if self.filtre_mode_actif != nom:
+                frame.configure(fg_color=self._assombrir_couleur(couleur, 0.8))
+        
+        def on_leave(event=None):
+            # Revenir à la couleur originale ou active
+            if self.filtre_mode_actif == nom:
+                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
+            else:
+                frame.configure(fg_color=couleur, border_width=0)
+        
+        frame.bind("<Button-1>", on_click_mode)
+        label_nom.bind("<Button-1>", on_click_mode)
+        label_montant.bind("<Button-1>", on_click_mode)
+        
+        frame.bind("<Enter>", on_enter)
+        label_nom.bind("<Enter>", on_enter)
+        label_montant.bind("<Enter>", on_enter)
+        
+        frame.bind("<Leave>", on_leave)
+        label_nom.bind("<Leave>", on_leave)
+        label_montant.bind("<Leave>", on_leave)
 
     def filtrer_par_doc(self, doc):
         """Filtre les données par type de document - cliquer à nouveau pour désactiver le filtre"""
+        print(f"\n{'='*70}")
+        print(f"📝 AVANT CLIC: filtre_doc_actif = {self.filtre_doc_actif}")
+        
         if self.filtre_doc_actif == doc:
             # Si on clique sur le même filtre, on le désactive
             self.filtre_doc_actif = None
+            print(f"❌ FILTRE DÉSACTIVÉ (second clic)")
         else:
             self.filtre_doc_actif = doc
+            print(f"✅ FILTRE ACTIVÉ: {doc}")
+        
+        print(f"📝 APRÈS CLIC: filtre_doc_actif = {self.filtre_doc_actif}")
+        print(f"{'='*70}\n")
+        
+        self._mettre_a_jour_etat_cadres()
         self.appliquer_filtres()
+    
+    def _traiter_clic_doc(self, doc):
+        """Traite les clics sur les cadres documents de manière asynchrone"""
+        # Si un traitement est déjà en cours, mettre en queue
+        if self._traitement_filtre_en_cours:
+            print(f"⏳ Clic en attente sur {doc} (traitement en cours)")
+            self._filtre_doc_en_attente = doc
+            return
+        
+        print(f"🔘 CLIC IMMÉDIAT sur DOCUMENT: {doc}")
+        self._traitement_filtre_en_cours = True
+        
+        # Déférer le traitement via après pour éviter les blocages
+        self.after(0, self._executer_clic_doc, doc)
+    
+    def _executer_clic_doc(self, doc):
+        """Exécute le clic sur un document"""
+        try:
+            self.filtrer_par_doc(doc)
+        finally:
+            # Débloquer et traiter les mises en attente
+            self._traitement_filtre_en_cours = False
+            
+            if self._filtre_doc_en_attente is not None:
+                en_attente = self._filtre_doc_en_attente
+                self._filtre_doc_en_attente = None
+                print(f"⚡ Traitement du clic en attente: {en_attente}")
+                self._traiter_clic_doc(en_attente)
+            elif self._filtre_mode_en_attente is not None:
+                en_attente = self._filtre_mode_en_attente
+                self._filtre_mode_en_attente = None
+                print(f"⚡ Traitement du clic en attente: {en_attente}")
+                self._traiter_clic_mode(en_attente)
+        
+    def _traiter_clic_mode(self, mode):
+        """Traite les clics sur les cadres des modes de manière asynchrone"""
+        # Si un traitement est déjà en cours, mettre en queue
+        if self._traitement_filtre_en_cours:
+            print(f"⏳ Clic en attente sur {mode} (traitement en cours)")
+            self._filtre_mode_en_attente = mode
+            return
+        
+        print(f"💳 CLIC IMMÉDIAT sur MODE: {mode}")
+        self._traitement_filtre_en_cours = True
+        
+        # Déférer le traitement via après pour éviter les blocages
+        self.after(0, self._executer_clic_mode, mode)
+    
+    def _executer_clic_mode(self, mode):
+        """Exécute le clic sur un mode de paiement"""
+        try:
+            self.filtrer_par_mode(mode)
+        finally:
+            # Débloquer et traiter les mises en attente
+            self._traitement_filtre_en_cours = False
+            
+            if self._filtre_mode_en_attente is not None:
+                en_attente = self._filtre_mode_en_attente
+                self._filtre_mode_en_attente = None
+                print(f"⚡ Traitement du clic en attente: {en_attente}")
+                self._traiter_clic_mode(en_attente)
+            elif self._filtre_doc_en_attente is not None:
+                en_attente = self._filtre_doc_en_attente
+                self._filtre_doc_en_attente = None
+                print(f"⚡ Traitement du clic en attente: {en_attente}")
+                self._traiter_clic_doc(en_attente)
         
     def filtrer_par_mode(self, mode):
         """Filtre les données par mode de paiement - cliquer à nouveau pour désactiver le filtre"""
+        print(f"\n{'='*70}")
+        print(f"💰 AVANT CLIC: filtre_mode_actif = {self.filtre_mode_actif}")
+        
         if self.filtre_mode_actif == mode:
             # Si on clique sur le même filtre, on le désactive
             self.filtre_mode_actif = None
+            print(f"❌ FILTRE DÉSACTIVÉ (second clic)")
         else:
             self.filtre_mode_actif = mode
+            print(f"✅ FILTRE ACTIVÉ: {mode}")
+        
+        print(f"💰 APRÈS CLIC: filtre_mode_actif = {self.filtre_mode_actif}")
+        print(f"{'='*70}\n")
+        
+        self._mettre_a_jour_etat_cadres()
         self.appliquer_filtres()
+    
+    def _assombrir_couleur(self, couleur_hex, facteur=0.7):
+        """Assombrit une couleur hex en multipliant les composantes RGB"""
+        couleur_hex = couleur_hex.lstrip('#')
+        r, g, b = tuple(int(couleur_hex[i:i+2], 16) for i in (0, 2, 4))
+        r, g, b = int(r * facteur), int(g * facteur), int(b * facteur)
+        return f'#{r:02x}{g:02x}{b:02x}'
+    
+    def _mettre_a_jour_etat_cadres(self):
+        """Met à jour l'état visuel de tous les cadres (documents et modes)"""
+        print(f"\n🎨 MISE À JOUR VISUELLE DES CADRES...")
+        
+        # Mettre à jour les cadres documents
+        for nom, (frame, couleur_orig, label_nom, label_montant) in self.frames_docs.items():
+            if self.filtre_doc_actif == nom:
+                # Cadre actif: bordure dorée et fond foncé
+                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
+                print(f"   ✨ {nom}: ACTIF (bordure dorée)")
+            else:
+                # Cadre inactif: couleur originale, pas de bordure
+                frame.configure(fg_color=couleur_orig, border_width=0)
+                print(f"   ☐ {nom}: inactif")
+        
+        # Mettre à jour les cadres modes
+        for nom, (frame, couleur_orig, label_nom, label_montant) in self.frames_modes.items():
+            if self.filtre_mode_actif == nom:
+                # Cadre actif: bordure dorée et fond foncé
+                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
+                print(f"   ✨ {nom}: ACTIF (bordure dorée)")
+            else:
+                # Cadre inactif: couleur originale, pas de bordure
+                frame.configure(fg_color=couleur_orig, border_width=0)
+                print(f"   ☐ {nom}: inactif")
+        
+        print(f"🎨 MISE À JOUR TERMINÉE\n")
+        
+        # Force la mise à jour UI
+        self.update_idletasks()
     
     def filtrer_tableau_recherche(self, event=None):
         """Filtre le tableau en temps réel selon le texte de recherche"""
