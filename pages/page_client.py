@@ -185,7 +185,7 @@ class PageClient(ctk.CTkFrame):
         self.search_entry.bind("<KeyRelease>", self.filter_clients)
         
         # Treeview
-        columns = ("Nom du Client", "Contact", "Adresse", "NIF", "Plafond de Crédit", "Type")
+        columns = ("Nom du Client", "Contact", "Adresse", "NIF", "Crédit en cours", "Type")
         self.tree = ttk.Treeview(self, columns=columns, show="headings")
         self.tree.tag_configure("even", background="#FFFFFF", foreground="#000000")
         self.tree.tag_configure("odd", background="#E6EFF8", foreground="#000000")
@@ -220,7 +220,15 @@ class PageClient(ctk.CTkFrame):
             
             for idx, cli in enumerate(clients):
                 tag = "even" if idx % 2 == 0 else "odd"
-                self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], cli[5], cli[6]), tags=(tag,))
+                # calcul crédit restant
+                try:
+                    _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
+                except Exception:
+                    credit_restant = 0
+                credit_str = f" {self._formater_nombre(credit_restant)} Ar"
+                self.tree.insert("", "end", iid=cli[0], values=(
+                    cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]
+                ), tags=(tag,))
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
 
@@ -321,7 +329,14 @@ class PageClient(ctk.CTkFrame):
         if not search_query:
             for idx, cli in enumerate(self.all_clients_data):
                 tag = "even" if idx % 2 == 0 else "odd"
-                self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], cli[5], cli[6]), tags=(tag,))
+                try:
+                    _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
+                except Exception:
+                    credit_restant = 0
+                credit_str = self._formater_nombre(credit_restant)
+                self.tree.insert("", "end", iid=cli[0], values=(
+                    cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]
+                ), tags=(tag,))
             return
         
         # Filtrer les clients
@@ -333,7 +348,12 @@ class PageClient(ctk.CTkFrame):
             contact = str(cli[2]).lower() if cli[2] else ""
             adresse = str(cli[3]).lower() if cli[3] else ""
             nif = str(cli[4]).lower() if cli[4] else ""
-            credit = str(cli[5]).lower() if cli[5] else ""
+            # calculer crédit restant pour recherche
+            try:
+                _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
+            except Exception:
+                credit_restant = 0
+            credit = str(credit_restant).lower() if credit_restant else ""
             typeclient = str(cli[6]).lower() if cli[6] else ""
             
             # Vérifier si la requête correspond à un champ
@@ -344,7 +364,12 @@ class PageClient(ctk.CTkFrame):
                 search_query in credit or
                 search_query in typeclient):
                 tag = "even" if idx % 2 == 0 else "odd"
-                self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], cli[5], cli[6]), tags=(tag,))
+                try:
+                    _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
+                except Exception:
+                    credit_restant = 0
+                credit_str = self._formater_nombre(credit_restant)
+                self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]), tags=(tag,))
                 idx += 1
 
     def open_credit_window(self):
@@ -876,7 +901,9 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
         )
         mode_combo_global = ctk.CTkComboBox(main_frame, values=mode_names)
         if mode_names:
-            mode_combo_global.set(mode_names[0])
+            # choisir "Espèces" par défaut si présent, sinon prendre le premier élément
+            default_mode = "Espèces" if "Espèces" in mode_names else mode_names[0]
+            mode_combo_global.set(default_mode)
         mode_combo_global.grid(row=7, column=0, sticky="ew", padx=8, pady=(0, 10))
         
         def enregistrer_paiement_global():
