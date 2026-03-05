@@ -377,39 +377,27 @@ class PageClient(ctk.CTkFrame):
     def filter_clients(self, event=None):
         """Filtre les clients en temps réel basé sur la requête de recherche."""
         search_query = self.search_entry.get().lower().strip()
-        
-        # Filtrer les données
+
+        # Filtrer dynamiquement sur toutes les infos de la ligne (id, nom, contact,
+        # adresse, NIF, type client, crédit brut et crédit formaté affiché).
         filtered_data = []
         for cli, credit_restant in self.all_clients_data:
-            # cli = (idclient, nomcli, contactcli, adressecli, nifcli, credit, typeclient)
-            # Chercher dans tous les champs
-            nom = str(cli[1]).lower() if cli[1] else ""
-            contact = str(cli[2]).lower() if cli[2] else ""
-            adresse = str(cli[3]).lower() if cli[3] else ""
-            nif = str(cli[4]).lower() if cli[4] else ""
-            # calculer crédit restant pour recherche
-            try:
-                _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
-            except Exception:
-                credit_restant = 0
-            credit = str(credit_restant).lower() if credit_restant else ""
-            typeclient = str(cli[6]).lower() if cli[6] else ""
-            
-            # Vérifier si la requête correspond à un champ
-            if (search_query in nom or 
-                search_query in contact or 
-                search_query in adresse or 
-                search_query in nif or 
-                search_query in credit or
-                search_query in typeclient):
-                tag = "even" if idx % 2 == 0 else "odd"
-                try:
-                    _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
-                except Exception:
-                    credit_restant = 0
-                credit_str = self._formater_nombre(credit_restant)
-                self.tree.insert("", "end", iid=cli[0], values=(cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]), tags=(tag,))
-                idx += 1
+            searchable_parts = [
+                str(cli[0] or ""),  # idclient
+                str(cli[1] or ""),  # nomcli
+                str(cli[2] or ""),  # contactcli
+                str(cli[3] or ""),  # adressecli
+                str(cli[4] or ""),  # nifcli
+                str(cli[6] or ""),  # typeclient
+                str(credit_restant or 0),  # valeur numérique brute
+                self._formater_nombre(credit_restant),  # valeur affichée dans le tableau
+            ]
+            searchable_text = " ".join(searchable_parts).lower()
+
+            if not search_query or search_query in searchable_text:
+                filtered_data.append((cli, credit_restant))
+
+        self.display_clients(filtered_data)
 
     def open_credit_window(self):
         """Ouvre la fenêtre des crédits clients dans un nouveau pop-up."""
@@ -571,7 +559,7 @@ class PageClient(ctk.CTkFrame):
                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
         
         # Créer le treeview des crédits
-        colonnes_credits = ("ID", "Type", "Date", "Montant", "Montant Payé", "Solde Restant", "Statut")
+        colonnes_credits = ("ID", "Type", "Date", "RefVente" ,"Montant", "Montant Payé", "Solde Restant", "Statut")
         tree_credits = ttk.Treeview(table_frame, columns=colonnes_credits, show='headings', height=10)
         tree_credits.tag_configure("complet", background="#C8E6C9", foreground="#000000")
         tree_credits.tag_configure("partiel", background="#FFF9C4", foreground="#000000")
@@ -1036,6 +1024,7 @@ Solde Restant: {solde_restant:,.2f} Ar"""
                             credit_id_temp,
                             type_credit_temp,
                             date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
+                            ref,
                             f"{montant_initial or 0:,.2f}",
                             f"{montant_paye_temp:,.2f}",
                             f"{solde_restant_temp:,.2f}",
@@ -1340,6 +1329,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 credit_id,
                 type_credit,
                 date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
+                ref,
                 f"{float(montant_initial or 0):,.2f}",
                 f"{montant_paye_ligne:,.2f}",
                 f"{solde_restant:,.2f}",

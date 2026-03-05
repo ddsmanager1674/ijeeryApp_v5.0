@@ -339,21 +339,29 @@ class PageFournisseur(ctk.CTkFrame):
 
     def filter_fournisseurs(self, event=None):
         search_query = self.search_entry.get().lower().strip()
-        
-        # Filtrer les donn\u00e9es
+
+        # Filtrer dynamiquement sur toutes les infos de la ligne (id, nom, contact,
+        # adresse, NIF, STAT, CIF, dette brute et dette formatée affichée).
         filtered_data = []
         for frs, dette_restante in self.all_frs_data:
-            nom = str(frs[1]).lower() if frs[1] else ""
-            contact = str(frs[2]).lower() if frs[2] else ""
-            adresse = str(frs[3]).lower() if frs[3] else ""
-            nif = str(frs[4]).lower() if frs[4] else ""
+            searchable_parts = [
+                str(frs[0] or ""),  # idfrs
+                str(frs[1] or ""),  # nomfrs
+                str(frs[2] or ""),  # contactfrs
+                str(frs[3] or ""),  # adressefrs
+                str(frs[4] or ""),  # niffrs
+                str(frs[5] or ""),  # statfrs
+                str(frs[6] or ""),  # ciffrs
+                str(dette_restante or 0),  # valeur numérique brute
+                self._formater_nombre(dette_restante),  # valeur affichée dans le tableau
+            ]
+            searchable_text = " ".join(searchable_parts).lower()
 
-            if (not search_query or
-                    search_query in nom or search_query in contact or
-                    search_query in adresse or search_query in nif):
+            if not search_query or search_query in searchable_text:
                 filtered_data.append((frs, dette_restante))
-        
-        # Afficher les r\u00e9sultats filtr\u00e9s\n        self.display_fournisseurs(filtered_data)
+
+        # Afficher les résultats filtrés
+        self.display_fournisseurs(filtered_data)
 
     # ──────────────────────────────────────────────────────────────────
     # DOUBLE-CLIC → DÉTAILS DETTE
@@ -517,7 +525,17 @@ class PageFournisseur(ctk.CTkFrame):
             selected = tree_dettes.selection()
             if not selected:
                 return
-            self._open_global_payment_window(idfrs, detail_window, tree_dettes, label_montant_restant)
+            item_iid = selected[0]
+            values = tree_dettes.item(item_iid, "values")
+            if not values:
+                return
+            dette_id = values[0]
+            type_dette = values[1]
+            if type_dette == "Livraison Reçue":
+                # values[2] = Bon de Réception = reflivfrs
+                self._open_livraison_detail_window(values[2], idfrs, detail_window)
+            else:
+                self._open_dette_manuelle_detail_window(dette_id, detail_window)
 
         tree_dettes.bind("<Double-1>", on_dette_double_click)
 
@@ -737,6 +755,221 @@ class PageFournisseur(ctk.CTkFrame):
             label_montant_restant.configure(text=f"{total_restant:,.2f} Ar")
 
         return total_initial, total_paye_global, total_restant
+
+
+    def _open_livraison_detail_window(self, reflivfrs, idfrs, parent_window):
+        """Affiche les détails des livraisons regroupées sous un bon de réception fournisseur."""
+        try:
+            # Infos générales du bon de réception (via la 1ère ligne correspondante)
+            self.cursor.execute("""
+                SELECT
+                    lf.reflivfrs,
+                    MIN(lf.dateregistre)                            AS date_livraison,
+                    MAX(lf.factfrs)                                 AS num_facture_frs,
+                    MIN(lf.datepaiement)                            AS date_echeance,
+                    COALESCE(MAX(CONCAT(u.prenomuser, ' ', u.nomuser)), 'N/A') AS operateur,
+                    COALESCE(MAX(m.designationmag), 'N/A')          AS magasin,
+                    c.refcom
+                FROM tb_livraisonfrs lf
+                JOIN tb_commandedetail cd ON cd.idcom = lf.idcom AND cd.idarticle = lf.idarticle
+                JOIN tb_commande c ON c.idcom = lf.idcom
+                LEFT JOIN tb_users u ON lf.iduser = u.iduser
+                LEFT JOIN tb_magasin m ON lf.idmag = m.idmag
+                WHERE lf.reflivfrs = %s AND cd.idfrs = %s AND lf.deleted = 0
+                GROUP BY lf.reflivfrs, c.refcom
+                LIMIT 1
+            """, (reflivfrs, idfrs))
+            entete = self.cursor.fetchone()
+            if not entete:
+                messagebox.showinfo("Information", f"Aucune livraison trouvée pour le bon : {reflivfrs}")
+                return
+            ref, date_liv, num_fact, date_ech, operateur, magasin, refcom = entete
+
+            # Détail des articles livrés
+            self.cursor.execute("""
+                SELECT
+                    a.designation,
+                    COALESCE(u.designationunite, '-')   AS unite,
+                    lf.qtlivrefrs                       AS quantite,
+                    cd.punitcmd                         AS prix_unit,
+                    (cd.punitcmd * lf.qtlivrefrs)       AS montant_ligne
+                FROM tb_livraisonfrs lf
+                JOIN tb_commandedetail cd ON cd.idcom = lf.idcom AND cd.idarticle = lf.idarticle
+                LEFT JOIN tb_article a ON a.idarticle = lf.idarticle
+                LEFT JOIN tb_unite u ON u.idunite = lf.idunite
+                WHERE lf.reflivfrs = %s AND cd.idfrs = %s AND lf.deleted = 0
+            """, (reflivfrs, idfrs))
+            details = self.cursor.fetchall()
+
+            montant_total = sum(float(d[4] or 0) for d in details)
+
+        except psycopg2.Error as err:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            messagebox.showerror("Erreur", f"Erreur chargement livraison : {err}")
+            return
+
+        # --- Fenêtre ---
+        win = ctk.CTkToplevel(parent_window)
+        win.title(f"Détails Livraison — {reflivfrs}")
+        parent_window.update_idletasks()
+        pw = max(parent_window.winfo_width(), 1)
+        ph = max(parent_window.winfo_height(), 1)
+        px = parent_window.winfo_x()
+        py = parent_window.winfo_y()
+        ww, wh = max(720, int(pw * 0.6)), max(500, int(ph * 0.75))
+        win.geometry(f"{ww}x{wh}+{px + (pw - ww)//2}+{py + (ph - wh)//2}")
+        win.minsize(720, 500)
+        win.grab_set()
+        win.grid_columnconfigure(0, weight=1)
+        win.grid_rowconfigure(1, weight=1)
+
+        # --- Panel infos entête ---
+        info_frame = ctk.CTkFrame(win, fg_color="#fff8f0")
+        info_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
+
+        ctk.CTkLabel(info_frame, text="Informations du Bon de Réception",
+                     font=ctk.CTkFont(size=12, weight="bold"), text_color="#2c3e50"
+                     ).grid(row=0, column=0, columnspan=6, sticky="w", padx=10, pady=(8, 4))
+
+        infos = [
+            ("Bon de Réception :", ref or "N/A"),
+            ("N° Facture Frs :", num_fact or "N/A"),
+            ("Bon de Commande :", refcom or "N/A"),
+            ("Date Livraison :", date_liv.strftime("%d/%m/%Y %H:%M") if date_liv else "N/A"),
+            ("Date Échéance :", date_ech.strftime("%d/%m/%Y") if date_ech else "N/A"),
+            ("Magasin :", magasin),
+            ("Opérateur :", operateur),
+        ]
+        # Affichage sur 2 lignes (4 infos + 3 infos)
+        row1_infos = infos[:4]
+        row2_infos = infos[4:]
+        for col_idx, (label, value) in enumerate(row1_infos):
+            ctk.CTkLabel(info_frame, text=label,
+                         font=ctk.CTkFont(weight="bold", size=10), text_color="#34495e"
+                         ).grid(row=1, column=col_idx * 2, sticky="w", padx=(10, 2), pady=(0, 4))
+            ctk.CTkLabel(info_frame, text=value,
+                         font=ctk.CTkFont(size=10), text_color="#2c3e50"
+                         ).grid(row=1, column=col_idx * 2 + 1, sticky="w", padx=(0, 14), pady=(0, 4))
+        for col_idx, (label, value) in enumerate(row2_infos):
+            ctk.CTkLabel(info_frame, text=label,
+                         font=ctk.CTkFont(weight="bold", size=10), text_color="#34495e"
+                         ).grid(row=2, column=col_idx * 2, sticky="w", padx=(10, 2), pady=(0, 8))
+            ctk.CTkLabel(info_frame, text=value,
+                         font=ctk.CTkFont(size=10), text_color="#2c3e50"
+                         ).grid(row=2, column=col_idx * 2 + 1, sticky="w", padx=(0, 14), pady=(0, 8))
+
+        # --- Tableau des articles ---
+        detail_frame = ctk.CTkFrame(win)
+        detail_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(4, 4))
+        detail_frame.grid_columnconfigure(0, weight=1)
+        detail_frame.grid_rowconfigure(1, weight=1)
+
+        ctk.CTkLabel(detail_frame, text="Articles Livrés",
+                     font=ctk.CTkFont(size=12, weight="bold")
+                     ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 4))
+
+        cols = ("Désignation", "Unité", "Quantité", "Prix Unitaire", "Montant")
+        tree_detail = ttk.Treeview(detail_frame, columns=cols, show="headings", height=12)
+        tree_detail.tag_configure("even", background="#FFFFFF")
+        tree_detail.tag_configure("odd", background="#FFF3E0")
+
+        col_widths = {"Désignation": 220, "Unité": 70, "Quantité": 80, "Prix Unitaire": 110, "Montant": 110}
+        col_anchor = {"Quantité": "e", "Prix Unitaire": "e", "Montant": "e"}
+        for col in cols:
+            tree_detail.heading(col, text=col)
+            tree_detail.column(col, width=col_widths.get(col, 100),
+                               anchor=col_anchor.get(col, "w"))
+
+        sb = ttk.Scrollbar(detail_frame, command=tree_detail.yview)
+        tree_detail.configure(yscrollcommand=sb.set)
+        tree_detail.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
+        sb.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
+
+        for idx, d in enumerate(details):
+            designation, unite, qte, pu, montant_ligne = d
+            tag = "even" if idx % 2 == 0 else "odd"
+            tree_detail.insert("", "end", tags=(tag,), values=(
+                designation or "-",
+                unite or "-",
+                f"{qte or 0:,.2f}",
+                f"{pu or 0:,.2f}",
+                f"{montant_ligne or 0:,.2f}",
+            ))
+
+        # --- Total ---
+        total_frame = ctk.CTkFrame(win, fg_color="#f3e5f5")
+        total_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 4))
+        ctk.CTkLabel(total_frame, text=f"Montant Total :  {montant_total:,.2f} Ar",
+                     font=ctk.CTkFont(size=13, weight="bold"), text_color="#6c3483"
+                     ).pack(side="right", padx=20, pady=8)
+
+        ctk.CTkButton(win, text="Fermer", command=win.destroy,
+                      fg_color="#7f8c8d", width=100).grid(row=3, column=0, pady=(0, 10))
+
+    def _open_dette_manuelle_detail_window(self, dette_id, parent_window):
+        """Affiche les informations d'une dette manuelle fournisseur (tb_autredette)."""
+        try:
+            self.cursor.execute("""
+                SELECT ad.id, ad.numfact, ad.dateregistre, ad.montant, ad.dateecheance,
+                       f.nomfrs, f.contactfrs
+                FROM tb_autredette ad
+                LEFT JOIN tb_fournisseur f ON f.idfrs = ad.idfrs
+                WHERE ad.id = %s
+            """, (dette_id,))
+            row = self.cursor.fetchone()
+            if not row:
+                messagebox.showinfo("Information", "Dette introuvable.")
+                return
+            ad_id, numfact, date_reg, montant, date_ech, nomfrs, contactfrs = row
+        except psycopg2.Error as err:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            messagebox.showerror("Erreur", f"Erreur chargement dette : {err}")
+            return
+
+        win = ctk.CTkToplevel(parent_window)
+        win.title(f"Détails Dette Manuelle — {numfact or ad_id}")
+        parent_window.update_idletasks()
+        pw = max(parent_window.winfo_width(), 1)
+        ph = max(parent_window.winfo_height(), 1)
+        px = parent_window.winfo_x()
+        py = parent_window.winfo_y()
+        ww, wh = 460, 300
+        win.geometry(f"{ww}x{wh}+{px + (pw - ww)//2}+{py + (ph - wh)//2}")
+        win.resizable(False, False)
+        win.grab_set()
+
+        frame = ctk.CTkFrame(win, fg_color="#fff8f0")
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        ctk.CTkLabel(frame, text="Informations de la Dette Manuelle",
+                     font=ctk.CTkFont(size=13, weight="bold"), text_color="#2c3e50"
+                     ).pack(anchor="w", padx=10, pady=(10, 8))
+
+        infos = [
+            ("Référence :", numfact or "N/A"),
+            ("Date Enregistrement :", date_reg.strftime("%d/%m/%Y %H:%M") if date_reg else "N/A"),
+            ("Date Échéance :", date_ech.strftime("%d/%m/%Y") if date_ech else "N/A"),
+            ("Fournisseur :", nomfrs or "N/A"),
+            ("Contact :", contactfrs or "N/A"),
+            ("Montant :", f"{montant or 0:,.2f} Ar"),
+        ]
+        for label, value in infos:
+            row_f = ctk.CTkFrame(frame, fg_color="transparent")
+            row_f.pack(anchor="w", padx=10, pady=3, fill="x")
+            ctk.CTkLabel(row_f, text=label,
+                         font=ctk.CTkFont(weight="bold", size=11), text_color="#34495e",
+                         width=190).pack(side="left")
+            ctk.CTkLabel(row_f, text=value,
+                         font=ctk.CTkFont(size=11), text_color="#2c3e50").pack(side="left")
+
+        ctk.CTkButton(win, text="Fermer", command=win.destroy,
+                      fg_color="#7f8c8d", width=100).pack(pady=(8, 10))
 
     # ──────────────────────────────────────────────────────────────────
     # FENÊTRE PAIEMENT GLOBAL
