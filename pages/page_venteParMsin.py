@@ -2997,10 +2997,13 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
     # MÉTHODES D'IMPRESSION PDF A5
     # ==============================================================================
 
-    def generate_pdf_a5(self, data: Dict[str, Any], filename: str):
+    def generate_pdf_a5(self, data: dict, filename: str):
         """
-        Génère le PDF de la facture au format A5 avec le modèle canvas amélioré.
-        Utilise les données existantes du dictionnaire data.
+        Génère le PDF de la facture au format A5 avec gestion multi-pages.
+        - Au-delà de 25 lignes : saut de page automatique
+        - TOTAL Ar / Fmg toujours en bas du tableau (dernières 2 lignes), en gras,
+          label dans colonne PU TTC, valeur dans colonne MONTANT
+        - Somme en lettres avec retour à la ligne auto + marges gauche/droite
         """
         from reportlab.lib.pagesizes import A5
         from reportlab.lib import colors
@@ -3009,171 +3012,292 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
         from reportlab.pdfgen import canvas
         from reportlab.platypus import Table, TableStyle, Paragraph
 
-        # ✅ CRÉATION DU PDF AVEC CANVAS
+        MAX_ARTICLES_PAGE1     = 25
+        MAX_ARTICLES_SUIVANTES = 30
+        MARGIN                 = 10 * mm   # marge gauche/droite commune
+
         c = canvas.Canvas(filename, pagesize=A5)
         width, height = A5
 
-        # ✅ 1. CADRE DU VERSET (Haut de page avec bordure)
-        verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
-        c.setLineWidth(1)
-        c.rect(10*mm, height - 13*mm, width - 20*mm, 8*mm)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(width/2, height - 10.5*mm, verset)
-
-        # ✅ 2. EN-TÊTE DEUX COLONNES
-        styles = getSampleStyleSheet()
-        style_p = ParagraphStyle('style_p', fontSize=9, leading=11, parent=styles['Normal'])
-
-        societe = data['societe']
+        societe     = data['societe']
         utilisateur = data['utilisateur']
-        client = data['client']
-        vente = data['vente']
-        magasin = data.get('magasin', '')
+        client      = data['client']
+        vente       = data['vente']
+        magasin     = data.get('magasin', '')
 
-        # Adapter les clés de données si nécessaire
-        nomsociete = societe.get('nomsociete', 'N/A')
+        nomsociete     = societe.get('nomsociete', 'N/A')
         adressesociete = societe.get('adressesociete') or societe.get('adresse', 'N/A')
-        villesociete = societe.get('villesociete') or ''
+        villesociete   = societe.get('villesociete') or ''
         contactsociete = societe.get('contactsociete') or societe.get('tel', 'N/A')
-        nifsociete = societe.get('nifsociete') or societe.get('nif', 'N/A')
-        statsociete = societe.get('statsociete') or societe.get('stat', 'N/A')
+        nifsociete     = societe.get('nifsociete') or societe.get('nif', 'N/A')
+        statsociete    = societe.get('statsociete') or societe.get('stat', 'N/A')
 
-        # Insérer la ville juste en dessous de l'adresse si disponible
-        villes_line = f"{villesociete}<br/>" if villesociete else ""
-
-        gauche_text = f"<b><font size='11'>{nomsociete}</font></b><br/>{adressesociete}<br/>{villes_line}TEL: {contactsociete}<br/>NIF: {nifsociete} <br/>STAT: {statsociete}"
-
-        # Gérer si utilisateur est un dict ou une string et éviter d'afficher 'None'
         if isinstance(utilisateur, dict):
-            pren = utilisateur.get('prenomuser') or ''
-            nomu = utilisateur.get('nomuser') or ''
+            pren      = utilisateur.get('prenomuser') or ''
+            nomu      = utilisateur.get('nomuser') or ''
             user_name = f"{pren} {nomu}".strip()
         else:
             user_name = str(utilisateur) if utilisateur is not None else ''
 
-        # Affichage: titre magasin en gras à la place du label client, puis
-        # le nom du client en italique juste en dessous (vide si absent)
+        villes_line     = f"{villesociete}<br/>" if villesociete else ""
         magasin_display = magasin or ''
-        client_display = client.get('nomcli') or ''
-        droite_text = (
-            f"<b>Facture N°: {vente['refvente']}</b><br/>"
-            f"{vente['dateregistre']}<br/>"
-            f"<b>MAGASIN {magasin_display}</b><br/><br/>"
-            f"<i>Client: {client_display}</i><br/>"
-            f"<font size='7'>Op: {user_name}</font>"
-        )
+        client_display  = client.get('nomcli') or ''
 
-        gauche = Paragraph(gauche_text, style_p)
-        droite = Paragraph(droite_text, style_p)
+        # ─────────────────────────────────────────────────────
+        # Verset (toutes les pages)
+        # ─────────────────────────────────────────────────────
+        def draw_verset():
+            verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+            c.setLineWidth(1)
+            c.rect(MARGIN, height - 13*mm, width - 2*MARGIN, 8*mm)
+            c.setFont("Helvetica-Bold", 9)
+            c.drawCentredString(width / 2, height - 10.5*mm, verset)
 
-        header_table = Table([[gauche, droite]], colWidths=[64*mm, 64*mm])
-        header_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-        ]))
+        # ─────────────────────────────────────────────────────
+        # En-tête deux colonnes
+        # ─────────────────────────────────────────────────────
+        def draw_header(is_continuation=False):
+            styles  = getSampleStyleSheet()
+            style_p = ParagraphStyle('style_p', fontSize=9, leading=11,
+                                     parent=styles['Normal'])
 
-        header_table.wrapOn(c, width, height)
-        header_table.drawOn(c, 10*mm, height - 42*mm)
+            gauche_text = (
+                f"<b><font size='11'>{nomsociete}</font></b><br/>"
+                f"{adressesociete}<br/>{villes_line}"
+                f"TEL: {contactsociete}<br/>"
+                f"NIF: {nifsociete} <br/>"
+                f"STAT: {statsociete}"
+            )
 
-        # ✅ 3. TABLEAU DES ARTICLES
-        table_top = height - 45*mm
-        table_bottom = 55*mm
-        frame_height = table_top - table_bottom
+            suite_label = " <i>(suite)</i>" if is_continuation else ""
+            droite_text = (
+                f"<b>Facture N°: {vente['refvente']}{suite_label}</b><br/>"
+                f"{vente['dateregistre']}<br/>"
+                f"<b>MAGASIN {magasin_display}</b><br/><br/>"
+                f"<i>Client: {client_display}</i><br/>"
+                f"<font size='7'>Op: {user_name}</font>"
+            )
 
-        row_height = 5.5*mm
-        max_rows = int(frame_height / row_height)
+            gauche = Paragraph(gauche_text, style_p)
+            droite = Paragraph(droite_text, style_p)
 
-        # Préparer les données du tableau
-        table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']]
+            header_table = Table([[gauche, droite]], colWidths=[64*mm, 64*mm])
+            header_table.setStyle(TableStyle([
+                ('GRID',          (0, 0), (-1, -1), 1, colors.black),
+                ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING',   (0, 0), (-1, -1), 8),
+                ('TOPPADDING',    (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            header_table.wrapOn(c, width, height)
+            header_table.drawOn(c, MARGIN, height - 42*mm)
 
+        # ─────────────────────────────────────────────────────
+        # Footer : somme en lettres (auto-wrap) + mention + signatures
+        # ─────────────────────────────────────────────────────
+        def draw_footer(total_montant, table_bottom):
+            """
+            Positionné dynamiquement juste sous le bas du tableau.
+            La somme en lettres passe à la ligne automatiquement si elle
+            dépasse la largeur utile (width - 2×MARGIN).
+            """
+            usable_width    = width - 2 * MARGIN
+            montant_lettres = nombre_en_lettres_fr(int(total_montant)).upper()
+            full_text       = f"ARRETE A LA SOMME DE {montant_lettres} ARIARY TTC"
+
+            styles  = getSampleStyleSheet()
+            style_b = ParagraphStyle(
+                'footer_bold',
+                parent=styles['Normal'],
+                fontName='Helvetica-Bold',
+                fontSize=9,
+                leading=12,
+                alignment=1,   # centré
+            )
+            style_i = ParagraphStyle(
+                'footer_italic',
+                parent=styles['Normal'],
+                fontName='Helvetica-Oblique',
+                fontSize=8,
+                leading=10,
+                alignment=1,
+            )
+
+            p_lettre  = Paragraph(full_text, style_b)
+            p_mention = Paragraph(
+                "Nous déclinons la responsabilité des marchandises "
+                "non livrées au-delà de 5 jours",
+                style_i,
+            )
+
+            _, h_l = p_lettre.wrap(usable_width, 40*mm)
+            _, h_m = p_mention.wrap(usable_width, 20*mm)
+
+            # Positionner juste sous le tableau
+            gap      = 3 * mm
+            y_lettre  = table_bottom - gap - h_l
+            y_mention = y_lettre - 2*mm - h_m
+
+            p_lettre.drawOn(c,  MARGIN, y_lettre)
+            p_mention.drawOn(c, MARGIN, y_mention)
+
+            # Signatures
+            sig_y = 15*mm
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(MARGIN, sig_y, "Le Client")
+            c.drawCentredString(width / 2, sig_y, "Le Caissier")
+            c.drawString(width - 35*mm, sig_y, "Le Magasinier")
+
+        # ─────────────────────────────────────────────────────
+        # Tableau articles
+        # ─────────────────────────────────────────────────────
+        def draw_article_table(table_top, table_bottom, rows,
+                               show_totals, total_montant=0):
+            """
+            Quand show_totals=True :
+              • Les 2 DERNIÈRES lignes du tableau sont réservées aux totaux.
+              • Colonne PU TTC  (index 3) → label  'TOTAL Ar :' / 'Fmg :'
+              • Colonne MONTANT (index 4) → valeur numérique
+              • Ces lignes sont en gras, avec fond grisé et séparateur au-dessus.
+              Les lignes vides remplissent l'espace ENTRE les articles et les totaux.
+            """
+            frame_height = table_top - table_bottom
+            col_widths   = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+
+            # ── Nombre de lignes disponibles ──
+            row_height_est   = 5.5 * mm
+            max_rows_visible = int(frame_height / row_height_est)
+            reserved_bottom  = 2 if show_totals else 0
+            # slots pour les articles (hors header et hors lignes totaux)
+            content_slots = max_rows_visible - 1 - reserved_bottom
+
+            # ── Corps : articles + rembourrage ──
+            body = list(rows)
+            for _ in range(max(0, content_slots - len(body))):
+                body.append(['', '', '', '', ''])
+
+            # ── Lignes totaux en bas ──
+            if show_totals:
+                montant_fmg = int(total_montant * 5)
+                total_row = ['', '', 'TOTAL Ar :', self.formater_nombre_pdf(total_montant), '']
+                fmg_row   = ['', '', 'Fmg :',      self.formater_nombre_pdf(montant_fmg),   '']
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']] \
+                             + body + [total_row, fmg_row]
+            else:
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']] \
+                             + body
+
+            # ── Cadre + séparateurs verticaux ──
+            c.setLineWidth(1)
+            c.rect(MARGIN, table_bottom, width - 2*MARGIN, frame_height)
+            x_pos = MARGIN
+            for w in col_widths[:-1]:
+                x_pos += w
+                c.line(x_pos, table_top, x_pos, table_bottom)
+
+            actual_rh   = frame_height / len(table_data)
+            row_heights = [actual_rh] * len(table_data)
+
+            style_cmds = [
+                # En-tête
+                ('FONTNAME',      (0, 0),  (-1, 0),  'Helvetica-Bold'),
+                ('FONTSIZE',      (0, 0),  (-1, 0),  10),
+                ('LINEBELOW',     (0, 0),  (-1, 0),  1, colors.black),
+                # Corps
+                ('FONTSIZE',      (0, 1),  (-1, -1),  8),
+                # Alignements
+                ('ALIGN',         (3, 0),  (-1, -1), 'RIGHT'),  # PU TTC + MONTANT
+                ('ALIGN',         (0, 0),  (2, 0),   'LEFT'),   # en-tête col 0-2
+                ('VALIGN',        (0, 0),  (-1, -1), 'MIDDLE'),
+                # Padding
+                ('LEFTPADDING',   (0, 0),  (-1, -1),  2),
+                ('RIGHTPADDING',  (3, 0),  (-1, -1),  2),
+                ('TOPPADDING',    (0, 0),  (-1, -1),  0),
+                ('BOTTOMPADDING', (0, 0),  (-1, -1),  0),
+            ]
+
+            if show_totals:
+                style_cmds += [
+                    # Gras sur les 2 dernières lignes
+                    ('FONTNAME',   (0, -2), (-1, -1), 'Helvetica-Bold'),
+                    ('FONTSIZE',   (0, -2), (-1, -1),  9),
+                    # Séparateur au-dessus de TOTAL Ar
+                    ('LINEABOVE',  (0, -2), (-1, -2),  1, colors.black),
+                    # Label (col 2) aligné à droite → colle au montant
+                    ('ALIGN',      (2, -2), (2, -1),  'RIGHT'),
+                    # Fond grisé pour distinguer visuellement
+                    ('BACKGROUND', (0, -2), (-1, -1),
+                     colors.Color(0.93, 0.93, 0.93)),
+                ]
+
+            t = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
+            t.setStyle(TableStyle(style_cmds))
+            t.wrapOn(c, width, height)
+            t.drawOn(c, MARGIN, table_top - len(table_data) * actual_rh)
+
+            return table_bottom   # y bas du tableau (utile pour le footer)
+
+        # ─────────────────────────────────────────────────────
+        # Préparer toutes les lignes d'articles
+        # ─────────────────────────────────────────────────────
         total_montant = 0
-        num_articles = 0
+        all_rows = []
         for detail in data['details']:
-            montant = detail.get('montant_ttc', detail.get('montant', 0))
+            montant        = detail.get('montant_ttc', detail.get('montant', 0))
             total_montant += montant
-            num_articles += 1
-            table_data.append([
+            all_rows.append([
                 str(int(detail.get('qte', 0))),
                 str(detail.get('unite', '')),
                 str(detail.get('designation', '')),
                 self.formater_nombre_pdf(detail.get('prixunit', 0)),
-                self.formater_nombre_pdf(montant)
+                self.formater_nombre_pdf(montant),
             ])
 
-        # Ajouter des lignes vides
-        montant_fmg = int(total_montant * 5)
-        empty_rows_needed = max_rows - 1 - num_articles - 2
-        for i in range(max(0, empty_rows_needed)):
-            table_data.append(['', '', '', '', ''])
+        # ─────────────────────────────────────────────────────
+        # Découpage en pages
+        # ─────────────────────────────────────────────────────
+        pages = []
+        if len(all_rows) <= MAX_ARTICLES_PAGE1:
+            pages.append(('first', all_rows))
+        else:
+            pages.append(('first', all_rows[:MAX_ARTICLES_PAGE1]))
+            reste = all_rows[MAX_ARTICLES_PAGE1:]
+            while reste:
+                pages.append(('continuation', reste[:MAX_ARTICLES_SUIVANTES]))
+                reste = reste[MAX_ARTICLES_SUIVANTES:]
 
-        # Totaux
-        table_data.append(['', '', 'TOTAL Ar:', self.formater_nombre_pdf(total_montant), ''])
-        table_data.append(['', '', 'Fmg:', self.formater_nombre_pdf(montant_fmg), ''])
+        # ─────────────────────────────────────────────────────
+        # Rendu page par page
+        # ─────────────────────────────────────────────────────
+        for page_idx, (page_type, rows) in enumerate(pages):
+            is_last = (page_idx == len(pages) - 1)
 
-        col_widths = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+            draw_verset()
+            draw_header(is_continuation=(page_type == 'continuation'))
 
-        # Dessiner le cadre et lignes
-        c.setLineWidth(1)
-        c.rect(10*mm, table_bottom, width - 20*mm, frame_height)
+            table_top    = height - 45*mm
+            table_bottom = 55*mm if is_last else 15*mm
 
-        x_pos = 10*mm
-        for w in col_widths[:-1]:
-            x_pos += w
-            c.line(x_pos, table_top, x_pos, table_bottom)
+            tb = draw_article_table(
+                table_top, table_bottom, rows,
+                show_totals=is_last,
+                total_montant=total_montant,
+            )
 
-        # Créer le tableau avec hauteurs proportionnelles
-        actual_row_height = frame_height / len(table_data)
-        row_heights = [actual_row_height] * len(table_data)
+            if is_last:
+                draw_footer(total_montant, table_bottom=tb)
 
-        articles_table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
-        articles_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.transparent),
-            ('BACKGROUND', (0, -2), (-1, -1), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('FONTSIZE', (0, 1), (-1, -3), 8),
-            ('FONTSIZE', (0, -2), (-1, -1), 9),
-            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
-            ('LINEABOVE', (0, -2), (-1, -2), 1, colors.black),
-            # Bordure noire en bas du tableau (sous les montants TOTAL Ar et Fmg)
-            ('LINEBELOW', (0, -1), (-1, -1), 1, colors.black),
-            ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
-            ('ALIGN', (0, 0), (2, 0), 'LEFT'),
-            ('ALIGN', (2, -2), (2, -1), 'RIGHT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 1),
-            ('RIGHTPADDING', (3, 0), (-1, -1), 1),
-            ('TOPPADDING', (0, 0), (-1, -1), 0),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-        ]))
+            if len(pages) > 1:
+                c.setFont("Helvetica", 7)
+                c.drawCentredString(width / 2, 8*mm,
+                                    f"Page {page_idx + 1} / {len(pages)}")
 
-        articles_table.wrapOn(c, width, height)
-        assert actual_row_height, 'actual_row_height must not be None'
-        actual_total_height = len(table_data) * actual_row_height
-        articles_table.drawOn(c, 10*mm, table_top - actual_total_height)
+            if not is_last:
+                c.showPage()
 
-        # ✅ 4. TEXTE EN LETTRES
-        montant_lettres = nombre_en_lettres_fr(int(total_montant)).upper()
-        text_y = table_bottom - 18*mm
-        c.setFont("Helvetica-Bold", 10)
-        c.drawCentredString(width/2, text_y, f"ARRETE A LA SOMME DE {montant_lettres} ARIARY TTC")
-
-        # ✅ 5. MENTION LÉGALE
-        c.setFont("Helvetica-Oblique", 8)
-        c.drawCentredString(width/2, text_y - 5*mm, "Nous déclinons la responsabilité des marchandises non livrées au-delà de 5 jours")
-
-        # ✅ 6. SIGNATURES
-        sig_y = 15*mm
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(15*mm, sig_y, "Le Client")
-        c.drawCentredString(width/2, sig_y, "Le Caissier")
-        c.drawString(width - 35*mm, sig_y, "Le Magasinier")
-
-        # ✅ SAUVEGARDER
+        # ─────────────────────────────────────────────────────
+        # Sauvegarde
+        # ─────────────────────────────────────────────────────
         try:
             c.save()
             print(f"✅ PDF généré avec succès : {filename}")
@@ -3181,7 +3305,6 @@ class PageVenteParMsin(ctk.CTkFrame): # MODIFICATION : Hérite de CTkFrame pour 
             print(f"❌ Erreur PDF : {e}")
             import traceback
             traceback.print_exc()
-        
     # ==============================================================================
     # MÉTHODES D'IMPRESSION TICKET 80MM (Texte Brut)
     # ==============================================================================
