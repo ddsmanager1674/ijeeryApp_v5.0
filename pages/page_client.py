@@ -609,12 +609,20 @@ class PageClient(ctk.CTkFrame):
             if not selected:
                 return
             
-            item_id = selected[0]
-            try:
-                self._open_global_payment_window(idclient, detail_window, tree_credits, label_montant_restant)
-            except (ValueError, psycopg2.Error) as err:
-                messagebox.showerror("Erreur", f"Erreur ouverture paiement global: {err}")
-        
+            item_iid = selected[0]  # ex: "Crédit Vente_12" ou "Créance_5"
+            values = tree_credits.item(item_iid, "values")
+            # values = (ID, Type, Date, Montant, Montant Payé, Solde Restant, Statut)
+            if not values:
+                return
+
+            credit_id = values[0]
+            type_credit = values[1]
+
+            if type_credit == "Crédit Vente":
+                self._open_vente_detail_window(credit_id, detail_window)
+            else:
+                self._open_creance_detail_window(credit_id, detail_window)
+
         tree_credits.bind("<Double-1>", on_credit_double_click)
 
         # --- TABLEAU D'HISTORIQUE DES PAIEMENTS (Bas) ---
@@ -682,6 +690,212 @@ class PageClient(ctk.CTkFrame):
         
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
+
+    def _open_vente_detail_window(self, pmtfacture_id, parent_window):
+        """Affiche les détails de la vente liée à un crédit vente (tb_pmtfacture)."""
+        try:
+            # Récupérer la refvente depuis tb_pmtfacture
+            self.cursor.execute("""
+                SELECT refvente FROM tb_pmtfacture WHERE id = %s
+            """, (pmtfacture_id,))
+            row = self.cursor.fetchone()
+            if not row or not row[0]:
+                messagebox.showinfo("Information", "Aucune référence de vente associée à ce crédit.")
+                return
+            refvente = row[0]
+
+            # Récupérer les infos de la vente
+            self.cursor.execute("""
+                SELECT v.refvente, v.dateregistre, v.totmtvente,
+                       COALESCE(u.username, 'N/A') as operateur,
+                       COALESCE(m.designationmag, 'N/A') as magasin
+                FROM tb_vente v
+                LEFT JOIN tb_users u ON v.iduser = u.iduser
+                LEFT JOIN tb_magasin m ON v.idmag = m.idmag
+                WHERE v.refvente = %s AND v.deleted = 0
+            """, (refvente,))
+            vente = self.cursor.fetchone()
+            if not vente:
+                messagebox.showinfo("Information", f"Vente introuvable pour la référence : {refvente}")
+                return
+
+            ref, date_vente, total, operateur, magasin = vente
+
+            # Récupérer les détails de la vente
+            self.cursor.execute("""
+                SELECT 
+                    u.codearticle,
+                    a.designation,
+                    COALESCE(u.designationunite, '-') as unite,
+                    vd.prixunit,
+                    COALESCE(vd.remise, 0) as remise,
+                    vd.qtvente,
+                    (vd.prixunit * vd.qtvente * (1 - COALESCE(vd.remise, 0) / 100)) as montant
+                FROM tb_ventedetail vd
+                LEFT JOIN tb_article a ON vd.idarticle = a.idarticle
+                LEFT JOIN tb_unite u ON vd.idunite = u.idunite
+                WHERE vd.idvente = (SELECT id FROM tb_vente WHERE refvente = %s AND deleted = 0 LIMIT 1)
+                  AND vd.deleted = 0
+            """, (refvente,))
+            details = self.cursor.fetchall()
+
+        except psycopg2.Error as err:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            messagebox.showerror("Erreur", f"Erreur chargement détails vente : {err}")
+            return
+
+        # --- Fenêtre ---
+        win = ctk.CTkToplevel(parent_window)
+        win.title(f"Détails Vente — {refvente}")
+        parent_window.update_idletasks()
+        pw = max(parent_window.winfo_width(), 1)
+        ph = max(parent_window.winfo_height(), 1)
+        px = parent_window.winfo_x()
+        py = parent_window.winfo_y()
+        ww, wh = max(700, int(pw * 0.6)), max(500, int(ph * 0.75))
+        win.geometry(f"{ww}x{wh}+{px + (pw - ww)//2}+{py + (ph - wh)//2}")
+        win.minsize(700, 500)
+        win.grab_set()
+        win.grid_columnconfigure(0, weight=1)
+        win.grid_rowconfigure(1, weight=1)
+
+        # --- Panel info vente ---
+        info_frame = ctk.CTkFrame(win, fg_color="#f0f4f8")
+        info_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
+
+        ctk.CTkLabel(info_frame, text="Informations de la Vente",
+                     font=ctk.CTkFont(size=12, weight="bold"), text_color="#2c3e50"
+                     ).grid(row=0, column=0, columnspan=4, sticky="w", padx=10, pady=(8, 4))
+
+        infos = [
+            ("Référence :", ref),
+            ("Date Vente :", date_vente.strftime("%d/%m/%Y %H:%M") if date_vente else "N/A"),
+            ("Magasin :", magasin),
+            ("Opérateur :", operateur),
+            ("Montant Total :", f"{total or 0:,.2f} Ar"),
+        ]
+        for col_idx, (label, value) in enumerate(infos):
+            ctk.CTkLabel(info_frame, text=label,
+                         font=ctk.CTkFont(weight="bold", size=10), text_color="#34495e"
+                         ).grid(row=1, column=col_idx * 2, sticky="w", padx=(10, 2), pady=(0, 8))
+            ctk.CTkLabel(info_frame, text=value,
+                         font=ctk.CTkFont(size=10), text_color="#2c3e50"
+                         ).grid(row=1, column=col_idx * 2 + 1, sticky="w", padx=(0, 16), pady=(0, 8))
+
+        # --- Panel détails articles ---
+        detail_frame = ctk.CTkFrame(win)
+        detail_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(4, 4))
+        detail_frame.grid_columnconfigure(0, weight=1)
+        detail_frame.grid_rowconfigure(1, weight=1)
+
+        ctk.CTkLabel(detail_frame, text="Détail des Articles",
+                     font=ctk.CTkFont(size=12, weight="bold")
+                     ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 4))
+
+        cols = ("Code Article", "Désignation", "Unité", "Qté", "P.U", "Remise (%)", "Montant")
+        tree_detail = ttk.Treeview(detail_frame, columns=cols, show="headings", height=12)
+        tree_detail.tag_configure("even", background="#FFFFFF")
+        tree_detail.tag_configure("odd", background="#E6EFF8")
+
+        col_widths = {"Code Article": 90, "Désignation": 180, "Unité": 60,
+                      "Qté": 55, "P.U": 90, "Remise (%)": 80, "Montant": 100}
+        col_anchor = {"P.U": "e", "Qté": "e", "Remise (%)": "e", "Montant": "e"}
+        for col in cols:
+            tree_detail.heading(col, text=col)
+            tree_detail.column(col, width=col_widths.get(col, 90),
+                               anchor=col_anchor.get(col, "w"))
+
+        sb = ttk.Scrollbar(detail_frame, command=tree_detail.yview)
+        tree_detail.configure(yscrollcommand=sb.set)
+        tree_detail.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
+        sb.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
+
+        for idx, d in enumerate(details):
+            code, designation, unite, pu, remise, qte, montant_ligne = d
+            tag = "even" if idx % 2 == 0 else "odd"
+            tree_detail.insert("", "end", tags=(tag,), values=(
+                code or "-",
+                designation or "-",
+                unite or "-",
+                f"{qte or 0:,.2f}",
+                f"{pu or 0:,.2f}",
+                f"{remise or 0:,.1f}",
+                f"{montant_ligne or 0:,.2f}",
+            ))
+
+        # --- Total ---
+        total_frame = ctk.CTkFrame(win, fg_color="#eaf0fb")
+        total_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 12))
+        ctk.CTkLabel(total_frame, text=f"Montant Total :  {total or 0:,.2f} Ar",
+                     font=ctk.CTkFont(size=13, weight="bold"), text_color="#1a5276"
+                     ).pack(side="right", padx=20, pady=8)
+
+        ctk.CTkButton(win, text="Fermer", command=win.destroy,
+                      fg_color="#7f8c8d", width=100).grid(row=3, column=0, pady=(0, 10))
+
+    def _open_creance_detail_window(self, creance_id, parent_window):
+        """Affiche les informations d'une créance manuelle (tb_autrecreance)."""
+        try:
+            self.cursor.execute("""
+                SELECT ac.id, ac.numfact, ac.dateregistre, ac.montant,
+                       c.nomcli, c.contactcli
+                FROM tb_autrecreance ac
+                LEFT JOIN tb_client c ON ac.idclient = c.idclient
+                WHERE ac.id = %s
+            """, (creance_id,))
+            row = self.cursor.fetchone()
+            if not row:
+                messagebox.showinfo("Information", "Créance introuvable.")
+                return
+            ac_id, numfact, date_reg, montant, nomcli, contactcli = row
+        except psycopg2.Error as err:
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            messagebox.showerror("Erreur", f"Erreur chargement créance : {err}")
+            return
+
+        win = ctk.CTkToplevel(parent_window)
+        win.title(f"Détails Créance — {numfact or ac_id}")
+        parent_window.update_idletasks()
+        pw = max(parent_window.winfo_width(), 1)
+        ph = max(parent_window.winfo_height(), 1)
+        px = parent_window.winfo_x()
+        py = parent_window.winfo_y()
+        ww, wh = 440, 280
+        win.geometry(f"{ww}x{wh}+{px + (pw - ww)//2}+{py + (ph - wh)//2}")
+        win.resizable(False, False)
+        win.grab_set()
+
+        frame = ctk.CTkFrame(win, fg_color="#f0f4f8")
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        ctk.CTkLabel(frame, text="Informations de la Créance",
+                     font=ctk.CTkFont(size=13, weight="bold"), text_color="#2c3e50"
+                     ).pack(anchor="w", padx=10, pady=(10, 8))
+
+        infos = [
+            ("Référence :", numfact or "N/A"),
+            ("Date Enregistrement :", date_reg.strftime("%d/%m/%Y %H:%M") if date_reg else "N/A"),
+            ("Client :", nomcli or "N/A"),
+            ("Contact :", contactcli or "N/A"),
+            ("Montant :", f"{montant or 0:,.2f} Ar"),
+        ]
+        for label, value in infos:
+            row_f = ctk.CTkFrame(frame, fg_color="transparent")
+            row_f.pack(anchor="w", padx=10, pady=3, fill="x")
+            ctk.CTkLabel(row_f, text=label,
+                         font=ctk.CTkFont(weight="bold", size=11), text_color="#34495e",
+                         width=180).pack(side="left")
+            ctk.CTkLabel(row_f, text=value,
+                         font=ctk.CTkFont(size=11), text_color="#2c3e50").pack(side="left")
+
+        ctk.CTkButton(win, text="Fermer", command=win.destroy,
+                      fg_color="#7f8c8d", width=100).pack(pady=(8, 10))
 
     def _open_payment_window(self, credit_id, idclient, type_credit, montant_total, montant_paye, solde_restant, tree_credits, parent_window):
         """Ouvre une fenêtre pour enregistrer un paiement partiel."""
