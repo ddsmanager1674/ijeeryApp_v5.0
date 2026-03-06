@@ -211,34 +211,34 @@ class Fonts:
     # ── Constructeurs de polices ──────────────────────────────────────────────
 
     @classmethod
-    def get(cls, size: int = 12, weight: str = "normal",
+    def get(cls, size: int = 13, weight: str = "normal",
             italic: bool = False) -> ctk.CTkFont:
         """Constructeur générique."""
         return ctk.CTkFont(family=cls._family, size=size,
                            weight=weight, slant="italic" if italic else "roman")
 
     @classmethod
-    def body(cls, size: int = 12) -> ctk.CTkFont:
+    def body(cls, size: int = 13) -> ctk.CTkFont:
         """Corps de texte standard."""
         return cls.get(size)
 
     @classmethod
-    def medium(cls, size: int = 12) -> ctk.CTkFont:
+    def medium(cls, size: int = 13) -> ctk.CTkFont:
         """Poids medium — sous-titres, valeurs importantes."""
         return cls.get(size, "normal")   # CTk n'expose pas "medium" nativement
 
     @classmethod
-    def bold(cls, size: int = 12) -> ctk.CTkFont:
+    def bold(cls, size: int = 13) -> ctk.CTkFont:
         """Texte gras — boutons, totaux, alertes."""
         return cls.get(size, "bold")
 
     @classmethod
-    def label(cls, size: int = 12) -> ctk.CTkFont:
+    def label(cls, size: int = 13) -> ctk.CTkFont:
         """Étiquettes de champs, petits textes."""
         return cls.get(size)
 
     @classmethod
-    def small(cls, size: int = 12) -> ctk.CTkFont:
+    def small(cls, size: int = 13) -> ctk.CTkFont:
         """Texte discret — footers, métadonnées."""
         return cls.get(size)
 
@@ -273,12 +273,12 @@ class Fonts:
         return cls.get(size)
 
     @classmethod
-    def badge(cls, size: int = 12) -> ctk.CTkFont:
+    def badge(cls, size: int = 13) -> ctk.CTkFont:
         """Texte de badge/tag."""
         return cls.get(size, "bold")
 
     @classmethod
-    def button(cls, size: int = 12) -> ctk.CTkFont:
+    def button(cls, size: int = 13) -> ctk.CTkFont:
         """Texte de bouton."""
         return cls.get(size, "bold")
 
@@ -288,12 +288,12 @@ class Fonts:
         return cls.get(size)
 
     @classmethod
-    def tooltip(cls, size: int = 12) -> ctk.CTkFont:
+    def tooltip(cls, size: int = 13) -> ctk.CTkFont:
         """Tooltip / aide contextuelle."""
         return cls.get(size, "normal", italic=True)
 
     @classmethod
-    def monospace(cls, size: int = 12) -> ctk.CTkFont:
+    def monospace(cls, size: int = 13) -> ctk.CTkFont:
         """Codes, références, valeurs techniques."""
         return ctk.CTkFont(family="Courier New", size=size)
 
