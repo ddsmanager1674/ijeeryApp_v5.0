@@ -1,1918 +1,1595 @@
+# -*- coding: utf-8 -*-
+"""
+Page Commande Fournisseur — iJeery
+Refactorisé : thème app_theme, layout responsive, toggle transporteur, impression post-save.
+"""
+
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
 import json
 from datetime import datetime
 from html import escape
-from tkcalendar import DateEntry # Ajoutez cette ligne avec les autres imports
+from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
+from app_theme import Colors, Fonts, styled, Theme
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers TTK style (appliqués une seule fois)
+# ─────────────────────────────────────────────────────────────────────────────
+def _apply_treeview_style():
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure(
+        "iJeery.Treeview",
+        background=Colors.BG_CARD,
+        foreground=Colors.TEXT_PRIMARY,
+        fieldbackground=Colors.BG_CARD,
+        rowheight=28,
+        font=("Segoe UI", 9),
+        borderwidth=0,
+    )
+    style.configure(
+        "iJeery.Treeview.Heading",
+        background=Colors.MIDNIGHT,
+        foreground=Colors.TEXT_ON_DARK,
+        font=("Segoe UI", 9, "bold"),
+        relief="flat",
+        borderwidth=0,
+    )
+    style.map("iJeery.Treeview",
+              background=[("selected", Colors.PRIMARY_LIGHT)],
+              foreground=[("selected", Colors.TEXT_PRIMARY)])
+    style.map("iJeery.Treeview.Heading",
+              background=[("active", Colors.MIDNIGHT_LIGHT)])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Séparateur horizontal léger
+# ─────────────────────────────────────────────────────────────────────────────
+def _divider(parent):
+    return ctk.CTkFrame(parent, height=1, fg_color=Colors.DIVIDER)
 
 
 class PageCommandeFrs(ctk.CTkFrame):
     def __init__(self, parent, iduser):
-        super().__init__(parent)
+        super().__init__(parent, fg_color=Colors.BG_PAGE)
+        _apply_treeview_style()   # Appelé ici — fenêtre Tk déjà initialisée
         self.iduser = iduser
         self.article_selectionne = None
         self.items_commande = []
-        
-        # Variable pour stocker l'ID de la commande en mode modification
+
         self.idcom_charge = None
         self.mode_modification = False
-        
-        # Index de la ligne sélectionnée pour modification
         self.index_ligne_selectionnee = None
-        
+
+        # Transporteur
+        self.transporteur_id = None
+        self.transporteur_nom = None
+
         self.setup_ui()
         self.generer_reference()
         self.charger_fournisseurs()
-    
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # DB
+    # ─────────────────────────────────────────────────────────────────────────
     def connect_db(self):
-        """Connexion à la base de données PostgreSQL"""
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
                 db_config = config['database']
-
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']  
+            return psycopg2.connect(
+                host=db_config['host'], user=db_config['user'],
+                password=db_config['password'], database=db_config['database'],
+                port=db_config['port']
             )
-            return conn
         except FileNotFoundError:
-            messagebox.showerror("Erreur de configuration", "Fichier 'config.json' non trouvé.")
-            return None
+            messagebox.showerror("Erreur", "Fichier 'config.json' non trouvé.")
         except KeyError:
-            messagebox.showerror("Erreur de configuration", "Clés de base de données manquantes dans 'config.json'.")
-            return None
-        except psycopg2.Error as err:
-            messagebox.showerror("Erreur de connexion", f"Erreur de connexion à PostgreSQL : {err}")
-            return None
-        except UnicodeDecodeError as err:
-            messagebox.showerror("Erreur d'encodage", f"Problème d'encodage du fichier de configuration : {err}")
-            return None
-    
+            messagebox.showerror("Erreur", "Clés DB manquantes dans 'config.json'.")
+        except psycopg2.Error as e:
+            messagebox.showerror("Connexion", f"Erreur PostgreSQL : {e}")
+        except UnicodeDecodeError as e:
+            messagebox.showerror("Encodage", f"Problème d'encodage : {e}")
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Utilitaires numériques
+    # ─────────────────────────────────────────────────────────────────────────
     def formater_nombre(self, nombre):
-        """Formate un nombre avec séparateur de milliers (1.000,00)"""
         try:
             nombre = float(nombre)
-            # Formater avec 2 décimales
             partie_entiere = int(nombre)
             partie_decimale = abs(nombre - partie_entiere)
-            
-            # Formater la partie entière avec des points comme séparateurs de milliers
             str_entiere = f"{partie_entiere:,}".replace(',', '.')
-            
-            # Formater la partie décimale
             str_decimale = f"{partie_decimale:.2f}".split('.')[1]
-            
             return f"{str_entiere},{str_decimale}"
         except:
             return "0,00"
-    
+
     def parser_nombre(self, texte):
-        """Convertit un nombre formaté (1.000,00) en float"""
         try:
-            # Enlever les points (séparateurs de milliers) et remplacer la virgule par un point
-            texte_clean = texte.replace('.', '').replace(',', '.')
-            return float(texte_clean)
+            return float(texte.replace('.', '').replace(',', '.'))
         except:
             return 0.0
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Couleurs alternées Treeview
+    # ─────────────────────────────────────────────────────────────────────────
     def _configure_table_alternating_colors(self, tree):
-        """Configure les tags de couleurs alternées pour un Treeview."""
-        tree.tag_configure("row_even", background="#FFFFFF")
-        tree.tag_configure("row_odd", background="#F3F7FF")
+        tree.tag_configure("row_even", background=Colors.BG_CARD)
+        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
 
     def _refresh_table_alternating_colors(self, tree):
-        """Réapplique les couleurs alternées sur les lignes existantes."""
         for idx, item in enumerate(tree.get_children()):
             tags = tuple(t for t in tree.item(item, "tags") if t not in ("row_even", "row_odd"))
-            alt_tag = "row_even" if idx % 2 == 0 else "row_odd"
-            tree.item(item, tags=tags + (alt_tag,))
-    
+            alt = "row_even" if idx % 2 == 0 else "row_odd"
+            tree.item(item, tags=tags + (alt,))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Nombre en lettres
+    # ─────────────────────────────────────────────────────────────────────────
     def nombre_en_lettres(self, nombre):
-        """Convertit un nombre en lettres (pour le montant)"""
         unites = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"]
-        dizaines = ["", "dix", "vingt", "trente", "quarante", "cinquante", "soixante", "soixante-dix", "quatre-vingt", "quatre-vingt-dix"]
-        
-        def convert_moins_100(n):
-            if n < 10:
-                return unites[n]
-            elif n < 20:
-                specials = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf"]
-                return specials[n - 10]
-            elif n < 70:
-                unite = n % 10
-                dizaine = n // 10
-                if unite == 0:
-                    return dizaines[dizaine]
-                elif unite == 1 and dizaine != 8:
-                    return dizaines[dizaine] + "-et-un"
-                else:
-                    return dizaines[dizaine] + "-" + unites[unite]
-            elif n < 80:
-                return "soixante-" + convert_moins_100(n - 60)
-            elif n < 100:
-                if n == 80:
-                    return "quatre-vingts"
-                return "quatre-vingt-" + convert_moins_100(n - 80)
-            return ""
-        
-        def convert_moins_1000(n):
-            if n < 100:
-                return convert_moins_100(n)
-            centaine = n // 100
-            reste = n % 100
-            if centaine == 1:
-                result = "cent"
-            else:
-                result = unites[centaine] + " cent"
+        dizaines = ["", "dix", "vingt", "trente", "quarante", "cinquante",
+                    "soixante", "soixante-dix", "quatre-vingt", "quatre-vingt-dix"]
+
+        def c100(n):
+            if n < 10: return unites[n]
+            if n < 20:
+                s = ["dix","onze","douze","treize","quatorze","quinze","seize",
+                     "dix-sept","dix-huit","dix-neuf"]
+                return s[n-10]
+            if n < 70:
+                u = n % 10; d = n // 10
+                if u == 0: return dizaines[d]
+                if u == 1 and d != 8: return dizaines[d] + "-et-un"
+                return dizaines[d] + "-" + unites[u]
+            if n < 80: return "soixante-" + c100(n-60)
+            if n == 80: return "quatre-vingts"
+            return "quatre-vingt-" + c100(n-80)
+
+        def c1000(n):
+            if n < 100: return c100(n)
+            cent = n // 100; reste = n % 100
+            r = ("cent" if cent == 1 else unites[cent] + " cent")
             if reste == 0:
-                if centaine > 1:
-                    result += "s"
-            else:
-                result += " " + convert_moins_100(reste)
-            return result
-        
+                if cent > 1: r += "s"
+            else: r += " " + c100(reste)
+            return r
+
         try:
             nombre = float(nombre)
-            partie_entiere = int(nombre)
-            partie_decimale = int(round((nombre - partie_entiere) * 100))
-            
-            if partie_entiere == 0:
-                result = "zéro"
+            entier = int(nombre)
+            dec = int(round((nombre - entier) * 100))
+            if entier == 0: res = "zéro"
             else:
-                result = ""
-                
-                # Millions
-                if partie_entiere >= 1000000:
-                    millions = partie_entiere // 1000000
-                    if millions == 1:
-                        result += "un million "
-                    else:
-                        result += convert_moins_1000(millions) + " millions "
-                    partie_entiere %= 1000000
-                
-                # Milliers
-                if partie_entiere >= 1000:
-                    milliers = partie_entiere // 1000
-                    if milliers == 1:
-                        result += "mille "
-                    else:
-                        result += convert_moins_1000(milliers) + " mille "
-                    partie_entiere %= 1000
-                
-                # Centaines
-                if partie_entiere > 0:
-                    result += convert_moins_1000(partie_entiere)
-            
-            result = result.strip()
-            
-            # Ajouter la devise
-            result += " Ariary"
-            
-            # Ajouter les centimes si nécessaire
-            if partie_decimale > 0:
-                result += " et " + convert_moins_100(partie_decimale) + " centimes"
-            
-            return result.capitalize()
+                res = ""
+                if entier >= 1000000:
+                    m = entier // 1000000
+                    res += ("un million " if m == 1 else c1000(m) + " millions ")
+                    entier %= 1000000
+                if entier >= 1000:
+                    k = entier // 1000
+                    res += ("mille " if k == 1 else c1000(k) + " mille ")
+                    entier %= 1000
+                if entier > 0: res += c1000(entier)
+            res = res.strip() + " Ariary"
+            if dec > 0: res += " et " + c100(dec) + " centimes"
+            return res.capitalize()
         except:
             return "Zéro Ariary"
-        
+
+    # =========================================================================
+    # CONSTRUCTION DE L'UI  — layout compact, sans scrollbar
+    # =========================================================================
     def setup_ui(self):
-        # Titre
-        self.titre = ctk.CTkLabel(self, text="Nouvelle Commande Fournisseur", 
-                            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"))
-        self.titre.pack(pady=10)
-        
-        # Frame en haut pour référence, fournisseur ET TOTAL GLOBAL
-        frame_haut = ctk.CTkFrame(self)
-        frame_haut.pack(fill="x", padx=20, pady=10)
-        
+        # ── En-tête ──────────────────────────────────────────────────────────
+        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=42)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+
+        self.titre = ctk.CTkLabel(
+            header, text="Nouvelle Commande Fournisseur",
+            font=Fonts.bold(14), text_color=Colors.TEXT_ON_DARK
+        )
+        self.titre.pack(side="left", padx=14, pady=0)
+
+        styled.button_info(
+            header, text="Charger", icon="📂",
+            command=self.ouvrir_recherche_commande, width=120, height=28
+        ).pack(side="right", padx=8, pady=7)
+
+        styled.button_secondary(
+            header, text="Nouveau", icon="🔄",
+            command=self.nouvelle_commande, width=100, height=28
+        ).pack(side="right", padx=0, pady=7)
+
+        # ── Corps principal (pas de scrollbar) ───────────────────────────────
+        body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE)
+        body.pack(fill="both", expand=True, padx=8, pady=6)
+
+        # Section 1 — Infos générales
+        self._build_section_infos(body)
+
+        # Section 2 — Transporteur
+        self._build_section_transporteur(body)
+
+        # Section 3 — Saisie article
+        self._build_section_article(body)
+
+        # Section 4 — Tableau
+        self._build_section_tableau(body)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Section 1 — Infos générales  (ref + fournisseur inline)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _build_section_infos(self, parent):
+        card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
+                            corner_radius=8, border_width=1, border_color=Colors.BORDER)
+        card.pack(fill="x", pady=(0, 4))
+
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=6)
+        row.columnconfigure(3, weight=1)
+
+        # Titre section inline à gauche
+        ctk.CTkLabel(row, text="📋 Commande", font=Fonts.bold(11),
+                     text_color=Colors.MIDNIGHT, width=90, anchor="w"
+                     ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+
         # Référence
-        ctk.CTkLabel(frame_haut, text="Référence:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.entry_ref = ctk.CTkEntry(frame_haut, width=200, state="readonly")
-        self.entry_ref.grid(row=0, column=1, padx=10, pady=10)
-        
-        # Fournisseur (Entry + Bouton Recherche)
-        ctk.CTkLabel(frame_haut, text="Fournisseur:").grid(row=0, column=2, padx=10, pady=10, sticky="w")
-        self.entry_fournisseur = ctk.CTkEntry(frame_haut, width=250, state="readonly")
-        self.entry_fournisseur.grid(row=0, column=3, padx=10, pady=10, sticky="w")
-        
-        btn_search_frs = ctk.CTkButton(frame_haut, text="🔍", width=30,
-                                       command=self.ouvrir_recherche_fournisseur)
-        btn_search_frs.grid(row=0, column=3, columnspan=1, padx=(270, 10), pady=10, sticky="e")
-        self.fournisseur_id = None  # Initialisation
-        self.fournisseur_contact = None  # Contact du fournisseur
-        self.fournisseur_adresse = None  # Adresse du fournisseur
+        self.entry_ref = ctk.CTkEntry(row, width=160, height=28,
+                                      fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                                      font=Fonts.body(11), state="readonly")
+        self.entry_ref.grid(row=0, column=1, sticky="w", padx=(0, 20))
 
-            
-        # Bouton Charger Commande (pour la modification)
-        btn_charger = ctk.CTkButton(frame_haut, text="📂 Charger Commande", 
-                                    command=self.ouvrir_recherche_commande, width=150,
-                                    fg_color="#1976d2", hover_color="#1565c0")
-        btn_charger.grid(row=0, column=4, padx=10, pady=10)
-        
-        # LABEL TOTAL GLOBAL DE COMMANDE (NOUVEAU)
-        self.label_total_global = ctk.CTkLabel(frame_haut, text="Total Commande: 0,00", 
-                                       font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
-                                       text_color="#2e7d32")
-        self.label_total_global.grid(row=1, column=3, padx=20, pady=10, sticky="e")
-        
-        # Configurer la colonne 5 pour prendre l'espace restant
-        frame_haut.grid_columnconfigure(5, weight=1)
-        
-        # Frame milieu pour saisie des articles
-        frame_milieu = ctk.CTkFrame(self)
-        frame_milieu.pack(fill="x", padx=20, pady=10)
-        
-        # Nom d'article avec bouton recherche
-        ctk.CTkLabel(frame_milieu, text="Nom d'article:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.entry_article = ctk.CTkEntry(frame_milieu, width=300, state="readonly")
-        self.entry_article.grid(row=0, column=1, padx=10, pady=10)
-        
-        btn_recherche = ctk.CTkButton(frame_milieu, text="🔍 Rechercher", 
-                                      command=self.ouvrir_recherche_article, width=120)
-        btn_recherche.grid(row=0, column=2, padx=10, pady=10)
-        
-        # Unité
-        ctk.CTkLabel(frame_milieu, text="Unité:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
-        self.entry_unite = ctk.CTkEntry(frame_milieu, width=150, state="readonly")
-        self.entry_unite.grid(row=1, column=1, padx=10, pady=10, sticky="w")
-        
-        # Quantité Cmd
-        ctk.CTkLabel(frame_milieu, text="Quantité Cmd:").grid(row=2, column=0, padx=10, pady=10, sticky="w")
-        self.entry_qtcmd = ctk.CTkEntry(frame_milieu, width=150)
-        self.entry_qtcmd.grid(row=2, column=1, padx=10, pady=10, sticky="w")
-        self.entry_qtcmd.bind('<KeyRelease>', lambda event: self.calculer_total_ligne_preview()) # Bind pour le calcul
-        
-        # Prix Unitaire
-        ctk.CTkLabel(frame_milieu, text="Prix Unitaire:").grid(row=2, column=2, padx=10, pady=10, sticky="w")
-        self.entry_punitcmd = ctk.CTkEntry(frame_milieu, width=150)
-        self.entry_punitcmd.grid(row=2, column=3, padx=10, pady=10, sticky="w")
-        self.entry_punitcmd.bind('<KeyRelease>', lambda event: self.calculer_total_ligne_preview()) # Bind pour le calcul
-        
-        # Label Total Ligne (NOUVEAU)
-        self.label_total_ligne = ctk.CTkLabel(frame_milieu, text="Total Ligne: 0,00",
-                                              font=ctk.CTkFont(family="Segoe UI", weight="bold"))
-        self.label_total_ligne.grid(row=2, column=4, padx=20, pady=10, sticky="w")
-        
-        # Quantité Livrée
-        ctk.CTkLabel(frame_milieu, text="Quantité Livrée:").grid(row=3, column=0, padx=10, pady=10, sticky="w")
-        self.entry_qtlivre = ctk.CTkEntry(frame_milieu, width=150)
+        # Fournisseur label
+        ctk.CTkLabel(row, text="Fournisseur :", font=Fonts.label(10),
+                     text_color=Colors.TEXT_SECONDARY, anchor="w"
+                     ).grid(row=0, column=2, sticky="w", padx=(0, 4))
+
+        # Fournisseur entry + bouton
+        frs_f = ctk.CTkFrame(row, fg_color="transparent")
+        frs_f.grid(row=0, column=3, sticky="ew")
+
+        self.entry_fournisseur = ctk.CTkEntry(frs_f, height=28,
+                                              fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                                              font=Fonts.body(11), state="readonly")
+        self.entry_fournisseur.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        ctk.CTkButton(frs_f, text="🔍", width=28, height=28,
+                      fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
+                      text_color="white", font=Fonts.body(11), corner_radius=6,
+                      command=self.ouvrir_recherche_fournisseur
+                      ).pack(side="left")
+
+        self.fournisseur_id = None
+        self.fournisseur_contact = None
+        self.fournisseur_adresse = None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Section 2 — Transporteur (toggle inline)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _build_section_transporteur(self, parent):
+        card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
+                            corner_radius=8, border_width=1, border_color=Colors.BORDER)
+        card.pack(fill="x", pady=(0, 4))
+
+        # Ligne unique : titre + switch + entry + bouton (tout inline)
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=6)
+        row.columnconfigure(3, weight=1)
+
+        ctk.CTkLabel(row, text="🚛 Transporteur", font=Fonts.bold(11),
+                     text_color=Colors.MIDNIGHT, width=110, anchor="w"
+                     ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+
+        self.var_transporteur = ctk.BooleanVar(value=False)
+        self.switch_transporteur = ctk.CTkSwitch(
+            row, text="", variable=self.var_transporteur,
+            command=self.toggle_transporteur,
+            width=40, button_color=Colors.PRIMARY,
+            progress_color=Colors.PRIMARY_LIGHT,
+            switch_width=40, switch_height=20
+        )
+        self.switch_transporteur.grid(row=0, column=1, sticky="w", padx=(0, 10))
+
+        # Entry transporteur (masquée ou visible selon switch)
+        self.entry_transporteur = ctk.CTkEntry(
+            row, height=28, fg_color=Colors.BG_INPUT,
+            border_color=Colors.BORDER, font=Fonts.body(11),
+            state="readonly", placeholder_text="Sélectionner un transporteur..."
+        )
+        # Bouton recherche transporteur
+        self.btn_search_trans = ctk.CTkButton(
+            row, text="🔍", width=28, height=28,
+            fg_color=Colors.INFO, hover_color=Colors.INFO_DARK,
+            text_color="white", font=Fonts.body(11), corner_radius=6,
+            command=self.ouvrir_recherche_transporteur
+        )
+
+        # Widgets cachés par défaut — affichés par toggle_transporteur
+        self._trans_entry_col = 3
+        self._trans_btn_col   = 4
+
+    def toggle_transporteur(self):
+        if self.var_transporteur.get():
+            row = self.entry_transporteur.master
+            self.entry_transporteur.grid(row=0, column=self._trans_entry_col, sticky="ew", padx=(0, 4))
+            self.btn_search_trans.grid(row=0, column=self._trans_btn_col, sticky="w")
+        else:
+            self.entry_transporteur.grid_remove()
+            self.btn_search_trans.grid_remove()
+            self.transporteur_id = None
+            self.transporteur_nom = None
+            self.entry_transporteur.configure(state="normal")
+            self.entry_transporteur.delete(0, "end")
+            self.entry_transporteur.configure(state="readonly")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Section 3 — Saisie article (compact)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _build_section_article(self, parent):
+        card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
+                            corner_radius=8, border_width=1, border_color=Colors.BORDER)
+        card.pack(fill="x", pady=(0, 4))
+
+        # ── Ligne 1 : titre section | entry article + bouton recherche ───────
+        r1 = ctk.CTkFrame(card, fg_color="transparent")
+        r1.pack(fill="x", padx=10, pady=(6, 2))
+        r1.columnconfigure(2, weight=1)
+
+        ctk.CTkLabel(r1, text="📦 Article", font=Fonts.bold(11),
+                     text_color=Colors.MIDNIGHT, width=78, anchor="w"
+                     ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+
+        self.entry_article = ctk.CTkEntry(r1, height=28,
+                                          fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                                          font=Fonts.body(11), state="readonly")
+        self.entry_article.grid(row=0, column=1, columnspan=2, sticky="ew", padx=(0, 4))
+
+        ctk.CTkButton(r1, text="🔍 Rechercher", width=110, height=28,
+                      fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
+                      text_color="white", font=Fonts.body(10), corner_radius=6,
+                      command=self.ouvrir_recherche_article
+                      ).grid(row=0, column=3, sticky="w")
+
+        # ── Ligne 2 : tout inline sur une seule ligne ─────────────────────────
+        r2 = ctk.CTkFrame(card, fg_color="transparent")
+        r2.pack(fill="x", padx=10, pady=(2, 6))
+
+        def _field(par, label, width=90, readonly=False):
+            """Label au-dessus + entry, empilés, packés side=left."""
+            wrap = ctk.CTkFrame(par, fg_color="transparent")
+            wrap.pack(side="left", padx=(0, 6))
+            ctk.CTkLabel(wrap, text=label, font=Fonts.small(9),
+                         text_color=Colors.TEXT_MUTED).pack(anchor="w")
+            e = ctk.CTkEntry(wrap, width=width, height=26,
+                             fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                             font=Fonts.body(10),
+                             state="readonly" if readonly else "normal")
+            e.pack()
+            return e
+
+        self.entry_qtcmd    = _field(r2, "Qté cmd",       95)
+        self.entry_qtlivre  = _field(r2, "Qté livrée",    85)
         self.entry_qtlivre.insert(0, "0")
-        self.entry_qtlivre.grid(row=3, column=1, padx=10, pady=10, sticky="w")
-        
-        # Case à cocher pour activer/désactiver la date
-        self.var_has_peremption = ctk.BooleanVar(value=False)
-        self.check_peremption = ctk.CTkCheckBox(frame_milieu, text="Date de péremption", 
-                                               variable=self.var_has_peremption,
-                                               command=self.toggle_date_peremption)
-        self.check_peremption.grid(row=3, column=2, padx=10, pady=5, sticky="w")
+        self.entry_unite    = _field(r2, "Unité",          85, readonly=True)
+        self.entry_punitcmd = _field(r2, "Prix unitaire", 105)
 
-        self.entry_peremption = DateEntry(frame_milieu, width=15, background='darkblue', 
-                                         foreground='white', borderwidth=2, date_pattern='dd/mm/yyyy',
-                                         state="disabled")
-        self.entry_peremption.grid(row=3, column=3, padx=10, pady=5, sticky="w")
-        
-        # Frame pour les boutons Ajouter et Modifier Ligne
-        frame_btn_article = ctk.CTkFrame(frame_milieu, fg_color="transparent")
-        frame_btn_article.grid(row=3, column=4, columnspan=3, padx=10, pady=10, sticky="w")
-        
-        # Bouton Ajouter
-        self.btn_ajouter = ctk.CTkButton(frame_btn_article, text="➕ Ajouter", 
-                                    command=self.ajouter_article, width=100)
-        self.btn_ajouter.pack(side="left", padx=5)
-        
-        # Bouton Modifier Ligne
-        self.btn_modifier_ligne = ctk.CTkButton(frame_btn_article, text="✏️ Modifier Ligne", 
-                                    command=self.modifier_ligne_article, width=120,
-                                    fg_color="#f9a825", hover_color="#f57f17",
-                                    state="disabled")
-        self.btn_modifier_ligne.pack(side="left", padx=5)
-        
-        # Bouton Annuler Sélection
-        self.btn_annuler_selection = ctk.CTkButton(frame_btn_article, text="✖ Annuler", 
-                                    command=self.annuler_selection_ligne, width=100,
-                                    fg_color="#757575", hover_color="#616161",
-                                    state="disabled")
-        self.btn_annuler_selection.pack(side="left", padx=5)
-        
-        # Frame pour le Treeview
-        frame_tree = ctk.CTkFrame(self)
-        frame_tree.pack(fill="both", expand=True, padx=20, pady=5) # pady réduit
-        
-        # Treeview : Hauteur réduite à 6 lignes pour gagner de l'espace
+        self.entry_qtcmd.bind('<KeyRelease>',    lambda e: self.calculer_total_ligne_preview())
+        self.entry_punitcmd.bind('<KeyRelease>', lambda e: self.calculer_total_ligne_preview())
+
+        # Péremption optionnelle (checkbox + DateEntry inline)
+        per_wrap = ctk.CTkFrame(r2, fg_color="transparent")
+        per_wrap.pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(per_wrap, text="Péremption (opt.)", font=Fonts.small(9),
+                     text_color=Colors.TEXT_MUTED).pack(anchor="w")
+        per_inner = ctk.CTkFrame(per_wrap, fg_color="transparent")
+        per_inner.pack(anchor="w")
+
+        self.var_has_peremption = ctk.BooleanVar(value=False)
+        self.check_peremption = ctk.CTkCheckBox(
+            per_inner, text="", variable=self.var_has_peremption,
+            command=self.toggle_date_peremption,
+            checkbox_width=16, checkbox_height=16,
+            checkmark_color=Colors.TEXT_ON_DARK,
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
+            width=18
+        )
+        self.check_peremption.pack(side="left", padx=(0, 2))
+        self.entry_peremption = DateEntry(
+            per_inner, width=9, background=Colors.MIDNIGHT,
+            foreground="white", borderwidth=1,
+            date_pattern="dd/mm/yyyy", state="disabled",
+            font=("Segoe UI", 9)
+        )
+        self.entry_peremption.pack(side="left")
+
+        # Total ligne preview (label badge, toujours visible)
+        tot_wrap = ctk.CTkFrame(r2, fg_color="transparent")
+        tot_wrap.pack(side="left", padx=(6, 10))
+        ctk.CTkLabel(tot_wrap, text="Total ligne", font=Fonts.small(9),
+                     text_color=Colors.TEXT_MUTED).pack(anchor="w")
+        self.label_total_ligne = ctk.CTkLabel(
+            tot_wrap, text="0,00",
+            font=Fonts.bold(10), text_color=Colors.SUCCESS_TEXT,
+            fg_color=Colors.SUCCESS_LIGHT, corner_radius=5, padx=7, pady=3
+        )
+        self.label_total_ligne.pack(anchor="w")
+
+        # ── Boutons d'action — inline dans r2, poussés à droite ──────────────
+        btn_wrap = ctk.CTkFrame(r2, fg_color="transparent")
+        btn_wrap.pack(side="right")
+
+        # Espace vide pour aligner les boutons avec les entries (compense le label au-dessus)
+        ctk.CTkLabel(btn_wrap, text=" ", font=Fonts.small(9)).pack(anchor="w")
+        btn_inner = ctk.CTkFrame(btn_wrap, fg_color="transparent")
+        btn_inner.pack()
+
+        self.btn_ajouter = ctk.CTkButton(
+            btn_inner, text="➕ Ajouter", width=90, height=26,
+            fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
+            text_color=Colors.TEXT_ON_DARK, font=Fonts.button(10),
+            corner_radius=5, command=self.ajouter_article
+        )
+        self.btn_ajouter.pack(side="left", padx=(0, 4))
+
+        self.btn_modifier_ligne = ctk.CTkButton(
+            btn_inner, text="✏️ Modif.", width=85, height=26,
+            fg_color=Colors.WARNING, hover_color="#D68910",
+            text_color=Colors.TEXT_ON_DARK, font=Fonts.button(10),
+            corner_radius=5, state="disabled",
+            command=self.modifier_ligne_article
+        )
+        self.btn_modifier_ligne.pack(side="left", padx=(0, 4))
+
+        self.btn_annuler_selection = ctk.CTkButton(
+            btn_inner, text="✖", width=28, height=26,
+            fg_color=Colors.CLOUDS, hover_color=Colors.SILVER,
+            text_color=Colors.TEXT_PRIMARY, font=Fonts.button(10),
+            border_width=1, border_color=Colors.BORDER, corner_radius=5,
+            state="disabled", command=self.annuler_selection_ligne
+        )
+        self.btn_annuler_selection.pack(side="left")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Section 4 — Tableau (expand)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _build_section_tableau(self, parent):
+        card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
+                            corner_radius=8, border_width=1, border_color=Colors.BORDER)
+        card.pack(fill="both", expand=True, pady=(0, 0))
+
+        # En-tête tableau
+        thead = ctk.CTkFrame(card, fg_color="transparent")
+        thead.pack(fill="x", padx=10, pady=(6, 4))
+
+        ctk.CTkLabel(thead, text="📄 Lignes de commande",
+                     font=Fonts.bold(11), text_color=Colors.MIDNIGHT
+                     ).pack(side="left")
+
+        self.label_total_global = ctk.CTkLabel(
+            thead, text="Total : 0,00",
+            font=Fonts.bold(12), text_color=Colors.SUCCESS_TEXT,
+            fg_color=Colors.SUCCESS_LIGHT, corner_radius=6, padx=10, pady=3
+        )
+        self.label_total_global.pack(side="right")
+
+        # Treeview
+        tree_frame = ctk.CTkFrame(card, fg_color=Colors.BORDER, corner_radius=6)
+        tree_frame.pack(fill="both", expand=True, padx=10, pady=(0, 4))
+
         colonnes = ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Fournisseur")
-        self.tree = ttk.Treeview(frame_tree, columns=colonnes, show="headings", height=6)
+        self.tree = ttk.Treeview(tree_frame, columns=colonnes,
+                                  show="headings", height=6,
+                                  style="iJeery.Treeview")
         self._configure_table_alternating_colors(self.tree)
-        # Ajoutez l'en-tête pour Péremption
-        self.tree.heading("Péremption", text="Péremption")
-        self.tree.column("Péremption", width=100)
-        
+
+        col_widths = {"Article": 220, "Unité": 75, "Qté Cmd": 90,
+                      "Prix Unit.": 105, "Qté Livrée": 90, "Péremption": 90, "Fournisseur": 140}
         for col in colonnes:
             self.tree.heading(col, text=col)
-            if col == "Article":
-                self.tree.column(col, width=250)
-            elif col in ["Unité"]:
-                self.tree.column(col, width=100)
-            else:
-                self.tree.column(col, width=120)
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(frame_tree, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        
+            self.tree.column(col, width=col_widths.get(col, 90),
+                             anchor="center" if col not in ("Article", "Fournisseur") else "w",
+                             minwidth=60)
+
+        sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Bind pour sélection dans le Treeview
+        sb.pack(side="right", fill="y")
+
         self.tree.bind('<<TreeviewSelect>>', self.on_selection_ligne)
         self.tree.bind('<Double-Button-1>', self.on_double_click_ligne)
-        
-        # Frame boutons bas
-        frame_boutons = ctk.CTkFrame(self)
-        frame_boutons.pack(fill="x", padx=20, pady=10)
-        
-        btn_supprimer = ctk.CTkButton(frame_boutons, text="🗑️ Supprimer Ligne", 
-                                      command=self.supprimer_article, 
-                                      fg_color="#d32f2f", hover_color="#b71c1c")
-        btn_supprimer.pack(side="left", padx=10)
-        
-        # Bouton Nouvelle Commande
-        btn_nouveau = ctk.CTkButton(frame_boutons, text="🔄 Nouvelle Commande", 
-                                    command=self.nouvelle_commande,
-                                    fg_color="#0288d1", hover_color="#01579b")
-        btn_nouveau.pack(side="left", padx=10)
-        
-        btn_imprimer = ctk.CTkButton(frame_boutons, text="🖨️ Imprimer", 
-                                     command=self.imprimer_bon_commande,
-                                     fg_color="#ff6f00", hover_color="#e65100")
-        btn_imprimer.pack(side="right", padx=10)
-        
-        btn_enregistrer = ctk.CTkButton(frame_boutons, text="💾 Enregistrer", 
-                                        command=self.enregistrer_commande,
-                                        fg_color="#2e7d32", hover_color="#1b5e20")
-        btn_enregistrer.pack(side="right", padx=10)
-        
-        # Label total (pour la zone basse, inchangé pour la cohérence, mais le total principal est en haut)
-        self.label_total = ctk.CTkLabel(frame_boutons, text="Total: 0,00", 
-                                       font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
-        self.label_total.pack(side="right", padx=20)
-        
+
+        # Barre basse : supprimer + total + enregistrer
+        bot = ctk.CTkFrame(card, fg_color="transparent")
+        bot.pack(fill="x", padx=10, pady=(0, 6))
+
+        styled.button_danger(bot, text="Supprimer", icon="🗑️",
+                             width=120, height=28,
+                             command=self.supprimer_article
+                             ).pack(side="left")
+
+        styled.button_success(bot, text="Enregistrer", icon="💾",
+                              command=self.enregistrer_commande, width=140, height=28
+                              ).pack(side="right")
+
+        self.label_total = ctk.CTkLabel(bot, text="Total : 0,00",
+                                        font=Fonts.bold(11), text_color=Colors.TEXT_MUTED)
+        self.label_total.pack(side="right", padx=12)
+
+    # =========================================================================
+    # LOGIQUE TRANSPORTEUR
+    # =========================================================================
+    def ouvrir_recherche_transporteur(self):
+        fen = ctk.CTkToplevel(self)
+        fen.title("Rechercher un transporteur")
+        fen.geometry("700x380")
+        fen.grab_set()
+        Theme.apply_toplevel(fen)
+
+        main = ctk.CTkFrame(fen, fg_color=Colors.BG_PAGE)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ctk.CTkLabel(main, text="Sélectionner un transporteur",
+                     font=Fonts.heading(14), text_color=Colors.MIDNIGHT
+                     ).pack(pady=(0, 10))
+
+        sf = ctk.CTkFrame(main, fg_color="transparent")
+        sf.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(sf, text="🔍", font=Fonts.body(13)).pack(side="left", padx=6)
+        entry_s = ctk.CTkEntry(sf, placeholder_text="Nom ou contact...",
+                               height=34, fg_color=Colors.BG_INPUT,
+                               border_color=Colors.BORDER, font=Fonts.body(11))
+        entry_s.pack(side="left", fill="x", expand=True, padx=4)
+
+        tf = ctk.CTkFrame(main, fg_color=Colors.BORDER, corner_radius=8)
+        tf.pack(fill="both", expand=True, pady=(0, 8))
+
+        cols = ("ID", "Nom", "Contact", "Adresse")
+        tree = ttk.Treeview(tf, columns=cols, show="headings",
+                             height=8, style="iJeery.Treeview")
+        self._configure_table_alternating_colors(tree)
+        tree.heading("ID", text="ID")
+        tree.heading("Nom", text="Nom")
+        tree.heading("Contact", text="Contact")
+        tree.heading("Adresse", text="Adresse")
+        tree.column("ID", width=0, stretch=False)
+        tree.column("Nom", width=180)
+        tree.column("Contact", width=140)
+        tree.column("Adresse", width=260)
+        sb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        lbl_count = ctk.CTkLabel(main, text="", font=Fonts.small(10),
+                                  text_color=Colors.TEXT_MUTED)
+        lbl_count.pack(pady=(0, 4))
+
+        def charger(filtre=""):
+            for i in tree.get_children(): tree.delete(i)
+            conn = self.connect_db()
+            if not conn: return
+            try:
+                cur = conn.cursor()
+                q = "SELECT idtransporteur, nom, contact, adresse FROM tb_transporteur WHERE deleted=0"
+                p = []
+                if filtre:
+                    q += " AND (LOWER(nom) LIKE LOWER(%s) OR LOWER(contact) LIKE LOWER(%s))"
+                    p = [f"%{filtre}%", f"%{filtre}%"]
+                q += " ORDER BY nom"
+                cur.execute(q, p)
+                rows = cur.fetchall()
+                for r in rows:
+                    tree.insert("", "end", values=(r[0], r[1] or "", r[2] or "", r[3] or ""))
+                self._refresh_table_alternating_colors(tree)
+                lbl_count.configure(text=f"{len(rows)} transporteur(s)")
+            except Exception as e:
+                messagebox.showerror("Erreur", str(e))
+            finally:
+                conn.close()
+
+        entry_s.bind('<KeyRelease>', lambda e: charger(entry_s.get()))
+
+        def valider():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning("Attention", "Veuillez sélectionner un transporteur.")
+                return
+            v = tree.item(sel[0])['values']
+            self.transporteur_id = v[0]
+            self.transporteur_nom = v[1]
+            self.entry_transporteur.configure(state="normal")
+            self.entry_transporteur.delete(0, "end")
+            self.entry_transporteur.insert(0, v[1])
+            self.entry_transporteur.configure(state="readonly")
+            fen.destroy()
+
+        tree.bind('<Double-Button-1>', lambda e: valider())
+
+        bf = ctk.CTkFrame(main, fg_color="transparent")
+        bf.pack(fill="x")
+        styled.button_danger(bf, text="Annuler", icon="❌", width=110, height=36,
+                             command=fen.destroy).pack(side="left", padx=4)
+        styled.button_success(bf, text="Valider", icon="✅", width=110, height=36,
+                              command=valider).pack(side="right", padx=4)
+        charger()
+
+    # =========================================================================
+    # LOGIQUE MÉTIER (inchangée, sauf adaptations mineures)
+    # =========================================================================
+
     def toggle_date_peremption(self):
-        """Active ou désactive le widget calendrier selon la case à cocher"""
-        if self.var_has_peremption.get():
-            self.entry_peremption.configure(state="normal")
-        else:
-            self.entry_peremption.configure(state="disabled")
-    
-    # ==================== NOUVELLES FONCTIONS: Sélection et modification de ligne ====================
-    
+        state = "normal" if self.var_has_peremption.get() else "disabled"
+        self.entry_peremption.configure(state=state)
+
     def on_selection_ligne(self, event):
-        """Appelé quand une ligne est sélectionnée dans le Treeview"""
-        selection = self.tree.selection()
-        if selection:
-            # Activer les boutons
+        if self.tree.selection():
             self.btn_modifier_ligne.configure(state="normal")
             self.btn_annuler_selection.configure(state="normal")
-            
+
     def on_fournisseur_change(self, selection=None):
-        """(Obsolète) conserve la compatibilité si un appel externe fournit une valeur
-        mais la sélection est désormais gérée par l'entry et le bouton.  
-        Cette méthode tente simplement de déduire un ID si une chaîne est passée."""
-        if not selection:
-            return
+        if not selection: return
         try:
-            if " - " in selection:
-                self.fournisseur_id = selection.split(" - ")[0].strip()
-            else:
-                self.fournisseur_id = selection.strip()
+            self.fournisseur_id = selection.split(" - ")[0].strip() if " - " in selection else selection.strip()
         except Exception:
             self.fournisseur_id = None
-    
+
     def update_date_modification(self):
-        """
-        Met à jour la colonne datemodif de la commande principale
-        (stockée dans self.idcom_charge) avec la date et l'heure actuelles.
-        """
-        # Assurez-vous que l'ID de la commande est chargé
-        if not self.idcom_charge:
-            return 
-        
-        # Récupérer la date et l'heure actuelles
-        current_datetime = datetime.now()
-        
-        conn = self.connect_db() 
-        if conn is None:
-            return
-        
-        try:
-            cursor = conn.cursor()
-            
-            # REQUÊTE SQL CORRIGÉE : Utilisation de datemodif
-            sql_update = """
-                UPDATE tb_commande 
-                SET datemodif = %s 
-                WHERE idcom = %s;
-            """
-            
-            # Exécution de la requête
-            cursor.execute(sql_update, (current_datetime, self.idcom_charge))
-            conn.commit()
-            
-        except psycopg2.Error as e:
-            messagebox.showerror("Erreur BDD", f"Échec de la mise à jour de la date de modification: {e}")
-            conn.rollback()
-            
-        finally:
-            if conn:
-                conn.close()
-    
-    def mettre_a_jour_total_commande_db(self, total_commande):
-        """
-        Met à jour la colonne totalcom (ou totcmd) de la commande principale 
-        (stockée dans self.idcom_charge) avec le montant total.
-        
-        NOTE: Cette fonction est un ajout pour répondre à la demande 
-        'mettre à jour dans la table tb_commande/totcmd'.
-        Elle est appelée dans enregistrer_commande, mais pourrait aussi l'être 
-        après chaque ajout/modification si une persistance en temps réel est souhaitée.
-        """
-        if not self.idcom_charge:
-            return
-        
+        if not self.idcom_charge: return
         conn = self.connect_db()
-        if conn is None:
-            return
-        
+        if conn is None: return
         try:
-            cursor = conn.cursor()
-            # ASSUMER LE NOM DE COLONNE EST totalcom, VEUILLEZ VÉRIFIER VOTRE SCHÉMA DB
-            sql_update = """
-                UPDATE tb_commande
-                SET totcom = %s
-                WHERE idcom = %s;
-            """
-            cursor.execute(sql_update, (total_commande, self.idcom_charge))
+            cur = conn.cursor()
+            cur.execute("UPDATE tb_commande SET datemodif=%s WHERE idcom=%s",
+                        (datetime.now(), self.idcom_charge))
             conn.commit()
-            
         except psycopg2.Error as e:
-            # Ceci peut échouer si la colonne totalcom n'existe pas
-            #messagebox.showerror("Erreur BDD", f"Échec de la mise à jour du total de commande: {e}")
             conn.rollback()
-            
         finally:
-            if conn:
-                conn.close()
-    
+            conn.close()
+
     def on_double_click_ligne(self, event):
-        """Double-clic sur une ligne pour la charger dans les champs"""
-        selection = self.tree.selection()
-        if not selection:
-            return
-        
-        self.charger_ligne_pour_modification(selection[0])
-    
+        sel = self.tree.selection()
+        if sel: self.charger_ligne_pour_modification(sel[0])
+
     def calculer_total_ligne_preview(self):
-        """Calcule et affiche le total de la ligne en cours de saisie/modification"""
         try:
-            qtcmd = self.parser_nombre(self.entry_qtcmd.get())
-            punitcmd = self.parser_nombre(self.entry_punitcmd.get())
-            total_ligne = qtcmd * punitcmd
-            self.label_total_ligne.configure(text=f"Total Ligne: {self.formater_nombre(total_ligne)}")
+            t = self.parser_nombre(self.entry_qtcmd.get()) * self.parser_nombre(self.entry_punitcmd.get())
+            self.label_total_ligne.configure(text=self.formater_nombre(t))
         except:
-            self.label_total_ligne.configure(text="Total Ligne: 0,00")
-            
+            self.label_total_ligne.configure(text="0,00")
+
     def charger_ligne_pour_modification(self, item_id):
-        """Charge les données d'une ligne dans les champs pour modification"""
         index = self.tree.index(item_id)
         self.index_ligne_selectionnee = index
-        
         item_data = self.items_commande[index]
         values = self.tree.item(item_id)['values']
-        
-        # Remplir les champs
+
         self.entry_article.configure(state="normal")
         self.entry_article.delete(0, "end")
-        self.entry_article.insert(0, values[0])  # Article (désignation)
+        self.entry_article.insert(0, values[0])
         self.entry_article.configure(state="readonly")
-        
+
         self.entry_unite.configure(state="normal")
         self.entry_unite.delete(0, "end")
-        self.entry_unite.insert(0, values[1])  # Unité
+        self.entry_unite.insert(0, values[1])
         self.entry_unite.configure(state="readonly")
-        
+
         self.entry_qtcmd.delete(0, "end")
         self.entry_qtcmd.insert(0, self.formater_nombre(item_data['qtcmd']))
-        
         self.entry_punitcmd.delete(0, "end")
         self.entry_punitcmd.insert(0, self.formater_nombre(item_data['punitcmd']))
-        
         self.entry_qtlivre.delete(0, "end")
         self.entry_qtlivre.insert(0, self.formater_nombre(item_data['qtlivre']))
-        
-        # Charger la date de péremption si elle existe
+
         if item_data.get('dateperemption'):
             self.var_has_peremption.set(True)
             self.entry_peremption.configure(state="normal")
-            # Convertir la date du format DD/MM/YYYY au format datetime
             try:
-                from datetime import datetime
-                date_parts = item_data['dateperemption'].split('/')
-                if len(date_parts) == 3:
-                    date_obj = datetime(int(date_parts[2]), int(date_parts[1]), int(date_parts[0]))
-                    self.entry_peremption.set_date(date_obj)
+                parts = item_data['dateperemption'].split('/')
+                if len(parts) == 3:
+                    self.entry_peremption.set_date(
+                        datetime(int(parts[2]), int(parts[1]), int(parts[0])))
             except:
                 pass
         else:
             self.var_has_peremption.set(False)
             self.entry_peremption.configure(state="disabled")
-        
-        # Stocker l'article sélectionné pour la modification
+
         self.article_selectionne = {
             'idarticle': item_data['idarticle'],
             'idunite': item_data['idunite'],
             'nomart': values[0],
             'unite': values[1]
         }
-        
-        # Changer l'état des boutons
+
         self.btn_ajouter.configure(state="disabled")
-        self.btn_modifier_ligne.configure(state="normal", text="✅ Valider Modif.")
+        self.btn_modifier_ligne.configure(state="normal", text="✅  Valider Modif.")
         self.btn_annuler_selection.configure(state="normal")
-        
-        # Mettre à jour le preview du total ligne
         self.calculer_total_ligne_preview()
-        
-        # Mettre en surbrillance visuelle
-        self.titre.configure(text=f"⚠️ Modification de la ligne {index + 1}")
-    
+        self.titre.configure(text=f"⚠️  Modification ligne {index + 1}")
+
     def modifier_ligne_article(self):
-        """Modifie la ligne sélectionnée avec les nouvelles valeurs"""
-        selection = self.tree.selection()
-    
+        sel = self.tree.selection()
         if self.index_ligne_selectionnee is None:
-            if selection:
-                self.charger_ligne_pour_modification(selection[0])
-            else:
-                messagebox.showwarning("Attention", "Veuillez sélectionner une ligne à modifier")
+            if sel: self.charger_ligne_pour_modification(sel[0])
+            else: messagebox.showwarning("Attention", "Sélectionnez une ligne à modifier.")
             return
-    
         try:
             qtcmd = self.parser_nombre(self.entry_qtcmd.get())
             punitcmd = self.parser_nombre(self.entry_punitcmd.get())
             qtlivre = self.parser_nombre(self.entry_qtlivre.get())
-        
             if qtcmd <= 0:
-                messagebox.showwarning("Attention", "La quantité commandée doit être supérieure à 0")
+                messagebox.showwarning("Attention", "La quantité doit être > 0.")
                 return
-            
-            # Récupérer la date de péremption si activée
-            date_p = ""
-            if self.var_has_peremption.get():
-                date_p = self.entry_peremption.get_date().strftime('%d/%m/%Y')
-        
+            date_p = self.entry_peremption.get_date().strftime('%d/%m/%Y') if self.var_has_peremption.get() else ""
             total = qtcmd * punitcmd
-            index = self.index_ligne_selectionnee
-        
-            # Mettre à jour les données dans la liste interne
-            self.items_commande[index]['qtcmd'] = qtcmd
-            self.items_commande[index]['punitcmd'] = punitcmd
-            self.items_commande[index]['qtlivre'] = qtlivre
-            self.items_commande[index]['total'] = total
-            self.items_commande[index]['dateperemption'] = date_p if date_p else None
-        
-            # --- CORRECTION ICI ---
-            # On récupère l'ID de l'élément dans le Treeview
-            item_id = self.tree.get_children()[index]
-        
-            # Assure-toi que l'ordre ici correspond EXACTEMENT aux colonnes du Treeview :
-            # ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Fournisseur")
+            idx = self.index_ligne_selectionnee
+            self.items_commande[idx].update({'qtcmd': qtcmd, 'punitcmd': punitcmd,
+                                             'qtlivre': qtlivre, 'total': total,
+                                             'dateperemption': date_p or None})
+            item_id = self.tree.get_children()[idx]
             self.tree.item(item_id, values=(
-                self.article_selectionne['nomart'],     # Article
-                self.article_selectionne['unite'],      # Unité
-                self.formater_nombre(qtcmd),            # Qté Cmd
-                self.formater_nombre(punitcmd),         # Prix Unit.
-                self.formater_nombre(qtlivre),          # Qté Livrée
-                date_p,                                  # Péremption
-                self.items_commande[index].get('nomfrs', '')  # Fournisseur
+                self.article_selectionne['nomart'], self.article_selectionne['unite'],
+                self.formater_nombre(qtcmd), self.formater_nombre(punitcmd),
+                self.formater_nombre(qtlivre), date_p,
+                self.items_commande[idx].get('nomfrs', '')
             ))
-
-            if self.idcom_charge:
-                self.update_date_modification()
-
+            if self.idcom_charge: self.update_date_modification()
             self.annuler_selection_ligne()
             self.calculer_total()
-        
-            messagebox.showinfo("Succès", "Ligne modifiée avec succès!")
-        
+            messagebox.showinfo("Succès", "Ligne modifiée avec succès !")
         except ValueError:
-            messagebox.showerror("Erreur", "Veuillez entrer des valeurs numériques valides")
-    
+            messagebox.showerror("Erreur", "Valeurs numériques invalides.")
+
     def annuler_selection_ligne(self):
-        """Annule la sélection et réinitialise les champs"""
         self.index_ligne_selectionnee = None
         self.article_selectionne = None
-        
-        # Réinitialiser les champs
-        self.entry_article.configure(state="normal")
-        self.entry_article.delete(0, "end")
-        self.entry_article.configure(state="readonly")
-        
-        self.entry_unite.configure(state="normal")
-        self.entry_unite.delete(0, "end")
-        self.entry_unite.configure(state="readonly")
-        
+        for e in (self.entry_article, self.entry_unite):
+            e.configure(state="normal"); e.delete(0, "end"); e.configure(state="readonly")
         self.entry_qtcmd.delete(0, "end")
         self.entry_punitcmd.delete(0, "end")
         self.entry_qtlivre.delete(0, "end")
         self.entry_qtlivre.insert(0, "0")
-        
-        # Réinitialiser le label total ligne
-        self.label_total_ligne.configure(text="Total Ligne: 0,00")
-        
-        # Réinitialiser les boutons
+        self.label_total_ligne.configure(text="0,00")
         self.btn_ajouter.configure(state="normal")
-        self.btn_modifier_ligne.configure(state="disabled", text="✏️ Modifier Ligne")
+        self.btn_modifier_ligne.configure(state="disabled", text="✏️  Modifier Ligne")
         self.btn_annuler_selection.configure(state="disabled")
-        
-        # Désélectionner dans le Treeview
         self.tree.selection_remove(self.tree.selection())
-        
-        # Réinitialiser le titre
+        ref = self.entry_ref.get()
         if self.mode_modification and self.idcom_charge:
-            self.titre.configure(text=f"Modification Commande: {self.entry_ref.get()}")
+            self.titre.configure(text=f"Modification Commande : {ref}")
         else:
             self.titre.configure(text="Nouvelle Commande Fournisseur")
-    
-    # ==================== FIN NOUVELLES FONCTIONS ====================
-    
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Génération référence
+    # ─────────────────────────────────────────────────────────────────────────
     def generer_reference(self):
-        """Génère la référence automatique au format 2025-BC-00001"""
-        conn = self.connect_db()
-        if not conn:
-            return
-            
-        try:
-            cursor = conn.cursor()
-            annee_courante = datetime.now().year
-            
-            query = """
-                SELECT refcom FROM tb_commande 
-                WHERE refcom LIKE %s 
-                ORDER BY refcom DESC LIMIT 1
-            """
-            cursor.execute(query, (f"{annee_courante}-BC-%",))
-            resultat = cursor.fetchone()
-            
-            if resultat:
-                # Extraire le numéro après "BC-"
-                dernier_num = int(resultat[0].split('-')[-1])
-                nouveau_num = dernier_num + 1
-            else:
-                nouveau_num = 1
-            
-            reference = f"{annee_courante}-BC-{nouveau_num:05d}"
-            self.entry_ref.configure(state="normal")
-            self.entry_ref.delete(0, "end")
-            self.entry_ref.insert(0, reference)
-            self.entry_ref.configure(state="readonly")
-            
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de la génération de la référence: {str(e)}")
-        finally:
-            if 'cursor' in locals() and cursor: cursor.close()
-            if conn: conn.close()
-    
-    def charger_fournisseurs(self):
-        """Charge la liste des fournisseurs et initialise le premier"""
-        conn = self.connect_db()
-        if not conn:
-            return
-            
-        try:
-            cursor = conn.cursor()
-            query = """SELECT idfrs, nomfrs, contactfrs, adressefrs 
-                      FROM tb_fournisseur 
-                      WHERE deleted = 0 
-                      ORDER BY nomfrs"""
-            cursor.execute(query)
-            
-            # Stocker les fournisseurs avec toutes les infos
-            self.fournisseurs = {}
-            rows = cursor.fetchall()
-            for row in rows:
-                idfrs, nomfrs, contactfrs, adressefrs = row
-                self.fournisseurs[idfrs] = {
-                    'nom': nomfrs,
-                    'contact': contactfrs or '',
-                    'adresse': adressefrs or ''
-                }
-            
-            # Initialiser avec le premier fournisseur
-            if rows:
-                first_id = rows[0][0]
-                first_name = rows[0][1]
-                self.entry_fournisseur.configure(state="normal")
-                self.entry_fournisseur.delete(0, "end")
-                self.entry_fournisseur.insert(0, first_name)
-                self.entry_fournisseur.configure(state="readonly")
-                self.fournisseur_id = first_id
-                self.fournisseur_contact = rows[0][2] or ''
-                self.fournisseur_adresse = rows[0][3] or ''
-            
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors du chargement des fournisseurs: {str(e)}")
-        finally:
-            if 'cursor' in locals() and cursor: cursor.close()
-            if conn: conn.close()
-
-    def ouvrir_recherche_fournisseur(self):
-        """Ouvre une fenêtre pour rechercher et sélectionner un fournisseur"""
-        fenetre = ctk.CTkToplevel(self)
-        fenetre.title("Rechercher un fournisseur")
-        fenetre.geometry("800x400")
-        fenetre.grab_set()
-
-        main_frame = ctk.CTkFrame(fenetre)
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        titre = ctk.CTkLabel(main_frame, text="Sélectionner un fournisseur", 
-                            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
-        titre.pack(pady=(0, 10))
-
-        # Cadre de recherche
-        search_frame = ctk.CTkFrame(main_frame)
-        search_frame.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(search_frame, text="🔍 Rechercher:").pack(side="left", padx=5)
-        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Nom ou contact...", width=300)
-        entry_search.pack(side="left", padx=5, fill="x", expand=True)
-
-        # Cadre pour le tableau
-        tree_frame = ctk.CTkFrame(main_frame)
-        tree_frame.pack(fill="both", expand=True, pady=(0, 10))
-
-        # Colonnes: ID (caché), Nom, Contact, Adresse
-        colonnes = ("ID", "Nom", "Contact", "Adresse")
-        tree = ttk.Treeview(tree_frame, columns=colonnes, show='headings', height=12)
-        self._configure_table_alternating_colors(tree)
-        
-        tree.heading("ID", text="ID")
-        tree.heading("Nom", text="Nom")
-        tree.heading("Contact", text="Contact")
-        tree.heading("Adresse", text="Adresse")
-        
-        tree.column("ID", width=0, stretch=False)  # Caché
-        tree.column("Nom", width=150, anchor='w')
-        tree.column("Contact", width=150, anchor='w')
-        tree.column("Adresse", width=300, anchor='w')
-
-        scrollbar = ctk.CTkScrollbar(tree_frame, command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        label_count = ctk.CTkLabel(main_frame, text="Nombre de fournisseurs : 0")
-        label_count.pack(pady=5)
-
-        def charger_fournisseurs_liste(filtre=""):
-            """Charge et affiche les fournisseurs dans le tableau"""
-            for item in tree.get_children():
-                tree.delete(item)
-            
-            conn = self.connect_db()
-            if not conn:
-                return
-            
-            try:
-                cursor = conn.cursor()
-                query = """SELECT idfrs, nomfrs, contactfrs, adressefrs 
-                          FROM tb_fournisseur 
-                          WHERE deleted = 0"""
-                params = []
-                
-                if filtre:
-                    query += """ AND (
-                        LOWER(nomfrs) LIKE LOWER(%s) OR 
-                        LOWER(contactfrs) LIKE LOWER(%s)
-                    )"""
-                    params = [f"%{filtre}%", f"%{filtre}%"]
-                
-                query += " ORDER BY nomfrs"
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
-                
-                for row in rows:
-                    idfrs, nomfrs, contactfrs, adressefrs = row
-                    tree.insert('', 'end', values=(
-                        idfrs,
-                        nomfrs or '',
-                        contactfrs or '',
-                        adressefrs or ''
-                    ))
-                
-                self._refresh_table_alternating_colors(tree)
-                label_count.configure(text=f"Nombre de fournisseurs : {len(rows)}")
-                
-            except Exception as e:
-                messagebox.showerror("Erreur", f"Erreur lors du chargement: {str(e)}")
-            finally:
-                if 'cursor' in locals() and cursor: cursor.close()
-                if conn: conn.close()
-
-        def rechercher(*args):
-            """Affiche les résultats de recherche"""
-            charger_fournisseurs_liste(entry_search.get())
-        
-        entry_search.bind('<KeyRelease>', rechercher)
-
-        def valider_selection():
-            """Valide la sélection et met à jour l'entry_fournisseur"""
-            selection = tree.selection()
-            if not selection:
-                messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur")
-                return
-            
-            values = tree.item(selection[0])['values']
-            frs_id = values[0]
-            frs_nom = values[1]
-            frs_contact = values[2]
-            frs_adresse = values[3]
-            
-            # Mettre à jour les attributs
-            self.fournisseur_id = frs_id
-            self.fournisseur_contact = frs_contact
-            self.fournisseur_adresse = frs_adresse
-            
-            # Mettre à jour l'entry
-            self.entry_fournisseur.configure(state="normal")
-            self.entry_fournisseur.delete(0, "end")
-            self.entry_fournisseur.insert(0, frs_nom)
-            self.entry_fournisseur.configure(state="readonly")
-            
-            fenetre.destroy()
-
-        tree.bind('<Double-Button-1>', lambda e: valider_selection())
-        
-        # Boutons
-        btn_frame = ctk.CTkFrame(main_frame)
-        btn_frame.pack(fill="x")
-        
-        btn_annuler = ctk.CTkButton(btn_frame, text="❌ Annuler", command=fenetre.destroy, 
-                                   fg_color="#d32f2f", hover_color="#b71c1c")
-        btn_annuler.pack(side="left", padx=5, pady=5)
-        
-        btn_valider = ctk.CTkButton(btn_frame, text="✅ Valider", command=valider_selection, 
-                                   fg_color="#2e7d32", hover_color="#1b5e20")
-        btn_valider.pack(side="right", padx=5, pady=5)
-        
-        # Charger la liste complète à l'ouverture
-        charger_fournisseurs_liste()
-
-    def ouvrir_recherche_commande(self):
-        """Ouvre une fenêtre pour rechercher et charger une commande existante"""
-        fenetre = ctk.CTkToplevel(self)
-        fenetre.title("Rechercher une commande à modifier")
-        fenetre.geometry("900x500")
-        fenetre.grab_set()
-        
-        main_frame = ctk.CTkFrame(fenetre)
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        titre = ctk.CTkLabel(main_frame, text="Sélectionner une commande", 
-                            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
-        titre.pack(pady=(0, 10))
-        
-        search_frame = ctk.CTkFrame(main_frame)
-        search_frame.pack(fill="x", pady=(0, 10))
-        
-        ctk.CTkLabel(search_frame, text="🔍 Rechercher:").pack(side="left", padx=5)
-        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Référence ou fournisseur...", width=300)
-        entry_search.pack(side="left", padx=5, fill="x", expand=True)
-        
-        tree_frame = ctk.CTkFrame(main_frame)
-        tree_frame.pack(fill="both", expand=True, pady=(0, 10))
-        
-        colonnes = ("ID", "Référence", "Date", "Fournisseur", "Statut")
-        tree = ttk.Treeview(tree_frame, columns=colonnes, show='headings', height=12)
-        self._configure_table_alternating_colors(tree)
-        
-        tree.heading("ID", text="ID")
-        tree.heading("Référence", text="Référence")
-        tree.heading("Date", text="Date")
-        tree.heading("Fournisseur", text="Fournisseur")
-        tree.heading("Statut", text="Statut")
-        
-        tree.column("ID", width=0, stretch=False)
-        tree.column("Référence", width=120, anchor='w')
-        tree.column("Date", width=100, anchor='w')
-        tree.column("Fournisseur", width=200, anchor='w')
-        tree.column("Statut", width=100, anchor='center')
-        
-        # Style pour les tags
-        style = ttk.Style()
-        style.configure("Treeview", rowheight=22, background="#FFFFFF", foreground="#000000", fieldbackground="#FFFFFF", borderwidth=0, font=('Segoe UI', 8))
-        style.configure("Treeview.Heading", background="#E8E8E8", foreground="#000000", font=('Segoe UI', 8, 'bold'))
-        tree.tag_configure('incomplet', background='#ffcccc')  # Rouge clair pour incomplet
-        tree.tag_configure('complet', background='#ccffcc')    # Vert clair pour complet
-        
-        scrollbar = ctk.CTkScrollbar(tree_frame, command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        
-        tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        label_count = ctk.CTkLabel(main_frame, text="Nombre de commandes : 0")
-        label_count.pack(pady=5)
-        
-        def charger_commandes(filtre=""):
-            for item in tree.get_children():
-                tree.delete(item)
-            
-            conn = self.connect_db()
-            if not conn:
-                return
-            
-            try:
-                cursor = conn.cursor()
-                query = """
-                    SELECT c.idcom, c.refcom, c.datecom,
-                           COALESCE(
-                               NULLIF(
-                                   (
-                                       SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
-                                       FROM tb_commandedetail d2
-                                       LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
-                                       WHERE d2.idcom = c.idcom
-                                   ),
-                                   ''
-                               ),
-                               'Fournisseur non précisé'
-                           ) AS fournisseurs_liste,
-                           c.descriptioncom,
-                           (SELECT COUNT(*) 
-                            FROM tb_commandedetail d 
-                            WHERE d.idcom = c.idcom) as total_lignes,
-                           (SELECT COUNT(*) 
-                            FROM tb_commandedetail d 
-                            WHERE d.idcom = c.idcom AND d.qtcmd = d.qtlivre) as lignes_completes
-                    FROM tb_commande c
-                    WHERE c.deleted = 0
-                """
-                params = []
-                if filtre:
-                    query += """ AND (
-                        LOWER(c.refcom) LIKE LOWER(%s) OR 
-                        LOWER(
-                            COALESCE(
-                                (
-                                    SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
-                                    FROM tb_commandedetail d2
-                                    LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
-                                    WHERE d2.idcom = c.idcom
-                                ),
-                                ''
-                            )
-                        ) LIKE LOWER(%s)
-                    )"""
-                    params = [f"%{filtre}%", f"%{filtre}%"]
-                
-                query += " ORDER BY c.datecom DESC, c.refcom DESC"
-                cursor.execute(query, params)
-                resultats = cursor.fetchall()
-                
-                for row in resultats:
-                    date_str = row[2].strftime("%d/%m/%Y %H:%M") if row[2] else ""
-                    total_lignes = row[5] if row[5] else 0
-                    lignes_completes = row[6] if row[6] else 0
-                    
-                    # Déterminer le statut et le tag
-                    if total_lignes > 0 and lignes_completes == total_lignes:
-                        statut = "✅ Livrés"
-                        tag = 'complet'
-                    else:
-                        statut = "⚠️ En attente"
-                        tag = 'incomplet'
-                    
-                    tree.insert('', 'end', 
-                              values=(row[0], row[1], date_str, row[3] or "", statut),
-                              tags=(tag,))
-                self._refresh_table_alternating_colors(tree)
-                
-                label_count.configure(text=f"Nombre de commandes : {len(resultats)}")
-                
-            except Exception as e:
-                messagebox.showerror("Erreur", f"Erreur lors du chargement: {str(e)}")
-            finally:
-                if 'cursor' in locals() and cursor: cursor.close()
-                if conn: conn.close()
-        
-        def rechercher(*args):
-            charger_commandes(entry_search.get())
-        
-        entry_search.bind('<KeyRelease>', rechercher)
-        
-        def valider_selection():
-            selection = tree.selection()
-            if not selection:
-                messagebox.showwarning("Attention", "Veuillez sélectionner une commande")
-                return
-            values = tree.item(selection[0])['values']
-            idcom = values[0]
-            fenetre.destroy()
-            self.charger_commande(idcom)
-        
-        tree.bind('<Double-Button-1>', lambda e: valider_selection())
-        btn_frame = ctk.CTkFrame(main_frame)
-        btn_frame.pack(fill="x")
-        btn_annuler = ctk.CTkButton(btn_frame, text="❌ Annuler", command=fenetre.destroy, fg_color="#d32f2f", hover_color="#b71c1c")
-        btn_annuler.pack(side="left", padx=5, pady=5)
-        btn_valider = ctk.CTkButton(btn_frame, text="✅ Charger", command=valider_selection, fg_color="#2e7d32", hover_color="#1b5e20")
-        btn_valider.pack(side="right", padx=5, pady=5)
-        charger_commandes()
-        
-    def charger_commande(self, idcom):
-        """Charge une commande existante pour modification"""
         conn = self.connect_db()
         if not conn: return
         try:
-            cursor = conn.cursor()
-            query_commande = """
-                SELECT c.idcom, c.refcom, c.datecom, c.idfrs, f.nomfrs, c.descriptioncom
-                FROM tb_commande c
-                LEFT JOIN tb_fournisseur f ON c.idfrs = f.idfrs
-                WHERE c.idcom = %s AND c.deleted = 0
-            """
-            cursor.execute(query_commande, (idcom,))
-            commande = cursor.fetchone()
-            if not commande:
-                messagebox.showerror("Erreur", "Commande non trouvée")
-                return
+            cur = conn.cursor()
+            annee = datetime.now().year
+            cur.execute("SELECT refcom FROM tb_commande WHERE refcom LIKE %s ORDER BY refcom DESC LIMIT 1",
+                        (f"{annee}-BC-%",))
+            r = cur.fetchone()
+            num = (int(r[0].split('-')[-1]) + 1) if r else 1
+            ref = f"{annee}-BC-{num:05d}"
+            self.entry_ref.configure(state="normal")
+            self.entry_ref.delete(0, "end")
+            self.entry_ref.insert(0, ref)
+            self.entry_ref.configure(state="readonly")
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Référence : {e}")
+        finally:
+            if 'cur' in locals(): cur.close()
+            if conn: conn.close()
 
-            # CORRECTION: Ajouter la colonne dateperemption
-            query_details = """
-                SELECT d.id, d.idarticle, a.designation, u.designationunite, d.idunite, 
-                   d.qtcmd, d.qtlivre, d.punitcmd, d.total, d.dateperemption, d.idfrs, f.nomfrs
+    # ─────────────────────────────────────────────────────────────────────────
+    # Fournisseurs
+    # ─────────────────────────────────────────────────────────────────────────
+    def charger_fournisseurs(self):
+        conn = self.connect_db()
+        if not conn: return
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT idfrs, nomfrs, contactfrs, adressefrs FROM tb_fournisseur WHERE deleted=0 ORDER BY nomfrs")
+            self.fournisseurs = {}
+            rows = cur.fetchall()
+            for row in rows:
+                self.fournisseurs[row[0]] = {'nom': row[1], 'contact': row[2] or '', 'adresse': row[3] or ''}
+            if rows:
+                self.entry_fournisseur.configure(state="normal")
+                self.entry_fournisseur.delete(0, "end")
+                self.entry_fournisseur.insert(0, rows[0][1])
+                self.entry_fournisseur.configure(state="readonly")
+                self.fournisseur_id = rows[0][0]
+                self.fournisseur_contact = rows[0][2] or ''
+                self.fournisseur_adresse = rows[0][3] or ''
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Fournisseurs : {e}")
+        finally:
+            if 'cur' in locals(): cur.close()
+            if conn: conn.close()
+
+    def ouvrir_recherche_fournisseur(self):
+        fen = ctk.CTkToplevel(self)
+        fen.title("Rechercher un fournisseur")
+        fen.geometry("800x420")
+        fen.grab_set()
+        Theme.apply_toplevel(fen)
+
+        main = ctk.CTkFrame(fen, fg_color=Colors.BG_PAGE)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ctk.CTkLabel(main, text="Sélectionner un fournisseur",
+                     font=Fonts.heading(14), text_color=Colors.MIDNIGHT
+                     ).pack(pady=(0, 10))
+
+        sf = ctk.CTkFrame(main, fg_color="transparent")
+        sf.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(sf, text="🔍").pack(side="left", padx=6)
+        entry_s = ctk.CTkEntry(sf, placeholder_text="Nom ou contact...", height=34,
+                               fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, font=Fonts.body(11))
+        entry_s.pack(side="left", fill="x", expand=True, padx=4)
+
+        tf = ctk.CTkFrame(main, fg_color=Colors.BORDER, corner_radius=8)
+        tf.pack(fill="both", expand=True, pady=(0, 8))
+        cols = ("ID", "Nom", "Contact", "Adresse")
+        tree = ttk.Treeview(tf, columns=cols, show="headings", height=10, style="iJeery.Treeview")
+        self._configure_table_alternating_colors(tree)
+        tree.column("ID", width=0, stretch=False)
+        tree.column("Nom", width=160); tree.column("Contact", width=150); tree.column("Adresse", width=300)
+        for c in cols: tree.heading(c, text=c)
+        sb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        lbl_c = ctk.CTkLabel(main, text="", font=Fonts.small(10), text_color=Colors.TEXT_MUTED)
+        lbl_c.pack(pady=(0, 4))
+
+        def charger(filtre=""):
+            for i in tree.get_children(): tree.delete(i)
+            conn = self.connect_db()
+            if not conn: return
+            try:
+                cur = conn.cursor()
+                q = "SELECT idfrs, nomfrs, contactfrs, adressefrs FROM tb_fournisseur WHERE deleted=0"
+                p = []
+                if filtre:
+                    q += " AND (LOWER(nomfrs) LIKE LOWER(%s) OR LOWER(contactfrs) LIKE LOWER(%s))"
+                    p = [f"%{filtre}%", f"%{filtre}%"]
+                q += " ORDER BY nomfrs"
+                cur.execute(q, p)
+                rows = cur.fetchall()
+                for r in rows:
+                    tree.insert("", "end", values=(r[0], r[1] or '', r[2] or '', r[3] or ''))
+                self._refresh_table_alternating_colors(tree)
+                lbl_c.configure(text=f"{len(rows)} fournisseur(s)")
+            except Exception as e:
+                messagebox.showerror("Erreur", str(e))
+            finally:
+                conn.close()
+
+        entry_s.bind('<KeyRelease>', lambda e: charger(entry_s.get()))
+
+        def valider():
+            sel = tree.selection()
+            if not sel: messagebox.showwarning("Attention", "Sélectionnez un fournisseur."); return
+            v = tree.item(sel[0])['values']
+            self.fournisseur_id = v[0]; self.fournisseur_contact = v[2]; self.fournisseur_adresse = v[3]
+            self.entry_fournisseur.configure(state="normal")
+            self.entry_fournisseur.delete(0, "end")
+            self.entry_fournisseur.insert(0, v[1])
+            self.entry_fournisseur.configure(state="readonly")
+            fen.destroy()
+
+        tree.bind('<Double-Button-1>', lambda e: valider())
+        bf = ctk.CTkFrame(main, fg_color="transparent")
+        bf.pack(fill="x")
+        styled.button_danger(bf, text="Annuler", icon="❌", width=110, height=36, command=fen.destroy).pack(side="left", padx=4)
+        styled.button_success(bf, text="Valider", icon="✅", width=110, height=36, command=valider).pack(side="right", padx=4)
+        charger()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Recherche commande
+    # ─────────────────────────────────────────────────────────────────────────
+    def ouvrir_recherche_commande(self):
+        fen = ctk.CTkToplevel(self)
+        fen.title("Charger une commande")
+        fen.geometry("900x520")
+        fen.grab_set()
+        Theme.apply_toplevel(fen)
+
+        main = ctk.CTkFrame(fen, fg_color=Colors.BG_PAGE)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ctk.CTkLabel(main, text="Sélectionner une commande",
+                     font=Fonts.heading(14), text_color=Colors.MIDNIGHT).pack(pady=(0, 10))
+
+        sf = ctk.CTkFrame(main, fg_color="transparent")
+        sf.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(sf, text="🔍").pack(side="left", padx=6)
+        entry_s = ctk.CTkEntry(sf, placeholder_text="Référence ou fournisseur...", height=34,
+                               fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, font=Fonts.body(11))
+        entry_s.pack(side="left", fill="x", expand=True, padx=4)
+
+        tf = ctk.CTkFrame(main, fg_color=Colors.BORDER, corner_radius=8)
+        tf.pack(fill="both", expand=True, pady=(0, 8))
+        cols = ("ID", "Référence", "Date", "Fournisseur", "Statut")
+        tree = ttk.Treeview(tf, columns=cols, show="headings", height=12, style="iJeery.Treeview")
+        self._configure_table_alternating_colors(tree)
+        tree.column("ID", width=0, stretch=False)
+        tree.column("Référence", width=130); tree.column("Date", width=110)
+        tree.column("Fournisseur", width=220); tree.column("Statut", width=110, anchor="center")
+        for c in cols: tree.heading(c, text=c)
+        tree.tag_configure('incomplet', background='#fff3cd')
+        tree.tag_configure('complet', background='#d4edda')
+        sb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        lbl_c = ctk.CTkLabel(main, text="", font=Fonts.small(10), text_color=Colors.TEXT_MUTED)
+        lbl_c.pack(pady=(0, 4))
+
+        def charger(filtre=""):
+            for i in tree.get_children(): tree.delete(i)
+            conn = self.connect_db()
+            if not conn: return
+            try:
+                cur = conn.cursor()
+                q = """
+                    SELECT c.idcom, c.refcom, c.datecom,
+                           COALESCE(NULLIF((
+                               SELECT string_agg(DISTINCT COALESCE(f2.nomfrs,''),', ' ORDER BY COALESCE(f2.nomfrs,''))
+                               FROM tb_commandedetail d2
+                               LEFT JOIN tb_fournisseur f2 ON d2.idfrs=f2.idfrs
+                               WHERE d2.idcom=c.idcom), ''), 'Non précisé') AS frs,
+                           (SELECT COUNT(*) FROM tb_commandedetail d WHERE d.idcom=c.idcom) as tl,
+                           (SELECT COUNT(*) FROM tb_commandedetail d WHERE d.idcom=c.idcom AND d.qtcmd=d.qtlivre) as lc
+                    FROM tb_commande c WHERE c.deleted=0
+                """
+                p = []
+                if filtre:
+                    q += " AND (LOWER(c.refcom) LIKE LOWER(%s))"
+                    p = [f"%{filtre}%"]
+                q += " ORDER BY c.datecom DESC"
+                cur.execute(q, p)
+                rows = cur.fetchall()
+                for r in rows:
+                    ds = r[2].strftime("%d/%m/%Y") if r[2] else ""
+                    tl = r[4] or 0; lc = r[5] or 0
+                    statut = "✅ Livré" if tl > 0 and lc == tl else "⏳ En attente"
+                    tag = "complet" if tl > 0 and lc == tl else "incomplet"
+                    tree.insert("", "end", values=(r[0], r[1], ds, r[3] or "", statut), tags=(tag,))
+                lbl_c.configure(text=f"{len(rows)} commande(s)")
+            except Exception as e:
+                messagebox.showerror("Erreur", str(e))
+            finally:
+                conn.close()
+
+        entry_s.bind('<KeyRelease>', lambda e: charger(entry_s.get()))
+
+        def valider():
+            sel = tree.selection()
+            if not sel: messagebox.showwarning("Attention", "Sélectionnez une commande."); return
+            idcom = tree.item(sel[0])['values'][0]
+            fen.destroy()
+            self.charger_commande(idcom)
+
+        tree.bind('<Double-Button-1>', lambda e: valider())
+        bf = ctk.CTkFrame(main, fg_color="transparent")
+        bf.pack(fill="x")
+        styled.button_danger(bf, text="Annuler", icon="❌", width=110, height=36, command=fen.destroy).pack(side="left", padx=4)
+        styled.button_success(bf, text="Charger", icon="📂", width=130, height=36, command=valider).pack(side="right", padx=4)
+        charger()
+
+    def charger_commande(self, idcom):
+        conn = self.connect_db()
+        if not conn: return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT c.idcom, c.refcom, c.datecom, c.idfrs, f.nomfrs, c.descriptioncom, c.idtransportuer
+                FROM tb_commande c
+                LEFT JOIN tb_fournisseur f ON c.idfrs=f.idfrs
+                WHERE c.idcom=%s AND c.deleted=0
+            """, (idcom,))
+            commande = cur.fetchone()
+            if not commande: messagebox.showerror("Erreur", "Commande non trouvée."); return
+
+            cur.execute("""
+                SELECT d.id, d.idarticle, a.designation, u.designationunite, d.idunite,
+                       d.qtcmd, d.qtlivre, d.punitcmd, d.total, d.dateperemption, d.idfrs, f.nomfrs
                 FROM tb_commandedetail d
-                INNER JOIN tb_article a ON d.idarticle = a.idarticle
-                INNER JOIN tb_unite u ON d.idunite = u.idunite
-                LEFT JOIN tb_fournisseur f ON d.idfrs = f.idfrs
-                WHERE d.idcom = %s
-            """
-            cursor.execute(query_details, (idcom,))
-            details = cursor.fetchall()
-        
+                INNER JOIN tb_article a ON d.idarticle=a.idarticle
+                INNER JOIN tb_unite u ON d.idunite=u.idunite
+                LEFT JOIN tb_fournisseur f ON d.idfrs=f.idfrs
+                WHERE d.idcom=%s
+            """, (idcom,))
+            details = cur.fetchall()
+
             self.reinitialiser_formulaire(generer_ref=False)
             self.mode_modification = True
             self.idcom_charge = idcom
-            self.titre.configure(text=f"Modification Commande: {commande[1]}")
-        
+            self.titre.configure(text=f"Modification Commande : {commande[1]}")
+
             self.entry_ref.configure(state="normal")
             self.entry_ref.delete(0, "end")
             self.entry_ref.insert(0, commande[1])
             self.entry_ref.configure(state="readonly")
-        
+
             if commande[4]:
                 self.entry_fournisseur.configure(state="normal")
                 self.entry_fournisseur.delete(0, "end")
                 self.entry_fournisseur.insert(0, commande[4])
                 self.entry_fournisseur.configure(state="readonly")
-                self.fournisseur_id = commande[3]  # Stocker l'ID du fournisseur
-            
-            for detail in details:
-                # Détail avec fournisseur porté par la ligne
-                idcomdetail, idarticle, designation, unite, idunite, qtcmd, qtlivre, punitcmd, total_db, dateperemption, idfrs_detail, nomfrs_detail = detail
-                punitcmd = punitcmd if punitcmd else 0
-            
-                # Utiliser le total de la base de données s'il existe, sinon le calculer
-                total = total_db if total_db else (qtcmd * punitcmd)
-            
-                # Formater la date de péremption
-                date_peremption_str = ""
-                if dateperemption:
-                    if isinstance(dateperemption, str):
-                        date_peremption_str = dateperemption
-                    else:
-                        date_peremption_str = dateperemption.strftime('%d/%m/%Y')
-            
-                # Ajout des données à la liste interne
+                self.fournisseur_id = commande[3]
+
+            # Transporteur
+            idtrans = commande[6]
+            if idtrans:
+                self.var_transporteur.set(True)
+                self.toggle_transporteur()
+                # Récupérer nom transporteur
+                cur.execute("SELECT nom FROM tb_transporteur WHERE idtransporteur=%s", (idtrans,))
+                tr = cur.fetchone()
+                if tr:
+                    self.transporteur_id = idtrans
+                    self.transporteur_nom = tr[0]
+                    self.entry_transporteur.configure(state="normal")
+                    self.entry_transporteur.delete(0, "end")
+                    self.entry_transporteur.insert(0, tr[0])
+                    self.entry_transporteur.configure(state="readonly")
+
+            for d in details:
+                idcd, idar, desig, unite, idunite, qtcmd, qtlivre, punit, total_db, datep, idfrs_d, nomfrs_d = d
+                punit = punit or 0
+                total = total_db if total_db else (qtcmd * punit)
+                dp_str = ""
+                if datep:
+                    dp_str = datep if isinstance(datep, str) else datep.strftime('%d/%m/%Y')
                 self.items_commande.append({
-                    'idcomdetail': idcomdetail,
-                    'idarticle': idarticle,
-                    'idunite': idunite,
-                    'idfrs': idfrs_detail if idfrs_detail else commande[3],
-                    'nomfrs': nomfrs_detail if nomfrs_detail else (commande[4] if commande[4] else ""),
-                    'qtcmd': qtcmd,
-                    'qtlivre': qtlivre,
-                    'punitcmd': punitcmd,
-                    'total': total,
-                    'dateperemption': date_peremption_str
+                    'idcomdetail': idcd, 'idarticle': idar, 'idunite': idunite,
+                    'idfrs': idfrs_d if idfrs_d else commande[3],
+                    'nomfrs': nomfrs_d if nomfrs_d else (commande[4] or ""),
+                    'qtcmd': qtcmd, 'qtlivre': qtlivre, 'punitcmd': punit,
+                    'total': total, 'dateperemption': dp_str
                 })
-            
-                # Ajout au Treeview - Afficher les 7 colonnes dans le bon ordre
                 self.tree.insert("", "end", values=(
-                    designation,                        # Article
-                    unite,                             # Unité
-                    self.formater_nombre(qtcmd),       # Qté Cmd
-                    self.formater_nombre(punitcmd),    # Prix Unit.
-                    self.formater_nombre(qtlivre),     # Qté Livrée
-                    date_peremption_str,               # Péremption
-                    nomfrs_detail if nomfrs_detail else (commande[4] if commande[4] else "")  # Fournisseur
+                    desig, unite,
+                    self.formater_nombre(qtcmd), self.formater_nombre(punit),
+                    self.formater_nombre(qtlivre), dp_str,
+                    nomfrs_d if nomfrs_d else (commande[4] or "")
                 ))
             self._refresh_table_alternating_colors(self.tree)
-            
             self.calculer_total()
-        
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors du chargement de la commande: {str(e)}")
+            messagebox.showerror("Erreur", f"Chargement commande : {e}")
         finally:
-            if 'cursor' in locals() and cursor: cursor.close()
+            if 'cur' in locals(): cur.close()
             if conn: conn.close()
 
-            
+    # ─────────────────────────────────────────────────────────────────────────
+    # Recherche article
+    # ─────────────────────────────────────────────────────────────────────────
     def ouvrir_recherche_article(self):
-        """Ouvre une fenêtre pour rechercher et sélectionner un article"""
         if self.index_ligne_selectionnee is not None:
-            messagebox.showwarning("Attention", "Veuillez d'abord valider ou annuler la modification de ligne en cours")
+            messagebox.showwarning("Attention", "Validez ou annulez la modification en cours.")
             return
-            
-        fenetre_recherche = ctk.CTkToplevel(self)
-        fenetre_recherche.title("Rechercher un article")
-        fenetre_recherche.geometry("1000x600")
-        fenetre_recherche.grab_set()
-        
-        main_frame = ctk.CTkFrame(fenetre_recherche)
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        titre = ctk.CTkLabel(main_frame, text="Sélectionner un article", font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
-        titre.pack(pady=(0, 10))
-        
-        search_frame = ctk.CTkFrame(main_frame)
-        search_frame.pack(fill="x", pady=(0, 10))
-        
-        ctk.CTkLabel(search_frame, text="🔍 Rechercher:").pack(side="left", padx=5)
-        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Code ou désignation...", width=300)
-        entry_search.pack(side="left", padx=5, fill="x", expand=True)
-        
-        tree_frame = ctk.CTkFrame(main_frame)
-        tree_frame.pack(fill="both", expand=True, pady=(0, 10))
-        
-        # COLONNES MODIFIÉES : Ajout de ID_Unite (caché) pour corriger le problème d'idunite
-        colonnes = ("ID_Article", "ID_Unite", "Code", "Désignation", "Unité") 
-        tree = ttk.Treeview(tree_frame, columns=colonnes, show='headings', height=15)
+        fen = ctk.CTkToplevel(self)
+        fen.title("Rechercher un article")
+        fen.geometry("1000x580")
+        fen.grab_set()
+        Theme.apply_toplevel(fen)
+
+        main = ctk.CTkFrame(fen, fg_color=Colors.BG_PAGE)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ctk.CTkLabel(main, text="Sélectionner un article",
+                     font=Fonts.heading(14), text_color=Colors.MIDNIGHT).pack(pady=(0, 10))
+
+        sf = ctk.CTkFrame(main, fg_color="transparent")
+        sf.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(sf, text="🔍").pack(side="left", padx=6)
+        entry_s = ctk.CTkEntry(sf, placeholder_text="Code ou désignation...", height=34,
+                               fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, font=Fonts.body(11))
+        entry_s.pack(side="left", fill="x", expand=True, padx=4)
+
+        tf = ctk.CTkFrame(main, fg_color=Colors.BORDER, corner_radius=8)
+        tf.pack(fill="both", expand=True, pady=(0, 8))
+        cols = ("ID_Article", "ID_Unite", "Code", "Désignation", "Unité")
+        tree = ttk.Treeview(tf, columns=cols, show="headings", height=14, style="iJeery.Treeview")
         self._configure_table_alternating_colors(tree)
-        
-        tree.heading("ID_Article", text="ID_Article") 
-        tree.heading("ID_Unite", text="ID_Unite")     
-        tree.heading("Code", text="Code")
-        tree.heading("Désignation", text="Désignation")
-        tree.heading("Unité", text="Unité")
-        
-        tree.column("ID_Article", width=0, stretch=False) # Caché
-        tree.column("ID_Unite", width=0, stretch=False)     # Caché (NOUVEAU)
-        tree.column("Code", width=150, anchor='w')
-        tree.column("Désignation", width=500, anchor='w')
-        tree.column("Unité", width=100, anchor='w')
-        
-        scrollbar = ctk.CTkScrollbar(tree_frame, command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        
+        tree.column("ID_Article", width=0, stretch=False)
+        tree.column("ID_Unite", width=0, stretch=False)
+        tree.column("Code", width=140); tree.column("Désignation", width=480); tree.column("Unité", width=110)
+        for c in cols: tree.heading(c, text=c)
+        sb = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
         tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        label_count = ctk.CTkLabel(main_frame, text="Nombre d'articles : 0")
-        label_count.pack(pady=5)
-        
-        def charger_articles(filtre=""):
-            for item in tree.get_children():
-                tree.delete(item)
+        sb.pack(side="right", fill="y")
+
+        lbl_c = ctk.CTkLabel(main, text="", font=Fonts.small(10), text_color=Colors.TEXT_MUTED)
+        lbl_c.pack(pady=(0, 4))
+
+        def charger(filtre=""):
+            for i in tree.get_children(): tree.delete(i)
             conn = self.connect_db()
             if not conn: return
             try:
-                cursor = conn.cursor()
-                # La requête retourne l'article et son unité de base/de commande
-                query = """
-                    SELECT T2."idarticle", T1."codearticle", T2."designation", T1."designationunite", T1."idunite"
-                    FROM tb_unite AS T1
-                    INNER JOIN tb_article AS T2 ON T1.idarticle = T2.idarticle
-                    WHERE T2."deleted" = 0
-                """
-                params = []
+                cur = conn.cursor()
+                q = """SELECT T2.idarticle, T1.codearticle, T2.designation, T1.designationunite, T1.idunite
+                       FROM tb_unite T1 INNER JOIN tb_article T2 ON T1.idarticle=T2.idarticle
+                       WHERE T2.deleted=0"""
+                p = []
                 if filtre:
-                    query += """ AND (
-                        LOWER(T1."codearticle") LIKE LOWER(%s) OR 
-                        LOWER(T2."designation") LIKE LOWER(%s)
-                    )"""
-                    params = [f"%{filtre}%", f"%{filtre}%"]
-                query += " ORDER BY T1.\"codearticle\""
-                
-                cursor.execute(query, params)
-                resultats = cursor.fetchall()
-                
-                for row in resultats:
-                    if len(row) >= 5:
-                        # row: [idarticle, codearticle, designation, designationunite, idunite]
-                        # Insertion de 5 valeurs: ID_Article, ID_Unite, Code, Désignation, Unité
-                        tree.insert('', 'end', values=(row[0], row[4], row[1], row[2], row[3])) # Remplir la colonne ID_Unite avec row[4]
+                    q += " AND (LOWER(T1.codearticle) LIKE LOWER(%s) OR LOWER(T2.designation) LIKE LOWER(%s))"
+                    p = [f"%{filtre}%", f"%{filtre}%"]
+                q += ' ORDER BY T1.codearticle'
+                cur.execute(q, p)
+                rows = cur.fetchall()
+                for r in rows:
+                    tree.insert("", "end", values=(r[0], r[4], r[1], r[2], r[3]))
                 self._refresh_table_alternating_colors(tree)
-                
-                label_count.configure(text=f"Nombre d'articles : {len(resultats)}")
-                
+                lbl_c.configure(text=f"{len(rows)} article(s)")
             except Exception as e:
-                messagebox.showerror("Erreur", f"Erreur lors du chargement des articles: {str(e)}")
+                messagebox.showerror("Erreur", str(e))
             finally:
-                if 'cursor' in locals() and cursor: cursor.close()
-                if conn: conn.close()
-        
-        def rechercher(*args):
-            charger_articles(entry_search.get())
-            
-        entry_search.bind('<KeyRelease>', rechercher)
-        
-        def valider_selection():
-            selection = tree.selection()
-            if not selection:
-                messagebox.showwarning("Attention", "Veuillez sélectionner un article")
-                return
-            
-            values = tree.item(selection[0])['values']
-            
-            # Récupération des données selon l'ordre des colonnes Treeview (y compris les cachées)
-            idarticle = values[0]
-            idunite = values[1] # ID DE L'UNITÉ (CORRIGÉ)
-            codeart = values[2]
-            nomart = values[3]
-            unite = values[4]
-            
-            self.article_selectionne = {
-                'idarticle': idarticle,
-                'idunite': idunite, # L'IDUNITE CORRECT EST MAINTENANT CAPTURÉ
-                'nomart': nomart,
-                'unite': unite
-            }
-            
-            # Mettre à jour les champs
+                conn.close()
+
+        entry_s.bind('<KeyRelease>', lambda e: charger(entry_s.get()))
+
+        def valider():
+            sel = tree.selection()
+            if not sel: messagebox.showwarning("Attention", "Sélectionnez un article."); return
+            v = tree.item(sel[0])['values']
+            self.article_selectionne = {'idarticle': v[0], 'idunite': v[1], 'nomart': v[3], 'unite': v[4]}
             self.entry_article.configure(state="normal")
             self.entry_article.delete(0, "end")
-            self.entry_article.insert(0, nomart)
+            self.entry_article.insert(0, v[3])
             self.entry_article.configure(state="readonly")
-            
             self.entry_unite.configure(state="normal")
             self.entry_unite.delete(0, "end")
-            self.entry_unite.insert(0, unite)
+            self.entry_unite.insert(0, v[4])
             self.entry_unite.configure(state="readonly")
-            
             self.entry_qtcmd.delete(0, "end")
             self.entry_punitcmd.delete(0, "end")
-            
-            # Réinitialiser/Afficher le total de la ligne pour les nouveaux champs vides
             self.calculer_total_ligne_preview()
-            
-            fenetre_recherche.destroy()
-        
-        tree.bind('<Double-Button-1>', lambda e: valider_selection())
-        
-        btn_frame = ctk.CTkFrame(main_frame)
-        btn_frame.pack(fill="x")
-        
-        btn_annuler = ctk.CTkButton(btn_frame, text="❌ Annuler", command=fenetre_recherche.destroy, fg_color="#d32f2f", hover_color="#b71c1c")
-        btn_annuler.pack(side="left", padx=5, pady=5)
-        
-        btn_valider = ctk.CTkButton(btn_frame, text="✅ Valider", command=valider_selection, fg_color="#2e7d32", hover_color="#1b5e20")
-        btn_valider.pack(side="right", padx=5, pady=5)
-        
-        charger_articles()
-        
-    def ajouter_article(self):
-        if not hasattr(self, 'article_selectionne') or not self.article_selectionne:
-            messagebox.showwarning("Attention", "Veuillez sélectionner un article.")
-            return
-        
-        frs_nom = self.entry_fournisseur.get()
-        idfrs = self.fournisseur_id
-        
-        if not idfrs:
-            messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur.")
-            return
+            fen.destroy()
 
+        tree.bind('<Double-Button-1>', lambda e: valider())
+        bf = ctk.CTkFrame(main, fg_color="transparent")
+        bf.pack(fill="x")
+        styled.button_danger(bf, text="Annuler", icon="❌", width=110, height=36, command=fen.destroy).pack(side="left", padx=4)
+        styled.button_success(bf, text="Valider", icon="✅", width=110, height=36, command=valider).pack(side="right", padx=4)
+        charger()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Ajouter / Supprimer article
+    # ─────────────────────────────────────────────────────────────────────────
+    def ajouter_article(self):
+        if not self.article_selectionne:
+            messagebox.showwarning("Attention", "Sélectionnez un article.")
+            return
+        if not self.fournisseur_id:
+            messagebox.showwarning("Attention", "Sélectionnez un fournisseur.")
+            return
         try:
             qtcmd = self.parser_nombre(self.entry_qtcmd.get())
             punitcmd = self.parser_nombre(self.entry_punitcmd.get())
             qtlivre = self.parser_nombre(self.entry_qtlivre.get())
-            
             if qtcmd <= 0:
-                messagebox.showwarning("Attention", "La quantité commandée doit être supérieure à 0")
+                messagebox.showwarning("Attention", "La quantité doit être > 0.")
                 return
-            
-            # Récupérer la date de péremption si activée
-            date_p = ""
-            if self.var_has_peremption.get():
-                date_p = self.entry_peremption.get_date().strftime('%d/%m/%Y')
-            
-            # Calculer le total avec qtcmd (pas qtlivre)
+            date_p = self.entry_peremption.get_date().strftime('%d/%m/%Y') if self.var_has_peremption.get() else ""
             total = qtcmd * punitcmd
+            frs_nom = self.entry_fournisseur.get()
 
-            # Ajout au Treeview (Affichage) : ordre exact des colonnes
-            # ("Article", "Unité", "Qté Cmd", "Prix Unit.", "Qté Livrée", "Péremption", "Fournisseur")
             self.tree.insert("", "end", values=(
-                self.article_selectionne['nomart'],      # Article
-                self.article_selectionne['unite'],       # Unité
-                self.formater_nombre(qtcmd),             # Qté Cmd
-                self.formater_nombre(punitcmd),          # Prix Unit.
-                self.formater_nombre(qtlivre),           # Qté Livrée
-                date_p,                                   # Péremption
-                frs_nom                                   # Fournisseur
+                self.article_selectionne['nomart'], self.article_selectionne['unite'],
+                self.formater_nombre(qtcmd), self.formater_nombre(punitcmd),
+                self.formater_nombre(qtlivre), date_p, frs_nom
             ))
             self._refresh_table_alternating_colors(self.tree)
 
-            # Ajout à la liste mémoire pour la DB
             self.items_commande.append({
-                'idcomdetail': None,  # Crucial pour savoir que c'est un INSERT
-                'idarticle': self.article_selectionne['idarticle'],
-                'idunite': self.article_selectionne['idunite'],
-                'idfrs': idfrs,
-                'nomfrs': frs_nom,
-                'qtcmd': qtcmd,
-                'punitcmd': punitcmd,
-                'qtlivre': qtlivre,
-                'dateperemption': date_p if date_p else None,
-                'total': total
+                'idcomdetail': None, 'idarticle': self.article_selectionne['idarticle'],
+                'idunite': self.article_selectionne['idunite'], 'idfrs': self.fournisseur_id,
+                'nomfrs': frs_nom, 'qtcmd': qtcmd, 'punitcmd': punitcmd,
+                'qtlivre': qtlivre, 'dateperemption': date_p or None, 'total': total
             })
 
-            # Nettoyage des champs
-            self.entry_article.configure(state="normal")
-            self.entry_article.delete(0, "end")
-            self.entry_article.configure(state="readonly")
-            
-            self.entry_unite.configure(state="normal")
-            self.entry_unite.delete(0, "end")
-            self.entry_unite.configure(state="readonly")
-            
+            for e in (self.entry_article, self.entry_unite):
+                e.configure(state="normal"); e.delete(0, "end"); e.configure(state="readonly")
             self.entry_qtcmd.delete(0, "end")
             self.entry_punitcmd.delete(0, "end")
             self.entry_qtlivre.delete(0, "end")
             self.entry_qtlivre.insert(0, "0")
-            
-            # Réinitialiser la date de péremption
             self.var_has_peremption.set(False)
             self.entry_peremption.configure(state="disabled")
-            
-            # Réinitialiser l'article sélectionné
             self.article_selectionne = None
-            
-            # Réinitialiser le label total ligne
-            self.label_total_ligne.configure(text="Total Ligne: 0,00")
-            
-            # Recalculer le total de la commande
+            self.label_total_ligne.configure(text="0,00")
             self.calculer_total()
-            
-            if self.idcom_charge:
-                self.update_date_modification()
-            
-            #messagebox.showinfo("Succès", "Article ajouté avec succès!")
-        
+            if self.idcom_charge: self.update_date_modification()
         except ValueError:
             messagebox.showerror("Erreur", "Données numériques invalides.")
 
-        
     def supprimer_article(self):
-        """Supprime l'article sélectionné du treeview"""
-        selection = self.tree.selection()
-        if not selection:
-            messagebox.showwarning("Attention", "Veuillez sélectionner un article à supprimer")
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showwarning("Attention", "Sélectionnez une ligne à supprimer.")
             return
-            
         if self.index_ligne_selectionnee is not None:
             self.annuler_selection_ligne()
-            
-        index = self.tree.index(selection[0])
-        self.tree.delete(selection[0])
+        idx = self.tree.index(sel[0])
+        self.tree.delete(sel[0])
         self._refresh_table_alternating_colors(self.tree)
-        self.items_commande.pop(index)
+        self.items_commande.pop(idx)
         self.calculer_total()
-        
+
     def calculer_total(self):
-        """Calcule et affiche le total de la commande (pour les deux labels)"""
-        total = sum(item['qtcmd'] * item['punitcmd'] for item in self.items_commande)
-        
-        # Mise à jour du label en bas
-        self.label_total.configure(text=f"Total: {self.formater_nombre(total)}")
-        
-        # Mise à jour du label total global en haut (NOUVEAU)
-        self.label_total_global.configure(text=f"Total Commande: {self.formater_nombre(total)}")
-        
+        total = sum(i['qtcmd'] * i['punitcmd'] for i in self.items_commande)
+        txt = self.formater_nombre(total)
+        self.label_total.configure(text=f"Total : {txt}")
+        self.label_total_global.configure(text=f"Total : {txt}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ENREGISTREMENT — avec proposition d'impression
+    # ─────────────────────────────────────────────────────────────────────────
     def enregistrer_commande(self):
-        """Enregistre la commande (INSERT ou UPDATE selon le mode)"""
         if self.index_ligne_selectionnee is not None:
-            messagebox.showwarning("Attention", "Veuillez d'abord valider ou annuler la modification de ligne en cours")
+            messagebox.showwarning("Attention", "Validez ou annulez la modification en cours.")
             return
-        
         if not self.items_commande:
             messagebox.showwarning("Attention", "La commande ne contient aucune ligne.")
             return
-
-        frs_nom = self.entry_fournisseur.get()
-        idfrs = self.fournisseur_id
-    
-        if not idfrs:
-            messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur.")
+        if not self.fournisseur_id:
+            messagebox.showwarning("Attention", "Sélectionnez un fournisseur.")
             return
-        
-        total_commande = sum(item['qtcmd'] * item['punitcmd'] for item in self.items_commande)
-    
+
+        # Vérification transporteur si switch activé
+        if self.var_transporteur.get() and not self.transporteur_id:
+            messagebox.showwarning("Attention",
+                                   "Le transporteur est activé mais aucun transporteur n'est sélectionné.\n"
+                                   "Veuillez en choisir un ou désactiver l'option transporteur.")
+            return
+
+        total_commande = sum(i['qtcmd'] * i['punitcmd'] for i in self.items_commande)
+        idtrans = self.transporteur_id if self.var_transporteur.get() else None
+
         conn = self.connect_db()
         if not conn: return
-    
         try:
-            cursor = conn.cursor()
-            description = ""
-        
-            if self.mode_modification and self.idcom_charge:
-                # Mode Modification (UPDATE)
-            
-                # 1. Mise à jour de la commande principale
-                query_commande = """
-                    UPDATE tb_commande 
-                    SET refcom = %s, idfrs = NULL, descriptioncom = %s, totcmd = %s
-                    WHERE idcom = %s
-                """
-                cursor.execute(query_commande, (
-                    self.entry_ref.get(), 
-                    description, 
-                    total_commande,
-                    self.idcom_charge
-                ))
-            
-                ids_existants = [item['idcomdetail'] for item in self.items_commande if item['idcomdetail']]
-            
-                # 2. Suppression des lignes non conservées
-                query_select_ids = "SELECT id FROM tb_commandedetail WHERE idcom = %s"
-                cursor.execute(query_select_ids, (self.idcom_charge,))
-                all_ids_in_db = [row[0] for row in cursor.fetchall()]
-            
-                ids_a_supprimer = [id_db for id_db in all_ids_in_db if id_db not in ids_existants]
-            
-                if ids_a_supprimer:
-                    query_delete = "DELETE FROM tb_commandedetail WHERE id IN %s"
-                    cursor.execute(query_delete, (tuple(ids_a_supprimer),))
+            cur = conn.cursor()
 
-                # 3. Insertion/Mise à jour des lignes
-                query_update = """
-                    UPDATE tb_commandedetail 
-                    SET idarticle = %s, idunite = %s, idfrs = %s, qtcmd = %s, qtlivre = %s, punitcmd = %s, total = %s, dateperemption = %s
-                    WHERE id = %s
-                """
-                query_insert = """
-                    INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
-            
+            if self.mode_modification and self.idcom_charge:
+                # UPDATE
+                cur.execute("""
+                    UPDATE tb_commande SET refcom=%s, idfrs=NULL, descriptioncom=%s,
+                    totcmd=%s, idtransportuer=%s WHERE idcom=%s
+                """, (self.entry_ref.get(), "", total_commande, idtrans, self.idcom_charge))
+
+                ids_existants = [i['idcomdetail'] for i in self.items_commande if i['idcomdetail']]
+                cur.execute("SELECT id FROM tb_commandedetail WHERE idcom=%s", (self.idcom_charge,))
+                all_ids = [r[0] for r in cur.fetchall()]
+                to_del = [x for x in all_ids if x not in ids_existants]
+                if to_del:
+                    cur.execute("DELETE FROM tb_commandedetail WHERE id IN %s", (tuple(to_del),))
+
                 for item in self.items_commande:
-                    total_ligne = item['qtcmd'] * item['punitcmd']
-                    date_peremption = item.get('dateperemption', None)
-                
-                    # Convertir la date si nécessaire
-                    date_peremption_db = None
-                    if date_peremption:
-                        try:
-                            # Si c'est au format JJ/MM/AAAA, convertir en format DB
-                            if '/' in date_peremption:
-                                parts = date_peremption.split('/')
-                                if len(parts) == 3:
-                                    date_peremption_db = f"{parts[2]}-{parts[1]}-{parts[0]}"
-                            else:
-                                date_peremption_db = date_peremption
-                        except:
-                            date_peremption_db = None
-                
+                    tl = item['qtcmd'] * item['punitcmd']
+                    dp = self._format_date_db(item.get('dateperemption'))
                     if item['idcomdetail']:
-                        # UPDATE
-                        cursor.execute(query_update, (
-                            item['idarticle'], 
-                            item['idunite'], 
-                            item.get('idfrs'),
-                            item['qtcmd'], 
-                            item['qtlivre'], 
-                            item['punitcmd'], 
-                            total_ligne,
-                            date_peremption_db,
-                            item['idcomdetail']
-                        ))
+                        cur.execute("""
+                            UPDATE tb_commandedetail SET idarticle=%s, idunite=%s, idfrs=%s,
+                            qtcmd=%s, qtlivre=%s, punitcmd=%s, total=%s, dateperemption=%s WHERE id=%s
+                        """, (item['idarticle'], item['idunite'], item.get('idfrs'),
+                              item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp, item['idcomdetail']))
                     else:
-                        # INSERT (nouvelle ligne)
-                        cursor.execute(query_insert, (
-                            self.idcom_charge, 
-                            item['idarticle'], 
-                            item['idunite'], 
-                            item.get('idfrs'),
-                            item['qtcmd'], 
-                            item['qtlivre'], 
-                            item['punitcmd'],
-                            total_ligne,
-                            date_peremption_db
-                        ))
-                    
+                        cur.execute("""
+                            INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """, (self.idcom_charge, item['idarticle'], item['idunite'], item.get('idfrs'),
+                              item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp))
                 conn.commit()
-                messagebox.showinfo("Succès", f"Commande {self.entry_ref.get()} modifiée avec succès!")
-            
+                ref_sauvee = self.entry_ref.get()
+                messagebox.showinfo("Succès", f"Commande {ref_sauvee} modifiée avec succès !")
+
             else:
-                # Mode Création (INSERT)
-            
-                # 1. Insertion de la commande principale
-                query_commande = """
-                    INSERT INTO tb_commande (refcom, datecom, iduser, idfrs, descriptioncom, datemodif, totcmd, deleted)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
-                    RETURNING idcom
-                """
-                cursor.execute(query_commande, (
-                    self.entry_ref.get(), 
-                    datetime.now(),  # CORRECTION: Utiliser .date() au lieu de strftime
-                    self.iduser, 
-                    None,
-                    description,
-                    datetime.now(), #par défaut datmodif  = dateEntré
-                    total_commande
-                ))
-                idcom = cursor.fetchone()[0]
-            
-                # 2. Insertion des détails
-                query_detail = """
-                    INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
+                # INSERT
+                cur.execute("""
+                    INSERT INTO tb_commande (refcom, datecom, iduser, idfrs, descriptioncom, datemodif, totcmd, deleted, idtransportuer)
+                    VALUES (%s,%s,%s,NULL,'',%s,%s,0,%s) RETURNING idcom
+                """, (self.entry_ref.get(), datetime.now(), self.iduser,
+                      datetime.now(), total_commande, idtrans))
+                idcom = cur.fetchone()[0]
+                self.idcom_charge = idcom
+
                 for item in self.items_commande:
-                    total_ligne = item['qtcmd'] * item['punitcmd']
-                    date_peremption = item.get('dateperemption', None)
-                
-                    # Convertir la date si nécessaire
-                    date_peremption_db = None
-                    if date_peremption:
-                        try:
-                            if '/' in date_peremption:
-                                parts = date_peremption.split('/')
-                                if len(parts) == 3:
-                                    date_peremption_db = f"{parts[2]}-{parts[1]}-{parts[0]}"
-                            else:
-                                date_peremption_db = date_peremption
-                        except:
-                            date_peremption_db = None
-                
-                    cursor.execute(query_detail, (
-                        idcom, 
-                        item['idarticle'], 
-                        item['idunite'], 
-                        item.get('idfrs'),
-                        item['qtcmd'], 
-                        item['qtlivre'], 
-                        item['punitcmd'],
-                        total_ligne,
-                        date_peremption_db
-                    ))
-                
+                    tl = item['qtcmd'] * item['punitcmd']
+                    dp = self._format_date_db(item.get('dateperemption'))
+                    cur.execute("""
+                        INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    """, (idcom, item['idarticle'], item['idunite'], item.get('idfrs'),
+                          item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp))
                 conn.commit()
-                messagebox.showinfo("Succès", "Commande enregistrée avec succès!")
-            
+                messagebox.showinfo("Succès", "Commande enregistrée avec succès !")
+
+            # ── Proposition d'impression ──────────────────────────────────
+            imprimer = messagebox.askyesno(
+                "Impression",
+                "La commande a été enregistrée.\n\nVoulez-vous imprimer le bon de commande ?"
+            )
+            if imprimer:
+                self.imprimer_bon_commande()
+
             self.mode_modification = False
-            self.idcom_charge = None
             self.titre.configure(text="Nouvelle Commande Fournisseur")
             self.reinitialiser_formulaire()
-        
+
         except Exception as e:
             conn.rollback()
-            messagebox.showerror("Erreur", f"Erreur lors de l'enregistrement: {str(e)}")
+            messagebox.showerror("Erreur", f"Enregistrement : {e}")
         finally:
-            if 'cursor' in locals() and cursor: cursor.close()
+            if 'cur' in locals(): cur.close()
             if conn: conn.close()
 
-            
+    def _format_date_db(self, date_str):
+        """Convertit JJ/MM/AAAA → AAAA-MM-JJ pour la DB."""
+        if not date_str: return None
+        try:
+            if '/' in date_str:
+                p = date_str.split('/')
+                if len(p) == 3: return f"{p[2]}-{p[1]}-{p[0]}"
+            return date_str
+        except:
+            return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Réinitialisation
+    # ─────────────────────────────────────────────────────────────────────────
     def reinitialiser_formulaire(self, generer_ref=True):
-        """Réinitialise le formulaire après enregistrement"""
-        if generer_ref:
-            self.generer_reference()
+        if generer_ref: self.generer_reference()
         self.items_commande.clear()
         self.index_ligne_selectionnee = None
         self.article_selectionne = None
-        
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        self.idcom_charge = None
+        for i in self.tree.get_children(): self.tree.delete(i)
         self._refresh_table_alternating_colors(self.tree)
-            
-        self.entry_article.configure(state="normal")
-        self.entry_article.delete(0, "end")
-        self.entry_article.configure(state="readonly")
-        
-        self.entry_unite.configure(state="normal")
-        self.entry_unite.delete(0, "end")
-        self.entry_unite.configure(state="readonly")
-        
+        for e in (self.entry_article, self.entry_unite):
+            e.configure(state="normal"); e.delete(0, "end"); e.configure(state="readonly")
         self.entry_qtcmd.delete(0, "end")
         self.entry_punitcmd.delete(0, "end")
         self.entry_qtlivre.delete(0, "end")
         self.entry_qtlivre.insert(0, "0")
-        
         self.btn_ajouter.configure(state="normal")
-        self.btn_modifier_ligne.configure(state="disabled", text="✏️ Modifier Ligne")
+        self.btn_modifier_ligne.configure(state="disabled", text="✏️  Modifier Ligne")
         self.btn_annuler_selection.configure(state="disabled")
-        
-        # Réinitialiser le label total ligne
-        self.label_total_ligne.configure(text="Total Ligne: 0,00")
-        
+        self.label_total_ligne.configure(text="0,00")
+        # Réinitialiser transporteur
+        self.var_transporteur.set(False)
+        self.toggle_transporteur()
         self.calculer_total()
-        
+
     def nouvelle_commande(self):
-        """Réinitialise le formulaire et le mode de commande"""
         self.reinitialiser_formulaire()
         self.mode_modification = False
         self.idcom_charge = None
         self.titre.configure(text="Nouvelle Commande Fournisseur")
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # IMPRESSION
+    # ─────────────────────────────────────────────────────────────────────────
     def imprimer_bon_commande(self):
-        """Génère le contenu HTML du bon de commande et affiche l'aperçu"""
         if not self.idcom_charge and not self.items_commande:
-            messagebox.showwarning("Attention", "Veuillez charger ou créer une commande pour imprimer.")
+            messagebox.showwarning("Attention", "Aucune commande à imprimer.")
             return
 
-        # Tenter d'enregistrer d'abord si c'est une nouvelle commande non enregistrée
-        if not self.idcom_charge:
-            reponse = messagebox.askyesno("Confirmation d'enregistrement", "Voulez-vous enregistrer cette commande avant d'imprimer ?")
-            if reponse:
-                self.enregistrer_commande()
-                if not self.idcom_charge: # Si l'enregistrement a échoué
-                    return
-            else:
-                messagebox.showwarning("Annulation", "Impression annulée. Enregistrez pour obtenir un bon officiel.")
-                return
-
-        # Récupération des infos société et fournisseur
         conn = self.connect_db()
         if not conn: return
-    
+
         info_societe = None
-        # préparer informations fournisseur à partir de l'entry ou variables
         fournisseur_info = {
-            "nom": self.entry_fournisseur.get() if hasattr(self, 'entry_fournisseur') else "",
-            "contact": self.fournisseur_contact if hasattr(self, 'fournisseur_contact') else "N/A",
-            "adresse": self.fournisseur_adresse if hasattr(self, 'fournisseur_adresse') else "N/A"
+            "nom": self.entry_fournisseur.get(),
+            "contact": self.fournisseur_contact or "N/A",
+            "adresse": self.fournisseur_adresse or "N/A"
         }
+        transporteur_info = {"nom": "", "contact": "", "adresse": ""}
 
         try:
-            cursor = conn.cursor()
-        
-            # Récupération des infos de la société
-            cursor.execute("SELECT nomsociete, villesociete, adressesociete, contactsociete, nifsociete, statsociete, cifsociete FROM tb_infosociete LIMIT 1")
-            row_societe = cursor.fetchone()
-            if row_societe:
-                info_societe = (
-                    row_societe[0], # 0: nom
-                    row_societe[1], # 1: ville
-                    "Siège Social:", # 2: libellé
-                    row_societe[2], # 3: adresse
-                    row_societe[3], # 4: tel
-                    row_societe[1], # 5: ville
-                    row_societe[4], # 6: nif
-                    row_societe[5], # 7: stat
-                    row_societe[6]  # 8: cif
-                )
+            cur = conn.cursor()
+            cur.execute("SELECT nomsociete, villesociete, adressesociete, contactsociete, nifsociete, statsociete, cifsociete FROM tb_infosociete LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                info_societe = (row[0], row[1], "Siège Social:", row[2], row[3], row[1], row[4], row[5], row[6])
 
-            # Récupération des infos fournisseur détaillées
-            idfrs = self.fournisseur_id
-            if idfrs:
-                cursor.execute("SELECT nomfrs, contactfrs, adressefrs FROM tb_fournisseur WHERE idfrs = %s", (idfrs,))
-                row_frs = cursor.fetchone()
-                if row_frs:
-                    fournisseur_info = {
-                        "nom": row_frs[0],
-                        "contact": row_frs[1] or "N/A",
-                        "adresse": row_frs[2] or "N/A"
-                    }
+            if self.fournisseur_id:
+                cur.execute("SELECT nomfrs, contactfrs, adressefrs FROM tb_fournisseur WHERE idfrs=%s", (self.fournisseur_id,))
+                rf = cur.fetchone()
+                if rf:
+                    fournisseur_info = {"nom": rf[0], "contact": rf[1] or "N/A", "adresse": rf[2] or "N/A"}
 
+            if self.transporteur_id:
+                cur.execute("SELECT nom, contact, adresse FROM tb_transporteur WHERE idtransporteur=%s", (self.transporteur_id,))
+                rt = cur.fetchone()
+                if rt:
+                    transporteur_info = {"nom": rt[0] or "", "contact": rt[1] or "", "adresse": rt[2] or ""}
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur de récupération des données pour l'impression: {str(e)}")
-            info_societe = ("Nom Société", "Ville", "Siège Social:", "Adresse", "Tél", "Ville", "NIF", "STAT", "CIF")
+            messagebox.showerror("Erreur", f"Données impression : {e}")
         finally:
-            if 'cursor' in locals() and cursor: cursor.close()
-            if conn: conn.close()
-        
-        if not info_societe:
-            info_societe = ("Nom Société", "Ville", "Siège Social:", "Adresse", "Tél", "Ville", "NIF", "STAT", "CIF")
+            cur.close(); conn.close()
 
-        # Préparation des données pour le tableau
+        if not info_societe:
+            info_societe = ("Société", "Ville", "Siège Social:", "Adresse", "Tél", "Ville", "NIF", "STAT", "CIF")
+
         lignes_html = ""
         montant_total = 0
-        numero_ligne = 1  # CORRECTION: Ajout d'un compteur pour le numéro de ligne
-    
+        numero = 1
+
         for item in self.items_commande:
             total = item['qtcmd'] * item['punitcmd']
             montant_total += total
-        
-            # Récupérer les informations nécessaires
-            conn_temp = self.connect_db()
-            if conn_temp:
+            conn2 = self.connect_db()
+            designation, unite = "Article inconnu", "N/A"
+            if conn2:
                 try:
-                    cursor_temp = conn_temp.cursor()
-                    # Récupérer la désignation de l'article et de l'unité
-                    cursor_temp.execute("""
-                    SELECT a.designation, u.designationunite
-                    FROM tb_article a
-                    INNER JOIN tb_unite u ON a.idarticle = u.idarticle
-                    WHERE a.idarticle = %s AND u.idunite = %s
-                """, (item['idarticle'], item['idunite']))
-                    result = cursor_temp.fetchone()
-                
-                    if result:
-                        designation = result[0]
-                        unite = result[1]
-                    else:
-                        designation = "Article inconnu"
-                        unite = "N/A"
-                    
-                    cursor_temp.close()
-                except:
-                    designation = "Article inconnu"
-                    unite = "N/A"
-                finally:
-                    conn_temp.close()
-            else:
-                designation = "Article inconnu"
-                unite = "N/A"
-        
+                    cur2 = conn2.cursor()
+                    cur2.execute("""
+                        SELECT a.designation, u.designationunite FROM tb_article a
+                        INNER JOIN tb_unite u ON a.idarticle=u.idarticle
+                        WHERE a.idarticle=%s AND u.idunite=%s
+                    """, (item['idarticle'], item['idunite']))
+                    r2 = cur2.fetchone()
+                    if r2: designation, unite = r2[0], r2[1]
+                    cur2.close()
+                except: pass
+                finally: conn2.close()
+
             lignes_html += f"""
             <tr>
-                <td class="center">{numero_ligne}</td>
+                <td class="center">{numero}</td>
                 <td>{escape(designation)}</td>
                 <td class="center">{escape(unite)}</td>
                 <td class="right">{self.formater_nombre(item['qtcmd'])}</td>
                 <td class="right">{self.formater_nombre(item['punitcmd'])}</td>
                 <td class="right">{self.formater_nombre(total)}</td>
-            </tr>
-        """
-            numero_ligne += 1
-    
+            </tr>"""
+            numero += 1
+
         total_lettres = self.nombre_en_lettres(montant_total)
 
-        html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Bon de Commande - {self.entry_ref.get()}</title>
-    <style>
-        @page {{ size: A4; margin: 10mm; }}
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.4; color: #000; position: relative; background: white; }}
-        body::before {{ 
-            content: 'BC'; 
-            position: fixed; 
-            top: 50%; 
-            left: 50%; 
-            transform: translate(-50%, -50%) rotate(-45deg); 
-            font-size: 300px; 
-            font-weight: bold; 
-            color: rgba(0, 0, 0, 0.05); 
-            z-index: -1; 
-            pointer-events: none; 
-        }}
-        .container {{ width: 100%; max-width: 210mm; margin: 0 auto; background: white; position: relative; z-index: 1; }}
-        .header {{ display: flex; justify-content: space-between; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 3px solid #333; }}
-        .header-left {{ flex: 1; }}
-        .header-right {{ flex: 1; text-align: right; }}
-        .logo {{ font-size: 28px; font-weight: bold; color: #2c3e50; margin-bottom: 5px; }}
-        .company-info {{ font-size: 9pt; line-height: 1.3; }}
-        .company-info strong {{ font-weight: bold; }}
-        .title {{ text-align: center; margin: 25px 0; }}
-        .title h1 {{ font-size: 24pt; font-weight: bold; color: #2c3e50; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px; }}
-        .info-section {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
-        .info-box {{ width: 48%; border: 2px solid #333; padding: 12px; background: #f9f9f9; }}
-        .info-box h3 {{ font-size: 12pt; font-weight: bold; margin-bottom: 8px; color: #2c3e50; border-bottom: 2px solid #2c3e50; padding-bottom: 4px; }}
-        .info-box p {{ font-size: 10pt; margin: 3px 0; }}
-        .table-container {{ margin-top: 20px; }}
-        table {{ width: 100%; border-collapse: collapse; }}
-        table th, table td {{ border: 1px solid #333; padding: 8px; text-align: left; }}
-        table th {{ background-color: #e0e0e0; font-weight: bold; font-size: 10pt; text-transform: uppercase; }}
-        .right {{ text-align: right; }}
-        .center {{ text-align: center; }}
-        .total-row td {{ font-weight: bold; background-color: #f0f0f0; }}
-        .total-row .total-label {{ text-align: right; border-right: none; }}
-        .total-row .total-value {{ text-align: right; }}
-        .montant-lettres {{ margin-top: 20px; font-size: 11pt; font-style: italic; }}
-        .signatures {{ display: flex; justify-content: space-between; margin-top: 40px; }}
-        .signature-box {{ width: 45%; text-align: center; }}
-        .signature-box .title {{ font-weight: bold; font-size: 11pt; margin-bottom: 60px; text-decoration: underline; }}
-        @media print {{ 
-            body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }} 
-        }}
-    </style>
+        # Bloc transporteur dans le HTML (si présent)
+        transporteur_html = ""
+        if self.var_transporteur.get() and transporteur_info['nom']:
+            transporteur_html = f"""
+            <div class="info-box">
+                <h3>Transporteur</h3>
+                <p><strong>Nom:</strong> {escape(transporteur_info['nom'])}</p>
+                <p><strong>Adresse:</strong> {escape(transporteur_info['adresse'])}</p>
+                <p><strong>Contact:</strong> {escape(transporteur_info['contact'])}</p>
+            </div>"""
+
+        html_content = f"""<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>Bon de Commande - {self.entry_ref.get()}</title>
+<style>
+@page {{ size: A4; margin: 10mm; }}
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+body {{ font-family:Arial,sans-serif; font-size:11pt; line-height:1.4; color:#000; background:white; position:relative; }}
+body::before {{ content:'BC'; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) rotate(-45deg);
+    font-size:300px; font-weight:bold; color:rgba(0,0,0,0.04); z-index:-1; }}
+.container {{ width:100%; max-width:210mm; margin:0 auto; background:white; }}
+.header {{ display:flex; justify-content:space-between; margin-bottom:18px; padding-bottom:12px; border-bottom:3px solid #2C3E50; }}
+.logo {{ font-size:26px; font-weight:bold; color:#2C3E50; margin-bottom:4px; }}
+.company-info {{ font-size:9pt; line-height:1.4; }}
+.title {{ text-align:center; margin:20px 0; }}
+.title h1 {{ font-size:22pt; font-weight:bold; color:#2C3E50; text-transform:uppercase; letter-spacing:2px; }}
+.info-section {{ display:flex; gap:12px; margin-bottom:18px; flex-wrap:wrap; }}
+.info-box {{ flex:1; min-width:180px; border:2px solid #2C3E50; padding:10px; background:#f9f9f9; border-radius:4px; }}
+.info-box h3 {{ font-size:11pt; font-weight:bold; margin-bottom:6px; color:#2C3E50; border-bottom:1px solid #2C3E50; padding-bottom:3px; }}
+.info-box p {{ font-size:10pt; margin:2px 0; }}
+table {{ width:100%; border-collapse:collapse; margin-top:16px; }}
+table th, table td {{ border:1px solid #BDC3C7; padding:7px; text-align:left; }}
+table th {{ background:#2C3E50; color:#fff; font-size:9.5pt; text-transform:uppercase; }}
+.right {{ text-align:right; }} .center {{ text-align:center; }}
+.total-row td {{ font-weight:bold; background:#ECF0F1; }}
+.montant-lettres {{ margin-top:16px; font-size:10.5pt; font-style:italic; padding:8px; border:1px solid #ECF0F1; border-radius:4px; background:#f9f9f9; }}
+.signatures {{ display:flex; justify-content:space-between; margin-top:36px; }}
+.signature-box {{ width:44%; text-align:center; }}
+.signature-box .sig-title {{ font-weight:bold; font-size:11pt; margin-bottom:50px; text-decoration:underline; }}
+</style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="header-left">
-                <div class="logo">{escape(str(info_societe[0] or ''))}</div>
-                <div class="company-info">
-                    <strong>{escape(str(info_societe[2] or ''))}</strong><br>
-                    {escape(str(info_societe[3] or ''))}<br>
-                    {escape(str(info_societe[5] or ''))} - Tél: {escape(str(info_societe[4] or ''))}<br>
-                    <strong>NIF:</strong> {escape(str(info_societe[6] or ''))} | <strong>STAT:</strong> {escape(str(info_societe[7] or ''))} | <strong>CIF:</strong> {escape(str(info_societe[8] or ''))}
-                </div>
-            </div>
-            <div class="header-right">
-                <div class="company-info" style="text-align: right;">
-                    {escape(str(info_societe[1] or ''))}
-                </div>
-            </div>
-        </div>
-
-        <div class="title">
-            <h1>BON DE COMMANDE</h1>
-        </div>
-        
-        <div class="info-section">
-            <div class="info-box">
-                <h3>Fournisseur</h3>
-                <p><strong>Nom:</strong> {escape(fournisseur_info['nom'])}</p>
-                <p><strong>Adresse:</strong> {escape(fournisseur_info['adresse'])}</p>
-                <p><strong>Tél:</strong> {escape(fournisseur_info['contact'])}</p>
-            </div>
-            <div class="info-box">
-                <h3>Informations Commande</h3>
-                <p><strong>Référence:</strong> {escape(self.entry_ref.get())}</p>
-                <p><strong>Date:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
-                <p><strong>État:</strong> En attente</p>
-            </div>
-        </div>
-
-        <div class="table-container">
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 50px;" class="center">N°</th>
-                        <th>Désignation</th>
-                        <th style="width: 80px;" class="center">Unité</th>
-                        <th style="width: 120px;" class="right">Quantité</th>
-                        <th style="width: 120px;" class="right">Prix Unitaire</th>
-                        <th style="width: 120px;" class="right">Total</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {lignes_html}
-                    <tr class="total-row">
-                        <td colspan="5" class="total-label">MONTANT TOTAL (Ariary)</td>
-                        <td class="total-value">{self.formater_nombre(montant_total)}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
-        <div class="montant-lettres">
-            <strong>Montant en lettres:</strong> {total_lettres}
-        </div>
-        
-        <div class="signatures">
-            <div class="signature-box">
-                <div class="title">Le Responsable</div>
-            </div>
-            <div class="signature-box">
-                <div class="title">Le Fournisseur</div>
-            </div>
-        </div>
+<body><div class="container">
+<div class="header">
+<div>
+    <div class="logo">{escape(str(info_societe[0] or ''))}</div>
+    <div class="company-info">
+        <strong>{escape(str(info_societe[2] or ''))}</strong><br>
+        {escape(str(info_societe[3] or ''))}<br>
+        {escape(str(info_societe[5] or ''))} — Tél: {escape(str(info_societe[4] or ''))}<br>
+        <strong>NIF:</strong> {escape(str(info_societe[6] or ''))} | <strong>STAT:</strong> {escape(str(info_societe[7] or ''))} | <strong>CIF:</strong> {escape(str(info_societe[8] or ''))}
     </div>
-</body>
-</html>
-    """
-    
-        # CORRECTION PRINCIPALE: Appeler la fonction d'affichage de l'aperçu
-        self.afficher_apercu_impression(html_content)
+</div>
+<div class="company-info" style="text-align:right">{escape(str(info_societe[1] or ''))}</div>
+</div>
 
-    def afficher_apercu_impression(self, html_content):
-        """Affiche l'aperçu avant impression"""
-        import tempfile
-        import webbrowser
-        import os
-    
-        # Créer un fichier temporaire
+<div class="title"><h1>Bon de Commande</h1></div>
+
+<div class="info-section">
+<div class="info-box">
+    <h3>Fournisseur</h3>
+    <p><strong>Nom:</strong> {escape(fournisseur_info['nom'])}</p>
+    <p><strong>Adresse:</strong> {escape(fournisseur_info['adresse'])}</p>
+    <p><strong>Tél:</strong> {escape(fournisseur_info['contact'])}</p>
+</div>
+<div class="info-box">
+    <h3>Informations Commande</h3>
+    <p><strong>Référence:</strong> {escape(self.entry_ref.get())}</p>
+    <p><strong>Date:</strong> {datetime.now().strftime('%d/%m/%Y')}</p>
+    <p><strong>État:</strong> En attente</p>
+</div>
+{transporteur_html}
+</div>
+
+<table>
+<thead><tr>
+    <th style="width:44px" class="center">N°</th>
+    <th>Désignation</th>
+    <th style="width:76px" class="center">Unité</th>
+    <th style="width:110px" class="right">Quantité</th>
+    <th style="width:120px" class="right">Prix Unitaire</th>
+    <th style="width:120px" class="right">Total</th>
+</tr></thead>
+<tbody>
+{lignes_html}
+<tr class="total-row">
+    <td colspan="5" style="text-align:right">MONTANT TOTAL (Ariary)</td>
+    <td class="right">{self.formater_nombre(montant_total)}</td>
+</tr>
+</tbody>
+</table>
+
+<div class="montant-lettres"><strong>En lettres :</strong> {total_lettres}</div>
+
+<div class="signatures">
+<div class="signature-box"><div class="sig-title">Le Responsable</div></div>
+<div class="signature-box"><div class="sig-title">Le Fournisseur</div></div>
+</div>
+</div></body></html>"""
+
+        self._ouvrir_navigateur(html_content)
+
+    def _ouvrir_navigateur(self, html_content):
+        import tempfile, webbrowser, os
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html', encoding='utf-8') as f:
             f.write(html_content)
-            temp_path = f.name
-    
-        # Ouvrir dans le navigateur par défaut
-        webbrowser.open('file://' + os.path.abspath(temp_path))
-    
-        messagebox.showinfo("Impression", 
-                      "Le bon de commande a été ouvert dans votre navigateur.\n\n"
-                      "Utilisez Ctrl+P ou Cmd+P pour l'imprimer.")
+            path = f.name
+        webbrowser.open('file://' + os.path.abspath(path))
+        messagebox.showinfo("Impression",
+                            "Le bon de commande est ouvert dans votre navigateur.\n"
+                            "Utilisez Ctrl+P pour imprimer.")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    from app_theme import init_theme
+    init_theme()
     app = ctk.CTk()
-    app.geometry("1200x800")
-    
-    iduser = 1
-    
-    page = PageCommandeFrs(app, iduser)
+    app.geometry("1280x820")
+    app.title("Commande Fournisseur — iJeery")
+    Theme.apply(app)
+    page = PageCommandeFrs(app, iduser=1)
     page.pack(fill="both", expand=True)
-    
     app.mainloop()
