@@ -434,7 +434,7 @@ class PagePrixSaisie(ctk.CTkFrame):
             conn.close()
         
             messagebox.showinfo("Succès", "Prix enregistré avec succès")
-            self.charger_historique(idarticle)
+            #self.charger_historique(idarticle)
             self.nouveau()
         
         except Exception as e:
