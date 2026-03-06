@@ -9,73 +9,107 @@ import json
 import os
 from resource_utils import get_config_path, safe_file_read
 
-
 # Imports ReportLab pour le PDF
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-# Déterminer le répertoire parent
+# ── Thème iJeery ──────────────────────────────────────────────────────────────
+try:
+    from app_theme import Colors, Fonts, styled, Theme
+    _T = True
+except ImportError:
+    _T = False
+
+
+class _C:
+    BG_PAGE        = "#ECF0F1"
+    BG_CARD        = "#FFFFFF"
+    BG_HEADER      = "#2C3E50"
+    BG_INPUT       = "#F4F6F8"
+    PRIMARY        = "#3498DB"
+    PRIMARY_HOVER  = "#2980B9"
+    SUCCESS        = "#2ECC71"
+    SUCCESS_DARK   = "#27AE60"
+    DANGER         = "#E74C3C"
+    DANGER_DARK    = "#C0392B"
+    INFO_DARK      = "#16A085"
+    INFO           = "#1ABC9C"
+    TEXT_PRIMARY   = "#2C3E50"
+    TEXT_SECONDARY = "#5D6D7E"
+    TEXT_MUTED     = "#95A5A6"
+    BORDER         = "#D5D8DC"
+    DIVIDER        = "#E8EAED"
+
+
+C = Colors if _T else _C
+
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-class PageCaisse(ctk.CTkFrame):
-    def __init__(self, master):
-        super().__init__(master)
-        self.configure(fg_color="#f5f5f5")
 
+def _apply_tree_style():
+    s = ttk.Style()
+    try:
+        s.theme_use("clam")
+    except Exception:
+        pass
+    s.configure("Caisse.Treeview",
+                 background=C.BG_CARD, foreground=C.TEXT_PRIMARY,
+                 fieldbackground=C.BG_CARD, rowheight=22,
+                 font=("Roboto" if _T else "Segoe UI", 9),
+                 borderwidth=0)
+    s.configure("Caisse.Treeview.Heading",
+                 background=C.BG_HEADER, foreground="#FFFFFF",
+                 font=("Roboto" if _T else "Segoe UI", 9, "bold"),
+                 relief="flat", padding=(4, 3))
+    s.map("Caisse.Treeview",
+          background=[("selected", C.PRIMARY)],
+          foreground=[("selected", "#FFFFFF")])
+
+
+def _f(size=10, weight="normal"):
+    return ctk.CTkFont(
+        family="Roboto" if _T else "Segoe UI",
+        size=size, weight=weight)
+
+
+# ====================================================================
+# PageCaisse
+# ====================================================================
+
+class PageCaisse(ctk.CTkFrame):
+
+    def __init__(self, master):
+        super().__init__(master, fg_color=C.BG_PAGE)
+
+        # ── État interne (identique à l'original) ─────────────────────────────
         self.modes_paiement_dict = {"Tous": None}
-        self.donnees_pour_pdf = []
-        
-        self.total_enc_periode = 0
-        self.total_dec_periode = 0
-        
-        # Flag pour la visibilité de la colonne Cumul
-        self.show_cumul = False
-        
-        # Dictionnaires pour stocker les montants des cadres
-        self.montants_docs = {}
-        self.montants_modes = {}
-        
-        # Dictionnaires pour stocker les widgets des cadres
-        self.cadres_docs = {}
-        self.cadres_modes = {}
-        self.frames_docs = {}  # Stocke les frames pour les styles
-        self.frames_modes = {}  # Stocke les frames pour les styles
-        
-        # Variables pour les filtres actifs
-        self.filtre_doc_actif = None
-        self.filtre_mode_actif = None
-        
-        # Dictionnaire pour stocker les couleurs originales
-        self.couleurs_docs = {}
-        self.couleurs_modes = {}
-        
-        # � FLAGS DE CONTRÔLE POUR ÉVITER LES BLOCAGES
+        self.donnees_pour_pdf    = []
+        self.total_enc_periode   = 0
+        self.total_dec_periode   = 0
+        self.show_cumul          = False
+        self.montants_docs       = {}
+        self.montants_modes      = {}
+        self.cadres_docs         = {}
+        self.cadres_modes        = {}
+        self.frames_docs         = {}
+        self.frames_modes        = {}
+        self.filtre_doc_actif    = None
+        self.filtre_mode_actif   = None
+        self.couleurs_docs       = {}
+        self.couleurs_modes      = {}
         self._traitement_filtre_en_cours = False
-        self._filtre_doc_en_attente = None
-        self._filtre_mode_en_attente = None
-        
-        # �🔑 CRUCIAL: Mapping entre noms UI (cadres) et noms BD exactes
-        # Clé: Nom du cadre UI | Valeur: Nom exact en BD
+        self._filtre_doc_en_attente      = None
+        self._filtre_mode_en_attente     = None
         self.mode_ui_to_bd = {
-            "Espèces": None,      # Sera rempli depuis la BD
-            "Crédit": None,
-            "Chèque": None,
-            "Virement": None,
-            "Autres": None,
-            "Mvola": None,
-            "Airtel Money": None,
-            "Orange Money": None
+            "Espèces": None, "Crédit": None, "Chèque": None,
+            "Virement": None, "Autres": None, "Mvola": None,
+            "Airtel Money": None, "Orange Money": None,
         }
-        
-        # Mapping inverse pour retrouver l'ID rapidement
-        self.mode_bd_to_id = {}
-        
-        # Liste pour stocker les données du tableau avant filtrage
+        self.mode_bd_to_id   = {}
         self.donnees_tableau = []
 
-        # Connexion à la base de données
         self.conn = self.connect_db()
         if self.conn:
             self.cursor = self.conn.cursor()
@@ -83,398 +117,376 @@ class PageCaisse(ctk.CTkFrame):
             messagebox.showerror("Erreur", "Connexion impossible.")
             return
 
-        # ---- CADRES DE CATÉGORIES ----
-        self.frame_categories = ctk.CTkFrame(self, fg_color="#f5f5f5")
-        self.frame_categories.pack(pady=5, fill="x", padx=10)
-        
-        # Première ligne: Documents
-        self.frame_docs = ctk.CTkFrame(self.frame_categories, fg_color="#f5f5f5")
-        self.frame_docs.pack(fill="x", pady=2)
-        
-        docs_config = [
-            ("Client", "#7cb342"),
-            ("Avoir", "#ffeb3b"),
-            ("Fournisseur", "#64b5f6"),
-            ("Personnel", "#9e9e9e"),
-            ("Dépenses", "#f44336"),
-            ("Encaissement", "#4caf50"),
-            ("Paiement Crédit", "#29b6f6")
-        ]
-        
-        for doc, color in docs_config:
-            self.creer_cadre_doc(self.frame_docs, doc, color)
-        
-        # Deuxième ligne: Modes de paiement
-        self.frame_modes = ctk.CTkFrame(self.frame_categories, fg_color="#f5f5f5")
-        self.frame_modes.pack(fill="x", pady=2)
-        
-        modes_config = [
-            ("Espèces", "#ff6f00"),
-            ("Crédit", "#42a5f5"),
-            ("Chèque", "#0091ea"),
-            ("Virement", "#ce93d8"),
-            ("Autres", "#f44336"),
-            ("Mvola", "#fdd835"),
-            ("Airtel Money", "#c0ca33"),
-            ("Orange Money", "#00bcd4")
-        ]
-        
-        for mode, color in modes_config:
-            self.creer_cadre_mode(self.frame_modes, mode, color)
+        _apply_tree_style()
 
-        # ---- UI TOP (Filtres) ----
-        self.frame_top = ctk.CTkFrame(self, fg_color="#f5f5f5")
-        self.frame_top.pack(pady=10, fill="x", padx=10)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(3, weight=1)   # treeview row
 
-        # self.label_solde_global = ctk.CTkLabel(self.frame_top, text="Solde de caisse : 0 Ar", text_color="#000", font=("Arial", 18, "bold"))
-        # self.label_solde_global.pack(side="left", padx=20)
-
-        self.frame_filtre = ctk.CTkFrame(self.frame_top, fg_color="#f5f5f5")
-        self.frame_filtre.pack(side="left", padx=20, fill="x", expand=True)
-
-        self.entry_debut = DateEntry(self.frame_filtre, width=12, background='darkblue', date_pattern='dd/mm/yyyy')
-        self.entry_debut.pack(side="left", padx=5)
-        self.entry_fin = DateEntry(self.frame_filtre, width=12, background='darkblue', date_pattern='dd/mm/yyyy')
-        self.entry_fin.pack(side="left", padx=5)
-
-        ctk.CTkButton(self.frame_filtre, text="Valider", width=80, fg_color="#28a745", command=self.appliquer_filtres).pack(side="left", padx=5)
-        ctk.CTkButton(self.frame_filtre, text="Imprimer PDF", width=100, fg_color="#17a2b8", command=self.generer_pdf).pack(side="left", padx=5)
-
-        # Checkbox pour toggle colonne Cumul
-        self.check_cumul = ctk.CTkCheckBox(
-            self.frame_filtre, text="Afficher Cumul", 
-            checkbox_width=20, checkbox_height=20,
-            command=self.toggle_cumul
-        )
-        self.check_cumul.pack(side="left", padx=10)
-        
-        # Label Recherche avec icone
-        self.label_recherche = ctk.CTkLabel(
-            self.frame_filtre, text="Recherche 🔍 :", 
-            text_color="#000", font=("Arial", 10)
-        )
-        self.label_recherche.pack(side="left", padx=(20, 5))
-        
-        # Barre de recherche
-        self.entry_recherche = ctk.CTkEntry(
-            self.frame_filtre,
-            placeholder_text="Entrer un element à recherché dans le tableau de caisse",
-            height=32
-        )
-        self.entry_recherche.pack(side="left", padx=5, fill="x", expand=True)
-        self.entry_recherche.bind("<KeyRelease>", self.filtrer_tableau_recherche)
-
-        # ---- TREEVIEW ----
-        self.colonnes = ("Date", "Référence", "Description", "Encaissement", "Décaissement", "Cumul", "Mode", "Utilisateur")
-        self.frame_tree = ctk.CTkFrame(self)
-        self.frame_tree.pack(fill="both", expand=True, padx=10, pady=5)
-
-        self.tree = ttk.Treeview(self.frame_tree, columns=self.colonnes, show="headings")
-        for col in self.colonnes:
-            self.tree.heading(col, text=col)
-            if col == "Date":
-                self.tree.column(col, anchor="center", width=150)
-            elif col == "Cumul":
-                # Colonne Cumul cachée par défaut (largeur 0)
-                self.tree.column(col, anchor="center", width=0, stretch=False)
-            else:
-                self.tree.column(col, anchor="center", width=110)
-        self.tree.column("Description", width=250, anchor="w")
-
-        self.scrollbar_y = ttk.Scrollbar(self.frame_tree, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=self.scrollbar_y.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        self.scrollbar_y.grid(row=0, column=1, sticky="ns")
-        self.frame_tree.grid_rowconfigure(0, weight=1)
-        self.frame_tree.grid_columnconfigure(0, weight=1)
-
-        # Styles pour lignes alternées (meilleure lisibilité)
-        try:
-            # Tags 'odd' et 'even' utilisés lors de l'insertion des lignes
-            self.tree.tag_configure('odd', background='#ffffff')
-            self.tree.tag_configure('even', background='#F2D9EA')
-        except Exception:
-            # Certains environnements peuvent ne pas supporter tag_configure ; ignorer silencieusement
-            pass
-        # ---- BOTTOM (Totaux et Boutons d'action) ----
-        self.frame_bottom_container = ctk.CTkFrame(self, fg_color="#f5f5f5")
-        self.frame_bottom_container.pack(pady=10, fill="x", padx=10, side="bottom")
-
-        # Totaux à gauche
-        self.frame_totaux = ctk.CTkFrame(self.frame_bottom_container, fg_color="#f5f5f5")
-        self.frame_totaux.pack(side="left", fill="y")
-
-        self.label_total_enc = ctk.CTkLabel(self.frame_totaux, text="Total Enc: 0 Ar", font=("Arial", 13, "bold"))
-        self.label_total_enc.grid(row=0, column=0, padx=20, sticky='w')
-        self.label_total_dec = ctk.CTkLabel(self.frame_totaux, text="Total Déc: 0 Ar", font=("Arial", 13, "bold"))
-        self.label_total_dec.grid(row=1, column=0, padx=20, sticky='w')
-
-        # Boutons à droite
-        self.frame_actions = ctk.CTkFrame(self.frame_bottom_container, fg_color="#f5f5f5")
-        self.frame_actions.pack(side="right", fill="y", padx=20)
-
-        self.btn_encaissement = ctk.CTkButton(
-            self.frame_actions, text="+ Encaissement", fg_color="#28a745", 
-            hover_color="#218838", width=150, command=self.open_page_encaissement
-        )
-        self.btn_encaissement.pack(side="left", padx=5)
-
-        self.btn_decaissement = ctk.CTkButton(
-            self.frame_actions, text="- Décaissement", fg_color="#dc3545", 
-            hover_color="#c82333", width=150, command=self.open_page_decaissement
-        )
-        self.btn_decaissement.pack(side="left", padx=5)
+        self._build_header()
+        self._build_badges()
+        self._build_filters()
+        self._build_treeview()
+        self._build_footer()
 
         self.charger_modes_paiement()
         self.appliquer_filtres()
 
+    # ── helper font ──────────────────────────────────────────────────────────
+    # ====================================================================
+    # CONSTRUCTION UI — REFONTE DESIGN
+    # ====================================================================
+
+    def _build_header(self):
+        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
+        hdr.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(
+            hdr, text="Gestion de la Caisse",
+            font=_f(18, "bold"), text_color="#FFFFFF"
+        ).pack(side="left", padx=16, pady=10)
+
+        actions = ctk.CTkFrame(hdr, fg_color="transparent")
+        actions.pack(side="right", padx=16, pady=8)
+
+        self.btn_encaissement = ctk.CTkButton(
+            actions, text="＋  Encaissement",
+            command=self.open_page_encaissement,
+            fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
+            text_color="#FFFFFF", height=34, width=160, font=_f(10, "bold"))
+        self.btn_encaissement.pack(side="left", padx=(0, 8))
+
+        self.btn_decaissement = ctk.CTkButton(
+            actions, text="－  Décaissement",
+            command=self.open_page_decaissement,
+            fg_color=C.DANGER, hover_color=C.DANGER_DARK,
+            text_color="#FFFFFF", height=34, width=160, font=_f(10, "bold"))
+        self.btn_decaissement.pack(side="left")
+
+    def _build_badges(self):
+        """Deux rangées de badges cliquables (documents + modes de paiement)."""
+        card = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        card.grid(row=1, column=0, sticky="ew", padx=12, pady=(6, 2))
+
+        # ── Rangée Documents ──────────────────────────────────────────────────
+        row_docs = ctk.CTkFrame(card, fg_color="transparent")
+        row_docs.pack(fill="x", padx=8, pady=(8, 2))
+
+        ctk.CTkLabel(
+            row_docs, text="TYPES",
+            font=_f(8, "bold"), text_color=C.TEXT_MUTED, width=42, anchor="w"
+        ).pack(side="left", padx=(0, 4))
+
+        docs_config = [
+            ("Client",         "#7CB342"),
+            ("Avoir",          "#F9A825"),
+            ("Fournisseur",    "#1E88E5"),
+            ("Personnel",      "#757575"),
+            ("Dépenses",       "#E53935"),
+            ("Encaissement",   "#43A047"),
+            ("Paiement Crédit","#039BE5"),
+        ]
+        for doc, color in docs_config:
+            self.creer_cadre_doc(row_docs, doc, color)
+
+        # ── Rangée Modes ─────────────────────────────────────────────────────
+        row_modes = ctk.CTkFrame(card, fg_color="transparent")
+        row_modes.pack(fill="x", padx=8, pady=(2, 8))
+
+        ctk.CTkLabel(
+            row_modes, text="MODES",
+            font=_f(8, "bold"), text_color=C.TEXT_MUTED, width=42, anchor="w"
+        ).pack(side="left", padx=(0, 4))
+
+        modes_config = [
+            ("Espèces",      "#E65100"),
+            ("Crédit",       "#1976D2"),
+            ("Chèque",       "#0277BD"),
+            ("Virement",     "#7B1FA2"),
+            ("Autres",       "#C62828"),
+            ("Mvola",        "#F57F17"),
+            ("Airtel Money", "#827717"),
+            ("Orange Money", "#00838F"),
+        ]
+        for mode, color in modes_config:
+            self.creer_cadre_mode(row_modes, mode, color)
+
+    def _build_filters(self):
+        """Barre de filtres : dates, boutons, checkbox, recherche."""
+        panel = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        panel.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 4))
+
+        inner = ctk.CTkFrame(panel, fg_color="transparent")
+        inner.pack(fill="x", padx=10, pady=7)
+
+        # Dates
+        ctk.CTkLabel(inner, text="Du :", font=_f(10),
+                     text_color=C.TEXT_SECONDARY).pack(side="left", padx=(0, 2))
+        self.entry_debut = DateEntry(inner, width=10, background=C.BG_HEADER,
+                                     foreground="white", borderwidth=1,
+                                     date_pattern="dd/mm/yyyy",
+                                     font=("Segoe UI", 9))
+        self.entry_debut.pack(side="left", padx=(0, 6))
+
+        ctk.CTkLabel(inner, text="Au :", font=_f(10),
+                     text_color=C.TEXT_SECONDARY).pack(side="left", padx=(0, 2))
+        self.entry_fin = DateEntry(inner, width=10, background=C.BG_HEADER,
+                                   foreground="white", borderwidth=1,
+                                   date_pattern="dd/mm/yyyy",
+                                   font=("Segoe UI", 9))
+        self.entry_fin.pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            inner, text="Valider",
+            command=self.appliquer_filtres,
+            fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
+            text_color="#FFFFFF", height=28, width=80, font=_f(10, "bold")
+        ).pack(side="left", padx=(0, 4))
+
+        ctk.CTkButton(
+            inner, text="🖨️  PDF",
+            command=self.generer_pdf,
+            fg_color=C.INFO_DARK, hover_color=C.INFO,
+            text_color="#FFFFFF", height=28, width=90, font=_f(10, "bold")
+        ).pack(side="left", padx=(0, 12))
+
+        # Checkbox Cumul
+        self.check_cumul = ctk.CTkCheckBox(
+            inner, text="Afficher Cumul",
+            font=_f(10), text_color=C.TEXT_SECONDARY,
+            checkbox_width=18, checkbox_height=18,
+            command=self.toggle_cumul)
+        self.check_cumul.pack(side="left", padx=(0, 16))
+
+        # Séparateur
+        ctk.CTkFrame(inner, width=1, height=22,
+                     fg_color=C.BORDER).pack(side="left", padx=(0, 12))
+
+        # Recherche
+        ctk.CTkLabel(inner, text="🔍", font=_f(12),
+                     text_color=C.TEXT_MUTED).pack(side="left", padx=(0, 4))
+        self.entry_recherche = ctk.CTkEntry(
+            inner,
+            placeholder_text="Rechercher dans le tableau…",
+            height=28, fg_color=C.BG_INPUT,
+            border_color=C.BORDER, text_color=C.TEXT_PRIMARY, font=_f(10))
+        self.entry_recherche.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self.entry_recherche.bind("<KeyRelease>", self.filtrer_tableau_recherche)
+
+    def _build_treeview(self):
+        tbl = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        tbl.grid(row=3, column=0, sticky="nsew", padx=12, pady=(0, 4))
+        tbl.grid_rowconfigure(0, weight=1)
+        tbl.grid_columnconfigure(0, weight=1)
+
+        self.colonnes = ("Date", "Référence", "Description",
+                         "Encaissement", "Décaissement", "Cumul",
+                         "Mode", "Utilisateur")
+
+        self.tree = ttk.Treeview(tbl, columns=self.colonnes,
+                                 show="headings", style="Caisse.Treeview")
+
+        self.tree.tag_configure("odd",  background=C.BG_CARD)
+        self.tree.tag_configure("even", background="#F0F4F8")
+
+        col_cfg = {
+            "Date":          (140, "center"),
+            "Référence":     (110, "center"),
+            "Description":   (250, "w"),
+            "Encaissement":  (110, "e"),
+            "Décaissement":  (110, "e"),
+            "Cumul":         (0,   "e"),
+            "Mode":          (110, "center"),
+            "Utilisateur":   (100, "center"),
+        }
+        for col, (w, anc) in col_cfg.items():
+            self.tree.heading(col, text=col)
+            stretch = (col == "Description")
+            self.tree.column(col, width=w, anchor=anc,
+                             stretch=stretch,
+                             minwidth=0 if w == 0 else 40)
+
+        sy = ctk.CTkScrollbar(tbl, orientation="vertical",  command=self.tree.yview)
+        sx = ctk.CTkScrollbar(tbl, orientation="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=(6, 0))
+        sy.grid(row=0, column=1, sticky="ns",  pady=(6, 0))
+        sx.grid(row=1, column=0, sticky="ew",  padx=(6, 0))
+
+    def _build_footer(self):
+        pass
+
+    # ====================================================================
+    # BADGES (cadres cliquables) — design épuré
+    # ====================================================================
+
     def creer_cadre_doc(self, parent, nom, couleur):
-        """Crée un cadre cliquable pour un type de document"""
-        frame = ctk.CTkFrame(parent, fg_color=couleur, corner_radius=8, width=155, height=50)
-        frame.pack(side="left", padx=3, pady=3)
+        """Crée un badge cliquable pour un type de document."""
+        frame = ctk.CTkFrame(parent, fg_color=couleur, corner_radius=6,
+                             width=128, height=50)
+        frame.pack(side="left", padx=2, pady=1)
         frame.pack_propagate(False)
-        
-        label_nom = ctk.CTkLabel(frame, text=nom.upper(), font=("Arial", 9, "bold"), 
-                                  text_color="#fff" if couleur == "#ffeb3b" else "#fff")
+
+        label_nom = ctk.CTkLabel(
+            frame, text=nom.upper(),
+            font=_f(10, "normal"), text_color="#FFFFFF")
         label_nom.pack(pady=(5, 0))
-        
-        
-        label_montant = ctk.CTkLabel(frame, text="0", font=("Arial", 10, "bold"),
-                                      text_color="#fff" if couleur == "#ffeb3b" else "#fff")
+
+        label_montant = ctk.CTkLabel(
+            frame, text="0",
+            font=_f(11, "bold"), text_color="#FFFFFF")
         label_montant.pack()
-        
-        # Stocker les références
-        self.cadres_docs[nom] = label_montant
-        self.frames_docs[nom] = (frame, couleur, label_nom, label_montant)
+
+        self.cadres_docs[nom]  = label_montant
+        self.frames_docs[nom]  = (frame, couleur, label_nom, label_montant)
         self.couleurs_docs[nom] = couleur
-        
-        # Rendre le cadre cliquable - Utiliser un lambda pour capturer `nom` correctement
-        def on_click_doc(event=None, doc_nom=nom):
+
+        def on_click(event=None, doc_nom=nom):
             self._traiter_clic_doc(doc_nom)
-        
+
         def on_enter(event=None):
-            # Effet hover: légère assombrissement
             if self.filtre_doc_actif != nom:
                 frame.configure(fg_color=self._assombrir_couleur(couleur, 0.8))
-        
+
         def on_leave(event=None):
-            # Revenir à la couleur originale ou active
             if self.filtre_doc_actif == nom:
-                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
+                frame.configure(fg_color="#1a1a1a",
+                                border_width=2, border_color="#FFD700")
             else:
                 frame.configure(fg_color=couleur, border_width=0)
-        
-        frame.bind("<Button-1>", on_click_doc)
-        label_nom.bind("<Button-1>", on_click_doc)
-        label_montant.bind("<Button-1>", on_click_doc)
-        
-        frame.bind("<Enter>", on_enter)
-        label_nom.bind("<Enter>", on_enter)
-        label_montant.bind("<Enter>", on_enter)
-        
-        frame.bind("<Leave>", on_leave)
-        label_nom.bind("<Leave>", on_leave)
-        label_montant.bind("<Leave>", on_leave)
-        
+
+        for w in (frame, label_nom, label_montant):
+            w.bind("<Button-1>", on_click)
+            w.bind("<Enter>",    on_enter)
+            w.bind("<Leave>",    on_leave)
+
     def creer_cadre_mode(self, parent, nom, couleur):
-        """Crée un cadre cliquable pour un mode de paiement"""
-        frame = ctk.CTkFrame(parent, fg_color=couleur, corner_radius=8, width=130, height=50)
-        frame.pack(side="left", padx=3, pady=3)
+        """Crée un badge cliquable pour un mode de paiement."""
+        frame = ctk.CTkFrame(parent, fg_color=couleur, corner_radius=6,
+                             width=118, height=50)
+        frame.pack(side="left", padx=2, pady=1)
         frame.pack_propagate(False)
-        
-        label_nom = ctk.CTkLabel(frame, text=nom.upper(), font=("Arial", 10, "bold"),
-                                  text_color="#fff" if couleur in ["#ffeb3b", "#fdd835", "#c0ca33"] else "#fff")
+
+        label_nom = ctk.CTkLabel(
+            frame, text=nom.upper(),
+            font=_f(10, "normal"), text_color="#FFFFFF")
         label_nom.pack(pady=(5, 0))
-        
-        label_montant = ctk.CTkLabel(frame, text="0", font=("Arial", 11, "bold"),
-                                      text_color="#fff" if couleur in ["#ffeb3b", "#fdd835", "#c0ca33"] else "#fff")
+
+        label_montant = ctk.CTkLabel(
+            frame, text="0",
+            font=_f(11, "bold"), text_color="#FFFFFF")
         label_montant.pack()
-        
-        # Stocker les références
-        self.cadres_modes[nom] = label_montant
-        self.frames_modes[nom] = (frame, couleur, label_nom, label_montant)
+
+        self.cadres_modes[nom]  = label_montant
+        self.frames_modes[nom]  = (frame, couleur, label_nom, label_montant)
         self.couleurs_modes[nom] = couleur
-        
-        # Rendre le cadre cliquable - Utiliser un lambda pour capturer `nom` correctement
-        def on_click_mode(event=None, mode_nom=nom):
+
+        def on_click(event=None, mode_nom=nom):
             self._traiter_clic_mode(mode_nom)
-        
+
         def on_enter(event=None):
-            # Effet hover: légère assombrissement
             if self.filtre_mode_actif != nom:
                 frame.configure(fg_color=self._assombrir_couleur(couleur, 0.8))
-        
+
         def on_leave(event=None):
-            # Revenir à la couleur originale ou active
             if self.filtre_mode_actif == nom:
-                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
+                frame.configure(fg_color="#1a1a1a",
+                                border_width=2, border_color="#FFD700")
             else:
                 frame.configure(fg_color=couleur, border_width=0)
-        
-        frame.bind("<Button-1>", on_click_mode)
-        label_nom.bind("<Button-1>", on_click_mode)
-        label_montant.bind("<Button-1>", on_click_mode)
-        
-        frame.bind("<Enter>", on_enter)
-        label_nom.bind("<Enter>", on_enter)
-        label_montant.bind("<Enter>", on_enter)
-        
-        frame.bind("<Leave>", on_leave)
-        label_nom.bind("<Leave>", on_leave)
-        label_montant.bind("<Leave>", on_leave)
+
+        for w in (frame, label_nom, label_montant):
+            w.bind("<Button-1>", on_click)
+            w.bind("<Enter>",    on_enter)
+            w.bind("<Leave>",    on_leave)
+
+    # ====================================================================
+    # LOGIQUE MÉTIER — inchangée
+    # ====================================================================
 
     def filtrer_par_doc(self, doc):
-        """Filtre les données par type de document - cliquer à nouveau pour désactiver le filtre"""
-        print(f"\n{'='*70}")
-        print(f"📝 AVANT CLIC: filtre_doc_actif = {self.filtre_doc_actif}")
-        
         if self.filtre_doc_actif == doc:
-            # Si on clique sur le même filtre, on le désactive
             self.filtre_doc_actif = None
-            print(f"❌ FILTRE DÉSACTIVÉ (second clic)")
         else:
             self.filtre_doc_actif = doc
-            print(f"✅ FILTRE ACTIVÉ: {doc}")
-        
-        print(f"📝 APRÈS CLIC: filtre_doc_actif = {self.filtre_doc_actif}")
-        print(f"{'='*70}\n")
-        
         self._mettre_a_jour_etat_cadres()
         self.appliquer_filtres()
-    
+
     def _traiter_clic_doc(self, doc):
-        """Traite les clics sur les cadres documents de manière asynchrone"""
-        # Si un traitement est déjà en cours, mettre en queue
         if self._traitement_filtre_en_cours:
-            print(f"⏳ Clic en attente sur {doc} (traitement en cours)")
             self._filtre_doc_en_attente = doc
             return
-        
-        print(f"🔘 CLIC IMMÉDIAT sur DOCUMENT: {doc}")
         self._traitement_filtre_en_cours = True
-        
-        # Déférer le traitement via après pour éviter les blocages
         self.after(0, self._executer_clic_doc, doc)
-    
+
     def _executer_clic_doc(self, doc):
-        """Exécute le clic sur un document"""
         try:
             self.filtrer_par_doc(doc)
         finally:
-            # Débloquer et traiter les mises en attente
             self._traitement_filtre_en_cours = False
-            
             if self._filtre_doc_en_attente is not None:
                 en_attente = self._filtre_doc_en_attente
                 self._filtre_doc_en_attente = None
-                print(f"⚡ Traitement du clic en attente: {en_attente}")
                 self._traiter_clic_doc(en_attente)
             elif self._filtre_mode_en_attente is not None:
                 en_attente = self._filtre_mode_en_attente
                 self._filtre_mode_en_attente = None
-                print(f"⚡ Traitement du clic en attente: {en_attente}")
                 self._traiter_clic_mode(en_attente)
-        
+
     def _traiter_clic_mode(self, mode):
-        """Traite les clics sur les cadres des modes de manière asynchrone"""
-        # Si un traitement est déjà en cours, mettre en queue
         if self._traitement_filtre_en_cours:
-            print(f"⏳ Clic en attente sur {mode} (traitement en cours)")
             self._filtre_mode_en_attente = mode
             return
-        
-        print(f"💳 CLIC IMMÉDIAT sur MODE: {mode}")
         self._traitement_filtre_en_cours = True
-        
-        # Déférer le traitement via après pour éviter les blocages
         self.after(0, self._executer_clic_mode, mode)
-    
+
     def _executer_clic_mode(self, mode):
-        """Exécute le clic sur un mode de paiement"""
         try:
             self.filtrer_par_mode(mode)
         finally:
-            # Débloquer et traiter les mises en attente
             self._traitement_filtre_en_cours = False
-            
             if self._filtre_mode_en_attente is not None:
                 en_attente = self._filtre_mode_en_attente
                 self._filtre_mode_en_attente = None
-                print(f"⚡ Traitement du clic en attente: {en_attente}")
                 self._traiter_clic_mode(en_attente)
             elif self._filtre_doc_en_attente is not None:
                 en_attente = self._filtre_doc_en_attente
                 self._filtre_doc_en_attente = None
-                print(f"⚡ Traitement du clic en attente: {en_attente}")
                 self._traiter_clic_doc(en_attente)
-        
+
     def filtrer_par_mode(self, mode):
-        """Filtre les données par mode de paiement - cliquer à nouveau pour désactiver le filtre"""
-        print(f"\n{'='*70}")
-        print(f"💰 AVANT CLIC: filtre_mode_actif = {self.filtre_mode_actif}")
-        
         if self.filtre_mode_actif == mode:
-            # Si on clique sur le même filtre, on le désactive
             self.filtre_mode_actif = None
-            print(f"❌ FILTRE DÉSACTIVÉ (second clic)")
         else:
             self.filtre_mode_actif = mode
-            print(f"✅ FILTRE ACTIVÉ: {mode}")
-        
-        print(f"💰 APRÈS CLIC: filtre_mode_actif = {self.filtre_mode_actif}")
-        print(f"{'='*70}\n")
-        
         self._mettre_a_jour_etat_cadres()
         self.appliquer_filtres()
-    
+
     def _assombrir_couleur(self, couleur_hex, facteur=0.7):
-        """Assombrit une couleur hex en multipliant les composantes RGB"""
         couleur_hex = couleur_hex.lstrip('#')
         r, g, b = tuple(int(couleur_hex[i:i+2], 16) for i in (0, 2, 4))
         r, g, b = int(r * facteur), int(g * facteur), int(b * facteur)
         return f'#{r:02x}{g:02x}{b:02x}'
-    
+
     def _mettre_a_jour_etat_cadres(self):
-        """Met à jour l'état visuel de tous les cadres (documents et modes)"""
-        print(f"\n🎨 MISE À JOUR VISUELLE DES CADRES...")
-        
-        # Mettre à jour les cadres documents
         for nom, (frame, couleur_orig, label_nom, label_montant) in self.frames_docs.items():
             if self.filtre_doc_actif == nom:
-                # Cadre actif: bordure dorée et fond foncé
-                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
-                print(f"   ✨ {nom}: ACTIF (bordure dorée)")
+                frame.configure(fg_color="#1a1a1a",
+                                border_width=2, border_color="#FFD700")
             else:
-                # Cadre inactif: couleur originale, pas de bordure
                 frame.configure(fg_color=couleur_orig, border_width=0)
-                print(f"   ☐ {nom}: inactif")
-        
-        # Mettre à jour les cadres modes
         for nom, (frame, couleur_orig, label_nom, label_montant) in self.frames_modes.items():
             if self.filtre_mode_actif == nom:
-                # Cadre actif: bordure dorée et fond foncé
-                frame.configure(fg_color="#1a1a1a", border_width=3, border_color="#FFD700")
-                print(f"   ✨ {nom}: ACTIF (bordure dorée)")
+                frame.configure(fg_color="#1a1a1a",
+                                border_width=2, border_color="#FFD700")
             else:
-                # Cadre inactif: couleur originale, pas de bordure
                 frame.configure(fg_color=couleur_orig, border_width=0)
-                print(f"   ☐ {nom}: inactif")
-        
-        print(f"🎨 MISE À JOUR TERMINÉE\n")
-        
-        # Force la mise à jour UI
         self.update_idletasks()
-    
+
     def filtrer_tableau_recherche(self, event=None):
-        """Filtre le tableau en temps réel selon le texte de recherche"""
         recherche = self.entry_recherche.get().strip().lower()
-        
-        # Vider le tableau
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
         if not recherche:
-            # Si la recherche est vide, réafficher toutes les données
             for i, row in enumerate(self.donnees_tableau):
                 tag = 'even' if (i % 2) else 'odd'
                 try:
@@ -482,20 +494,10 @@ class PageCaisse(ctk.CTkFrame):
                 except TypeError:
                     self.tree.insert("", "end", values=row)
             return
-        
-        # Filtrer les lignes qui contiennent le texte de recherche
-        lignes_filtrees = []
-        for row in self.donnees_tableau:
-            # Vérifier si le texte de recherche est dans l'une des colonnes
-            match = False
-            for cell in row:
-                if recherche in str(cell).lower():
-                    match = True
-                    break
-            if match:
-                lignes_filtrees.append(row)
-        
-        # Réafficher les lignes filtrées
+        lignes_filtrees = [
+            row for row in self.donnees_tableau
+            if any(recherche in str(cell).lower() for cell in row)
+        ]
         for i, row in enumerate(lignes_filtrees):
             tag = 'even' if (i % 2) else 'odd'
             try:
@@ -504,42 +506,29 @@ class PageCaisse(ctk.CTkFrame):
                 self.tree.insert("", "end", values=row)
 
     def toggle_cumul(self):
-        """Toggle la visibilité de la colonne Cumul et recalcule les données."""
         self.show_cumul = self.check_cumul.get() == 1
-        
-        # Mettre à jour la largeur de la colonne Cumul
         if self.show_cumul:
-            self.tree.column("Cumul", anchor="center", width=110, stretch=True)
+            self.tree.column("Cumul", anchor="e", width=110, stretch=True)
         else:
-            self.tree.column("Cumul", anchor="center", width=0, stretch=False)
-        
-        # Recalculer et recharger les données avec la colonne Cumul
+            self.tree.column("Cumul", anchor="e", width=0, stretch=False)
         self.appliquer_filtres()
 
     def connect_db(self):
-        """Établit la connexion à la base de données à partir du fichier config.json"""
         try:
             config_path = get_config_path('config.json')
             if not os.path.exists(config_path):
                 config_path = 'config.json'
-                
             if not os.path.exists(config_path):
                 messagebox.showerror("Erreur", "Fichier config.json manquant.")
                 return None
-                 
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 db_config = config['database']
-
             conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
+                host=db_config['host'], user=db_config['user'],
                 password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port'],
-                client_encoding='UTF8'
-            )
-            print("Connection to the database successful!")
+                database=db_config['database'], port=db_config['port'],
+                client_encoding='UTF8')
             return conn
         except Exception as err:
             messagebox.showerror("Erreur de connexion", f"Détails : {err}")
@@ -547,127 +536,67 @@ class PageCaisse(ctk.CTkFrame):
 
     def format_montant(self, v):
         return f"{v:,.2f}".replace(",", " ").replace(".", ",").replace(" ", ".")
-    
+
     def format_montant_court(self, v):
-        """Formate les montants pour les cadres avec séparateurs de milliers"""
         return self.format_montant(v)
 
     def charger_modes_paiement(self):
-        """Charge les modes de paiement et crée un mapping UI ↔ BD"""
         try:
-            self.cursor.execute("SELECT idmode, modedepaiement FROM tb_modepaiement ORDER BY modedepaiement")
+            self.cursor.execute(
+                "SELECT idmode, modedepaiement FROM tb_modepaiement ORDER BY modedepaiement")
             rows = self.cursor.fetchall()
-            
-            print("\n" + "="*80)
-            print("🔄 CHARGEMENT DES MODES DE PAIEMENT")
-            print("="*80)
-            
-            # D'abord, afficher ce qu'on a en base
-            print("\n📊 Modes en base de données:")
-            for r in rows:
-                idmode, modedepaiement = r
-                print(f"   ID {idmode}: '{modedepaiement}'")
-            
-            # Créer le mapping inverse : BD → ID
             for r in rows:
                 idmode, modedepaiement = r
                 self.mode_bd_to_id[modedepaiement] = idmode
-            
-            # Définir les mappages UI → BD avec TOUS les alias possibles
-            print("\n🔗 Mappage UI → BD:")
-            
             alias_mapping = {
-                "Espèces": ["Espèces", "Espece"],
-                "Crédit": ["Crédit", "Credit"],
-                "Chèque": ["Chèque", "Cheque", "Chèque bancaire"],
-                "Virement": ["Virement", "Virement bancaire"],
-                "Autres": ["Autres", "Autres"],
-                "Mvola": ["Mvola", "MVOLA"],
+                "Espèces":      ["Espèces", "Espece"],
+                "Crédit":       ["Crédit", "Credit"],
+                "Chèque":       ["Chèque", "Cheque", "Chèque bancaire"],
+                "Virement":     ["Virement", "Virement bancaire"],
+                "Autres":       ["Autres"],
+                "Mvola":        ["Mvola", "MVOLA"],
                 "Airtel Money": ["Airtel Money", "Airtel money"],
-                "Orange Money": ["Orange Money", "Orange money"]
+                "Orange Money": ["Orange Money", "Orange money"],
             }
-            
-            # Pour chaque cadre UI, chercher le mode BD correspondant
             for nom_ui, alias_list in alias_mapping.items():
-                found = False
                 for alias in alias_list:
                     for nom_bd, idmode in self.mode_bd_to_id.items():
                         if nom_bd.lower().strip() == alias.lower().strip():
                             self.mode_ui_to_bd[nom_ui] = nom_bd
                             self.modes_paiement_dict[nom_ui] = idmode
-                            print(f"   '{nom_ui}' → '{nom_bd}' (ID: {idmode})")
-                            found = True
                             break
-                    if found:
-                        break
-                
-                if not found:
-                    print(f"   ⚠️  '{nom_ui}' → NON TROUVÉ en BD")
-            
-            print("\n📋 Dictionnaires finaux:")
-            print(f"   mode_ui_to_bd = {self.mode_ui_to_bd}")
-            print(f"   modes_paiement_dict = {self.modes_paiement_dict}")
-            print("="*80 + "\n")
-            
+                    else:
+                        continue
+                    break
         except Exception as e:
-            print(f"❌ Erreur lors du chargement des modes: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Erreur lors du chargement des modes: {e}")
 
     def calculer_montants_categories(self, date_d, date_f):
-        """Calcule les soldes (Encaissement - Décaissement) pour chaque catégorie et mode de paiement"""
         d_str, f_str = date_d.strftime('%Y-%m-%d'), date_f.strftime('%Y-%m-%d')
-        
-        # Réinitialiser les montants
-        self.montants_docs = {"Client": 0, "Avoir": 0, "Fournisseur": 0, "Personnel": 0, "Dépenses": 0, "Encaissement": 0, "Paiement Crédit": 0}
+        self.montants_docs = {
+            "Client": 0, "Avoir": 0, "Fournisseur": 0, "Personnel": 0,
+            "Dépenses": 0, "Encaissement": 0, "Paiement Crédit": 0}
         self.montants_modes = {}
-        
         try:
-            # Calculer par type de document (Encaissement - Décaissement)
-            
-            # Clients (Encaissements) - tb_pmtfacture
-            query_clients = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
-                FROM tb_pmtfacture 
-                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-            """
-            self.cursor.execute(query_clients, [d_str, f_str])
-            result = self.cursor.fetchone()
-            self.montants_docs["Client"] = float(result[0]) if result and result[0] else 0
-            
-            # Avoir
-            query_avoir = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
-                FROM tb_pmtavoir 
-                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-            """
-            self.cursor.execute(query_avoir, [d_str, f_str])
-            result = self.cursor.fetchone()
-            self.montants_docs["Avoir"] = float(result[0]) if result and result[0] else 0
-            
-            # Fournisseurs (Décaissements)
-            query_fournisseurs = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
-                FROM tb_pmtcom 
-                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-            """
-            self.cursor.execute(query_fournisseurs, [d_str, f_str])
-            result = self.cursor.fetchone()
-            self.montants_docs["Fournisseur"] = float(result[0]) if result and result[0] else 0
-            
-            # Paiement Crédit (tb_pmtcredit)
-            query_pmtcredit = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
-                FROM tb_pmtcredit 
-                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-            """
-            self.cursor.execute(query_pmtcredit, [d_str, f_str])
-            result = self.cursor.fetchone()
-            self.montants_docs["Paiement Crédit"] = float(result[0]) if result and result[0] else 0
-            
-            # Personnel (avances + salaires)
-            query_pers = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
+            for table, key in [
+                ("tb_pmtfacture",  "Client"),
+                ("tb_pmtavoir",    "Avoir"),
+                ("tb_pmtcom",      "Fournisseur"),
+                ("tb_pmtcredit",   "Paiement Crédit"),
+                ("tb_decaissement","Dépenses"),
+                ("tb_encaissement","Encaissement"),
+            ]:
+                ref_col = "refavoir" if table == "tb_pmtavoir" else "refpmt"
+                self.cursor.execute(f"""
+                    SELECT SUM(CASE WHEN idtypeoperation=1 THEN mtpaye ELSE -mtpaye END)
+                    FROM {table}
+                    WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                """, [d_str, f_str])
+                result = self.cursor.fetchone()
+                self.montants_docs[key] = float(result[0]) if result and result[0] else 0
+
+            self.cursor.execute("""
+                SELECT SUM(CASE WHEN idtypeoperation=1 THEN mtpaye ELSE -mtpaye END)
                 FROM (
                     SELECT idtypeoperation, mtpaye FROM tb_avancepers WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
                     UNION ALL
@@ -675,408 +604,145 @@ class PageCaisse(ctk.CTkFrame):
                     UNION ALL
                     SELECT idtypeoperation, mtpaye FROM tb_pmtsalaire WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
                 ) as pers
-            """
-            self.cursor.execute(query_pers, [d_str, f_str, d_str, f_str, d_str, f_str])
+            """, [d_str, f_str, d_str, f_str, d_str, f_str])
             result = self.cursor.fetchone()
             self.montants_docs["Personnel"] = float(result[0]) if result and result[0] else 0
-            
-            # Dépenses (seulement tb_decaissement - référence DEC...)
-            query_depenses = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
-                FROM tb_decaissement 
-                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-            """
-            self.cursor.execute(query_depenses, [d_str, f_str])
-            result = self.cursor.fetchone()
-            self.montants_docs["Dépenses"] = float(result[0]) if result and result[0] else 0
-            
-            # Encaissements (seulement tb_encaissement - référence ENC...)
-            query_encaissements = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END)
-                FROM tb_encaissement 
-                WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-            """
-            self.cursor.execute(query_encaissements, [d_str, f_str])
-            result = self.cursor.fetchone()
-            self.montants_docs["Encaissement"] = float(result[0]) if result and result[0] else 0
-            
-            # Calculer par mode de paiement (Encaissement - Décaissement)
-            query_modes = """
-                SELECT COALESCE(t2.modedepaiement, 'Inconnu'), 
-                       SUM(CASE WHEN t1.idtypeoperation = 1 THEN t1.mtpaye ELSE -t1.mtpaye END)
+
+            params = [d_str, f_str] * 9
+            self.cursor.execute("""
+                SELECT COALESCE(t2.modedepaiement, 'Inconnu'),
+                       SUM(CASE WHEN t1.idtypeoperation=1 THEN t1.mtpaye ELSE -t1.mtpaye END)
                 FROM (
                     SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtfacture WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcom WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_encaissement WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_decaissement WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_avancepers WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_avancespecpers WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtsalaire WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtavoir WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL
-                    SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcredit WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcom WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_encaissement WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_decaissement WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_avancepers WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_avancespecpers WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtsalaire WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtavoir WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcredit WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
                 ) t1
                 LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
                 GROUP BY t2.modedepaiement
-            """
-            params = [d_str, f_str] * 9
-            self.cursor.execute(query_modes, params)
+            """, params)
             for row in self.cursor.fetchall():
                 mode, solde = row
                 self.montants_modes[mode] = float(solde) if solde else 0
-            
-            # Mettre à jour l'affichage des cadres
+
             self.mettre_a_jour_cadres()
-            
         except Exception as e:
             print(f"Erreur calcul montants: {e}")
 
     def mettre_a_jour_cadres(self):
-        """Met à jour l'affichage des montants dans les cadres"""
-        # Mise à jour des cadres documents
         for doc, label in self.cadres_docs.items():
-            montant = self.montants_docs.get(doc, 0)
-            
-            label.configure(text=self.format_montant_court(montant))
-        
-        # Mise à jour des cadres modes de paiement
-        # ⚠️ CRUCIAL: Convertir les noms UI en noms BD pour chercher les montants
+            label.configure(text=self.format_montant_court(
+                self.montants_docs.get(doc, 0)))
         for mode_ui, label in self.cadres_modes.items():
             mode_bd = self.mode_ui_to_bd.get(mode_ui)
-            if mode_bd:
-                montant = self.montants_modes.get(mode_bd, 0)
-            else:
-                montant = 0
+            montant = self.montants_modes.get(mode_bd, 0) if mode_bd else 0
             label.configure(text=self.format_montant_court(montant))
 
     def appliquer_filtres(self, _=None):
-        # Utiliser les filtres actifs au lieu des ComboBox
-        mode_nom_ui = self.filtre_mode_actif  # C'est le nom du cadre UI
-        
-        # Chercher l'ID du mode en utilisant le mapping
-        mode_id = None
+        mode_nom_ui = self.filtre_mode_actif
+        mode_id     = None
         if mode_nom_ui:
-            # mode_nom_ui est le nom du cadre (ex: "Espèces")
-            # On cherche le mode_bd correspondant dans le mapping
             mode_bd = self.mode_ui_to_bd.get(mode_nom_ui)
             if mode_bd:
                 mode_id = self.mode_bd_to_id.get(mode_bd)
-        
         type_doc = self.filtre_doc_actif if self.filtre_doc_actif else "Tous"
-        
-        # 🔍 DEBUG - Afficher les filtres actifs
-        print(f"\n{'='*60}")
-        print(f"🔍 FILTRES ACTIFS:")
-        print(f"   Type document        : {type_doc}")
-        print(f"   Mode (UI)            : {mode_nom_ui}")
-        print(f"   Mode (BD)            : {self.mode_ui_to_bd.get(mode_nom_ui) if mode_nom_ui else None}")
-        print(f"   Mode ID              : {mode_id}")
-        print(f"{'='*60}\n")
-        
-        date_d = self.entry_debut.get_date()
-        date_f = self.entry_fin.get_date()
-        
-        # Calculer les montants des catégories
+        date_d   = self.entry_debut.get_date()
+        date_f   = self.entry_fin.get_date()
         self.calculer_montants_categories(date_d, date_f)
-        
-        # Charger les données filtrées
         self.charger_donnees(date_d, date_f, mode_id, type_doc)
 
     def charger_donnees(self, date_d, date_f, mode_id=None, type_doc="Tous"):
         if not self.conn: return
         d_str, f_str = date_d.strftime('%Y-%m-%d'), date_f.strftime('%Y-%m-%d')
-
         for item in self.tree.get_children(): self.tree.delete(item)
-        all_ops = []
-
-        # Construire la clause WHERE pour le mode
+        all_ops  = []
         sql_mode = ""
         mode_params = []
         if mode_id is not None:
-            sql_mode = " AND t1.idmode = %s"
+            sql_mode    = " AND t1.idmode = %s"
             mode_params = [mode_id]
 
+        def exec_query(query, params):
+            try:
+                self.cursor.execute(query, params)
+                all_ops.extend(self.cursor.fetchall())
+            except psycopg2.Error as e:
+                print(f"Erreur query: {e}")
+                self.conn.rollback()
+
+        if type_doc in ["Tous", "Client"]:
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtfacture t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+        if type_doc in ["Tous", "Paiement Crédit"]:
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtcredit t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+        if type_doc in ["Tous", "Avoir"]:
+            exec_query(f"SELECT t1.datepmt, t1.refavoir, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtavoir t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+        if type_doc in ["Tous", "Fournisseur"]:
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtcom t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+        if type_doc in ["Tous", "Encaissement"]:
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_encaissement t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+        if type_doc in ["Tous", "Dépenses"]:
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_decaissement t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+        if type_doc in ["Tous", "Personnel"]:
+            for tbl in ("tb_avancepers", "tb_avancespecpers", "tb_pmtsalaire"):
+                exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM {tbl} t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+        if (not mode_id or mode_id == 1) and type_doc == "Tous":
+            exec_query("SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Espèces'), COALESCE(t3.username,'admin') FROM tb_transfertcaisse t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s", [d_str, f_str])
+
+        def get_datetime(op):
+            dt = op[0]
+            return dt if isinstance(dt, datetime) else datetime.combine(dt, datetime.min.time())
+
+        all_ops.sort(key=get_datetime, reverse=True)
+        self.donnees_pour_pdf    = []
+        self.donnees_tableau     = []
+        self.total_enc_periode   = 0
+        self.total_dec_periode   = 0
+
+        all_ops_asc  = list(reversed(all_ops))
+        cumuls_dict  = {}
+        cumul_courant = 0
+        for idx, r in enumerate(all_ops_asc):
+            enc = float(r[3]) if r[4] == 1 else 0
+            dec = float(r[3]) if r[4] == 2 else 0
+            cumul_courant += enc - dec
+            cumuls_dict[idx] = cumul_courant
+
         try:
-            # ==================================================================
-            # LOGIQUE CORRECTE :
-            # - CLIENTS = tb_pmtfacture + tb_pmtcredit (tous modes de paiement)
-            # - AVOIR = tb_pmtavoir
-            # - FOURNISSEURS = tb_pmtcom
-            # - PERSONNEL = tb_avancepers + tb_avancespecpers + tb_pmtsalaire
-            # - DÉPENSES = tb_decaissement
-            # - ENCAISSEMENTS = tb_encaissement
-            # ==================================================================
-            
-            # 1. tb_pmtfacture (CLIENTS - tous les paiements de factures clients)
-            if type_doc in ["Tous", "Client"]:
-                query_pmtfacture = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_pmtfacture t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_pmtfacture, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_pmtfacture: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_pmtfacture: {e}")
-                    self.conn.rollback()
-
-            # 2. tb_pmtcredit (PAIEMENT CRÉDIT - paiements de crédits clients)
-            if type_doc in ["Tous", "Paiement Crédit"]:
-                query_pmtcredit = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_pmtcredit t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_pmtcredit, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_pmtcredit: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_pmtcredit: {e}")
-                    self.conn.rollback()
-
-            # 3. tb_pmtavoir (AVOIR)
-            if type_doc in ["Tous", "Avoir"]:
-                query_avoir = f"""
-                    SELECT t1.datepmt, t1.refavoir, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_pmtavoir t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_avoir, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_pmtavoir: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_pmtavoir: {e}")
-                    self.conn.rollback()
-
-            # 4. tb_pmtcom (FOURNISSEURS)
-            if type_doc in ["Tous", "Fournisseur"]:
-                query_pmtcom = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_pmtcom t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_pmtcom, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_pmtcom: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_pmtcom: {e}")
-                    self.conn.rollback()
-
-            # 5. tb_encaissement (ENCAISSEMENTS)
-            if type_doc in ["Tous", "Encaissement"]:
-                query_enc = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_encaissement t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_enc, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_encaissement: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_encaissement: {e}")
-                    self.conn.rollback()
-
-            # 6. tb_decaissement (DÉPENSES)
-            if type_doc in ["Tous", "Dépenses"]:
-                query_dec = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_decaissement t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_dec, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_decaissement: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_decaissement: {e}")
-                    self.conn.rollback()
-
-            # 7. Tables PERSONNEL (avances et salaires)
-            if type_doc in ["Tous", "Personnel"]:
-                # tb_avancepers
-                query_avpers = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_avancepers t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_avpers, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_avancepers: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_avancepers: {e}")
-                    self.conn.rollback()
-
-                # tb_avancespecpers
-                query_avspec = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_avancespecpers t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_avspec, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_avancespecpers: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_avancespecpers: {e}")
-                    self.conn.rollback()
-
-                # tb_pmtsalaire
-                query_sal = f"""
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Inconnu'), COALESCE(t3.username, 'Système')
-                    FROM tb_pmtsalaire t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL {sql_mode}
-                """
-                params = [d_str, f_str] + mode_params
-                try:
-                    self.cursor.execute(query_sal, params)
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_pmtsalaire: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_pmtsalaire: {e}")
-                    self.conn.rollback()
-
-            # 8. Transferts (seulement si "Tous" et mode Espèces ou pas de filtre mode)
-            if (not mode_id or mode_id == 1) and type_doc == "Tous": 
-                query_transfert = """
-                    SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, 
-                        COALESCE(t2.modedepaiement, 'Espèces'), COALESCE(t3.username, 'admin')
-                    FROM tb_transfertcaisse t1
-                    LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
-                    LEFT JOIN tb_users t3 ON t1.iduser = t3.iduser
-                    WHERE t1.datepmt::date BETWEEN %s AND %s
-                """
-                try:
-                    self.cursor.execute(query_transfert, [d_str, f_str])
-                    all_ops.extend(self.cursor.fetchall())
-                    print(f"✅ tb_transfertcaisse: {self.cursor.rowcount} lignes")
-                except psycopg2.Error as e:
-                    print(f"❌ Erreur sur tb_transfertcaisse: {e}")
-                    self.conn.rollback()
-
-            # Convertir toutes les dates en datetime pour le tri
-            def get_datetime(op):
-                dt = op[0]
-                if isinstance(dt, datetime):
-                    return dt
-                else:  # C'est un objet date
-                    return datetime.combine(dt, datetime.min.time())
-            
-            all_ops.sort(key=get_datetime, reverse=True)
-            self.donnees_pour_pdf = []
-            self.donnees_tableau = []
-            self.total_enc_periode = 0
-            self.total_dec_periode = 0
-
-            # ✅ CALCUL DES CUMULS DU BAS VERS LE HAUT (ascending)
-            # Créer une copie inversée pour calculer les cumuls en ordre ASC
-            all_ops_asc = list(reversed(all_ops))
-            cumuls_dict = {}  # Dictionnaire pour stocker cumul par index
-            cumul_courant = 0
-            
-            for idx, r in enumerate(all_ops_asc):
-                dt, ref, obs, mt, typ, mod, usr = r
-                enc = float(mt) if typ == 1 else 0
-                dec = float(mt) if typ == 2 else 0
-                cumul_courant += enc - dec
-                # Stocker le cumul avec l'index dans all_ops_asc
-                cumuls_dict[idx] = cumul_courant
-            
-            # Maintenant afficher en ordre DESC avec les cumuls
             for i, r in enumerate(all_ops):
                 dt, ref, obs, mt, typ, mod, usr = r
                 enc = float(mt) if typ == 1 else 0
                 dec = float(mt) if typ == 2 else 0
                 self.total_enc_periode += enc
                 self.total_dec_periode += dec
-
-                # Récupérer le cumul calculé (all_ops est en DESC, donc index inversé)
-                cumul_idx = len(all_ops) - 1 - i
-                cumul_courant = cumuls_dict.get(cumul_idx, 0)
-
-                # Gérer datetime et date
-                if isinstance(dt, datetime):
-                    date_str = dt.strftime("%d/%m/%Y %H:%M:%S")
-                else:  # C'est un objet date
-                    date_str = dt.strftime("%d/%m/%Y 00:00:00")
-
-                cumul_str = self.format_montant(cumul_courant) if self.show_cumul else ""
-                vals = (date_str, str(ref), str(obs), 
-                    self.format_montant(enc) if enc else "", 
-                    self.format_montant(dec) if dec else "", 
-                    cumul_str,
-                    mod, usr)
-
-                # Alternance des lignes pour lisibilité
+                cumul_idx   = len(all_ops) - 1 - i
+                cumul_val   = cumuls_dict.get(cumul_idx, 0)
+                date_str    = dt.strftime("%d/%m/%Y %H:%M:%S") if isinstance(dt, datetime) else dt.strftime("%d/%m/%Y 00:00:00")
+                cumul_str   = self.format_montant(cumul_val) if self.show_cumul else ""
+                vals = (date_str, str(ref), str(obs),
+                        self.format_montant(enc) if enc else "",
+                        self.format_montant(dec) if dec else "",
+                        cumul_str, mod, usr)
                 tag = 'even' if (i % 2) else 'odd'
                 try:
                     self.tree.insert("", "end", values=vals, tags=(tag,))
                 except TypeError:
-                    # Certains environnements/test runners peuvent rejeter tags ; utiliser insertion simple
                     self.tree.insert("", "end", values=vals)
-
                 self.donnees_pour_pdf.append(list(vals))
                 self.donnees_tableau.append(vals)
 
-            self.label_total_enc.configure(text=f"Total Encaissement: {self.format_montant(self.total_enc_periode)} Ar")
-            self.label_total_dec.configure(text=f"Total Décaissement: {self.format_montant(self.total_dec_periode)} Ar")
             self.update_solde_global()
-    
         except Exception as e:
             print(f"Erreur lors du chargement des données: {e}")
 
     def update_solde_global(self):
         try:
-            query = """
-                SELECT SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE -mtpaye END) 
+            self.cursor.execute("""
+                SELECT SUM(CASE WHEN idtypeoperation=1 THEN mtpaye ELSE -mtpaye END)
                 FROM (
                     SELECT idtypeoperation, mtpaye FROM tb_pmtfacture WHERE id_banque IS NULL
                     UNION ALL SELECT idtypeoperation, mtpaye FROM tb_pmtcom WHERE id_banque IS NULL
@@ -1089,93 +755,83 @@ class PageCaisse(ctk.CTkFrame):
                     UNION ALL SELECT idtypeoperation, mtpaye FROM tb_pmtavoir WHERE id_banque IS NULL
                     UNION ALL SELECT idtypeoperation, mtpaye FROM tb_pmtcredit WHERE id_banque IS NULL
                 ) as total
-            """
-            self.cursor.execute(query)
-            res = self.cursor.fetchone()
-            
+            """)
+            res   = self.cursor.fetchone()
             solde = float(res[0]) if res and res[0] is not None else 0.0
-            
-            # self.label_solde_global.configure(
-            #     text=f"Solde de caisse : {self.format_montant(solde)} Ar"
-            # )
         except Exception as e:
             print(f"Erreur calcul solde global: {e}")
-            # self.label_solde_global.configure(text="Solde de caisse : Erreur Ar")
 
     def generer_pdf(self):
         if not self.donnees_pour_pdf:
             messagebox.showwarning("Vide", "Aucune donnée à imprimer.")
             return
-
-        # 1. Récupération des infos société
         infos_societe = {"nom": "", "adresse": "", "ville": "", "contact": ""}
         try:
-            self.cursor.execute("SELECT nomsociete, adressesociete, villesociete, contactsociete FROM tb_infosociete LIMIT 1")
+            self.cursor.execute(
+                "SELECT nomsociete, adressesociete, villesociete, contactsociete FROM tb_infosociete LIMIT 1")
             res = self.cursor.fetchone()
             if res:
                 infos_societe = {
-                    "nom": res[0],
-                    "adresse": res[1],
-                    "ville": res[2],
-                    "contact": res[3]
-                }
+                    "nom": res[0], "adresse": res[1],
+                    "ville": res[2], "contact": res[3]}
         except Exception as e:
             print(f"Erreur recup infos societe: {e}")
 
         nom_fichier = f"Etat_Caisse_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        
         try:
-            doc = SimpleDocTemplate(nom_fichier, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+            doc = SimpleDocTemplate(nom_fichier, pagesize=landscape(A4),
+                                    rightMargin=30, leftMargin=30,
+                                    topMargin=30, bottomMargin=30)
             elements = []
-            styles = getSampleStyleSheet()
-            
-            style_societe_nom = ParagraphStyle('SocieteNom', parent=styles['Normal'], fontSize=14, leading=16, fontName='Helvetica-Bold')
-            style_societe_details = ParagraphStyle('SocieteDetails', parent=styles['Normal'], fontSize=10, leading=12)
-
+            styles   = getSampleStyleSheet()
+            style_sn = ParagraphStyle('SocieteNom', parent=styles['Normal'],
+                                      fontSize=14, leading=16, fontName='Helvetica-Bold')
+            style_sd = ParagraphStyle('SocieteDetails', parent=styles['Normal'],
+                                      fontSize=10, leading=12)
             if infos_societe["nom"]:
-                elements.append(Paragraph(infos_societe["nom"].upper(), style_societe_nom))
-                elements.append(Paragraph(f"{infos_societe['adresse']}", style_societe_details))
-                elements.append(Paragraph(f"{infos_societe['ville']}", style_societe_details))
-                elements.append(Paragraph(f"Contact : {infos_societe['contact']}", style_societe_details))
-            
+                elements.append(Paragraph(infos_societe["nom"].upper(), style_sn))
+                elements.append(Paragraph(infos_societe["adresse"],     style_sd))
+                elements.append(Paragraph(infos_societe["ville"],       style_sd))
+                elements.append(Paragraph(f"Contact : {infos_societe['contact']}", style_sd))
             elements.append(Spacer(1, 20))
-            
-            filtre_doc = self.filtre_doc_actif if self.filtre_doc_actif else "Tous"
-            filtre_mode = self.filtre_mode_actif if self.filtre_mode_actif else "Tous"
-            
-            elements.append(Paragraph(f"<b>ETAT DE CAISSE - {filtre_mode} ({filtre_doc})</b>", styles['Title']))
-            elements.append(Paragraph(f"Période du {self.entry_debut.get()} au {self.entry_fin.get()}", styles['Normal']))
+            filtre_doc  = self.filtre_doc_actif  or "Tous"
+            filtre_mode = self.filtre_mode_actif or "Tous"
+            elements.append(Paragraph(
+                f"<b>ETAT DE CAISSE - {filtre_mode} ({filtre_doc})</b>",
+                styles['Title']))
+            elements.append(Paragraph(
+                f"Période du {self.entry_debut.get()} au {self.entry_fin.get()}",
+                styles['Normal']))
             elements.append(Spacer(1, 15))
-
-            data = [self.colonnes]
-            data.extend(self.donnees_pour_pdf)
+            data = [self.colonnes] + self.donnees_pour_pdf
             solde_periode = self.total_enc_periode - self.total_dec_periode
-            data.append(["", "", "TOTAL CUMULÉ", self.format_montant(self.total_enc_periode), self.format_montant(self.total_dec_periode), "", ""])
-            data.append(["", "", "SOLDE DE LA PÉRIODE", "", self.format_montant(solde_periode), "", ""])
-
-            t = Table(data, repeatRows=1, colWidths=[100, 80, 200, 90, 90, 70, 70])
-            style_list = [
+            data.append(["", "", "TOTAL CUMULÉ",
+                         self.format_montant(self.total_enc_periode),
+                         self.format_montant(self.total_dec_periode), "", "", ""])
+            data.append(["", "", "SOLDE DE LA PÉRIODE", "",
+                         self.format_montant(solde_periode), "", "", ""])
+            t = Table(data, repeatRows=1,
+                      colWidths=[100, 80, 200, 90, 90, 70, 70, 70])
+            t.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('ALIGN', (2, 0), (2, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
-                ('GRID', (0, 0), (-1, -3), 0.5, colors.black),
+                ('TEXTCOLOR',  (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN',      (0, 0), (-1, -1), 'CENTER'),
+                ('ALIGN',      (2, 0), (2, -1),  'LEFT'),
+                ('FONTNAME',   (0, 0), (-1, 0),  'Helvetica-Bold'),
+                ('FONTSIZE',   (0, 0), (-1, -1),  8),
+                ('GRID',       (0, 0), (-1, -3),  0.5, colors.black),
                 ('BACKGROUND', (0, -2), (-1, -1), colors.lightgrey),
-                ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
-                ('GRID', (2, -2), (4, -1), 1, colors.black),
-                ('ALIGN', (3, -2), (4, -1), 'RIGHT'),
-            ]
-            t.setStyle(TableStyle(style_list))
+                ('FONTNAME',   (0, -2), (-1, -1), 'Helvetica-Bold'),
+                ('GRID',       (2, -2), (4, -1),  1, colors.black),
+                ('ALIGN',      (3, -2), (4, -1),  'RIGHT'),
+            ]))
             elements.append(t)
-            
             elements.append(Spacer(1, 30))
-            elements.append(Paragraph(f"Edité le : {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Italic']))
-            
+            elements.append(Paragraph(
+                f"Edité le : {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                styles['Italic']))
             doc.build(elements)
             os.startfile(nom_fichier)
-            
         except Exception as e:
             messagebox.showerror("Erreur PDF", f"Détails : {e}")
 
@@ -1184,7 +840,6 @@ class PageCaisse(ctk.CTkFrame):
             from page_decaissement import PageDecaissement
         except ImportError:
             from pages.page_decaissement import PageDecaissement
-    
         win = PageDecaissement(self.master, username="VotreUsername")
         self.master.wait_window(win)
         self.appliquer_filtres()
@@ -1194,14 +849,21 @@ class PageCaisse(ctk.CTkFrame):
             from page_encaissement import PageEncaissement
         except ImportError:
             from pages.page_encaissement import PageEncaissement
-    
         win = PageEncaissement(self.master, username="VotreUsername")
         self.master.wait_window(win)
         self.appliquer_filtres()
 
+
+# ── Test standalone ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    ctk.set_appearance_mode("light")
+    ctk.set_default_color_theme("blue")
     app = ctk.CTk()
-    app.title("Gestion Caisse")
-    app.geometry("1150x700")
-    PageCaisse(app).pack(fill="both", expand=True)
+    app.title("iJeery — Gestion Caisse")
+    app.geometry("1200x760")
+    if _T:
+        Theme.apply(app)
+    app.grid_rowconfigure(0, weight=1)
+    app.grid_columnconfigure(0, weight=1)
+    PageCaisse(app).grid(row=0, column=0, sticky="nsew")
     app.mainloop()
