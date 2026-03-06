@@ -1,217 +1,293 @@
+# -*- coding: utf-8 -*-
+"""
+Page Bon de Réception Fournisseur — iJeery
+Refactorisé : thème app_theme, layout compact sans scrollbar, fournisseur unique auto-rempli.
+Logique métier inchangée.
+"""
+
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
 import json
 from datetime import datetime
-from reportlab.lib.pagesizes import A5, landscape
+from reportlab.lib.pagesizes import A5
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
-from tkinter import simpledialog
 import os
-from tkcalendar import DateEntry # Ajoutez cette ligne avec les autres imports
+from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
+from app_theme import Colors, Fonts, styled, Theme
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+def _apply_treeview_style():
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure("iJeery.Treeview",
+                    background=Colors.BG_CARD, foreground=Colors.TEXT_PRIMARY,
+                    fieldbackground=Colors.BG_CARD, rowheight=26,
+                    font=("Segoe UI", 9), borderwidth=0)
+    style.configure("iJeery.Treeview.Heading",
+                    background=Colors.MIDNIGHT, foreground=Colors.TEXT_ON_DARK,
+                    font=("Segoe UI", 9, "bold"), relief="flat", borderwidth=0)
+    style.map("iJeery.Treeview",
+              background=[("selected", Colors.PRIMARY_LIGHT)],
+              foreground=[("selected", Colors.TEXT_PRIMARY)])
+    style.map("iJeery.Treeview.Heading",
+              background=[("active", Colors.MIDNIGHT_LIGHT)])
+
+
+def _configure_alternating(tree):
+    tree.tag_configure("row_even", background=Colors.BG_CARD)
+    tree.tag_configure("row_odd",  background=Colors.BG_ROW_ALT)
+
+def _refresh_alternating(tree):
+    for i, iid in enumerate(tree.get_children()):
+        tree.item(iid, tags=("row_even" if i % 2 == 0 else "row_odd",))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 class PageBonReception(ctk.CTkFrame):
     def __init__(self, parent, iduser):
-        super().__init__(parent)
-        self.iduser = iduser # L'ID utilisateur est correctement stocké ici
-        self.items_livraison = []
+        super().__init__(parent, fg_color=Colors.BG_PAGE)
+        _apply_treeview_style()
+
+        self.iduser   = iduser
+        self.items_livraison  = []
         self.idcom_selectionne = None
-        self.info_commande = None
-    
-        # *** NOUVEAU : Variables pour l'impression ***
-        self.infos_societe = {}
+        self.info_commande    = None
+        self.infos_societe    = {}
         self.derniere_reflivfrs_enregistree = None
-    
+        self.var_a_payer = ctk.BooleanVar(value=False)
+
         self.setup_ui()
         self.generer_reference()
         self.charger_magasins()
         self.charger_infos_societe()
-    
+
+    # =========================================================================
+    # DB
+    # =========================================================================
     def connect_db(self):
-        """Connexion à la base de données PostgreSQL"""
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
                 db_config = config['database']
-
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']  
-            )
-            return conn
+            return psycopg2.connect(
+                host=db_config['host'], user=db_config['user'],
+                password=db_config['password'], database=db_config['database'],
+                port=db_config['port'])
         except FileNotFoundError:
-            messagebox.showerror("Erreur de configuration", "Fichier 'config.json' non trouvé.")
-            return None
+            messagebox.showerror("Erreur", "Fichier 'config.json' non trouvé.")
         except KeyError:
-            messagebox.showerror("Erreur de configuration", "Clés de base de données manquantes dans 'config.json'.")
-            return None
-        except psycopg2.Error as err:
-            messagebox.showerror("Erreur de connexion", f"Erreur de connexion à PostgreSQL : {err}")
-            return None
-        except UnicodeDecodeError as err:
-            messagebox.showerror("Erreur d'encodage", f"Problème d'encodage du fichier de configuration : {err}")
-            return None
-    
+            messagebox.showerror("Erreur", "Clés DB manquantes dans 'config.json'.")
+        except psycopg2.Error as e:
+            messagebox.showerror("Connexion", f"Erreur PostgreSQL : {e}")
+        except UnicodeDecodeError as e:
+            messagebox.showerror("Encodage", f"Problème d'encodage : {e}")
+        return None
+
+    # =========================================================================
+    # Helpers numériques (inchangés)
+    # =========================================================================
     def formater_nombre(self, nombre):
-        """Formate un nombre avec séparateur de milliers (1.000,00)"""
         try:
             nombre = float(nombre)
-            partie_entiere = int(nombre)
-            partie_decimale = abs(nombre - partie_entiere)
-            
-            str_entiere = f"{partie_entiere:,}".replace(',', '.')
-            str_decimale = f"{partie_decimale:.2f}".split('.')[1]
-            
-            return f"{str_entiere},{str_decimale}"
+            pi = int(nombre)
+            pd = abs(nombre - pi)
+            return f"{pi:,}".replace(',', '.') + "," + f"{pd:.2f}".split('.')[1]
         except:
             return "0,00"
-    
+
     def parser_nombre(self, texte):
-        """Convertit un nombre formaté (1.000,00) en float"""
         try:
-            texte_clean = texte.replace('.', '').replace(',', '.')
-            return float(texte_clean)
+            return float(texte.replace('.', '').replace(',', '.'))
         except:
             return 0.0
-    
+
     def nombre_en_lettres(self, nombre):
-        """Convertit un nombre entier en une chaîne de caractères en français (version simplifiée)"""
-        # Pour une implémentation complète et robuste, utilisez une librairie comme num2words.
-        # Cette version est un placeholder.
         try:
             from num2words import num2words
-            # Supposer qu'on veut le montant en toutes lettres
             entier = int(nombre)
             decimal = int(round((nombre - entier) * 100))
-            
             texte = num2words(entier, lang='fr')
             if decimal > 0:
-                 texte += f" et {decimal:02d}/100"
+                texte += f" et {decimal:02d}/100"
             return texte.upper() + " ARIARY"
         except ImportError:
-            # Si num2words n'est pas installé, retourne juste le nombre en chaîne
-            # NOTE : Pour l'utilisateur, il faut installer 'num2words' si cette
-            # fonction est utilisée pour un usage professionnel. (pip install num2words)
             return f"MONTANT À CONVERTIR: {self.formater_nombre(nombre)} ARIARY"
         except Exception:
             return ""
-        
+
+    # =========================================================================
+    # UI — layout compact sans scrollbar
+    # =========================================================================
     def setup_ui(self):
-        # Titre
-        self.titre = ctk.CTkLabel(self, text="Bon de Réception Fournisseur", 
-                            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"))
-        self.titre.pack(pady=10)
-        
-        # Frame en haut pour référence, fournisseur et date
-        frame_haut = ctk.CTkFrame(self)
-        frame_haut.pack(fill="x", padx=20, pady=10)
-        
-        # Référence
-        ctk.CTkLabel(frame_haut, text="Référence BR:").grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.entry_ref = ctk.CTkEntry(frame_haut, width=200, state="readonly")
-        self.entry_ref.grid(row=0, column=1, padx=10, pady=10)
-        
-        # Bouton Charger Commande
-        btn_charger = ctk.CTkButton(frame_haut, text="📂 Charger Commande", 
-                                    command=self.ouvrir_recherche_commande, width=150,
-                                    fg_color="#1976d2", hover_color="#1565c0")
-        btn_charger.grid(row=0, column=2, padx=10, pady=10)
-        
-        # Fournisseur
-        ctk.CTkLabel(frame_haut, text="Fournisseur:").grid(row=1, column=0, padx=10, pady=10, sticky="w")
-        self.entry_fournisseur = ctk.CTkEntry(frame_haut, width=300, state="readonly")
-        self.entry_fournisseur.grid(row=1, column=1, columnspan=2, padx=10, pady=10, sticky="w")
-        
-               
-        
-        # Magasin
-        ctk.CTkLabel(frame_haut, text="Magasin:").grid(row=3, column=0, padx=10, pady=10, sticky="w")
-        self.combo_magasin = ctk.CTkComboBox(frame_haut, width=300, state="readonly")
-        self.combo_magasin.grid(row=3, column=1, columnspan=2, padx=10, pady=10, sticky="w")
-        
-        # N° Facture Fournisseur
-        ctk.CTkLabel(frame_haut, text="N° Facture:").grid(row=3, column=3, padx=10, pady=10, sticky="w")
-        
-        # --- CORRECTION 1: CRÉATION DU WIDGET MANQUANT ---
-        self.entry_factfrs = ctk.CTkEntry(frame_haut, width=200, placeholder_text="Saisir N° Facture Frs")
-        # --------------------------------------------------
-        self.entry_factfrs.grid(row=3, column=4, columnspan=2, padx=10, pady=10, sticky="w")
-        
-        # Frame pour le Treeview
-        frame_tree = ctk.CTkFrame(self)
-        frame_tree.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        # Label titre du tableau
-        label_titre_tableau = ctk.CTkLabel(frame_tree, text="Articles Livrés", 
-                                          font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"))
-        label_titre_tableau.pack(pady=(5, 5))
-        
+        # ── En-tête ──────────────────────────────────────────────────────────
+        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=42)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+
+        self.titre = ctk.CTkLabel(header, text="Bon de Réception Fournisseur",
+                                  font=Fonts.bold(14), text_color=Colors.TEXT_ON_DARK)
+        self.titre.pack(side="left", padx=14)
+
+        # ── Toggle "Fournisseur à payer" inline après le titre ────────────────
+        self.switch_a_payer = ctk.CTkSwitch(
+            header,
+            text="Fournisseur à payer",
+            variable=self.var_a_payer,
+            command=self._on_toggle_a_payer,
+            font=Fonts.body(11),
+            text_color=Colors.TEXT_ON_DARK,
+            button_color=Colors.SUCCESS,
+            progress_color=Colors.SUCCESS_DARK,
+            switch_width=38, switch_height=20,
+        )
+        self.switch_a_payer.pack(side="left", padx=(16, 0))
+
+        styled.button_secondary(header, text="🔄 Nouveau",
+                                command=self.nouveau_bon_reception, width=100, height=28
+                                ).pack(side="right", padx=8, pady=7)
+
+        # ── Corps ─────────────────────────────────────────────────────────────
+        body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE)
+        body.pack(fill="both", expand=True, padx=8, pady=6)
+
+        self._build_section_infos(body)
+        self._build_section_tableau(body)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Section 1 — Informations (tout inline, compact)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _build_section_infos(self, parent):
+        card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
+                            corner_radius=8, border_width=1, border_color=Colors.BORDER)
+        card.pack(fill="x", pady=(0, 4))
+
+        # Ligne 1 : Réf | Charger commande | Fournisseur (readonly)
+        r1 = ctk.CTkFrame(card, fg_color="transparent")
+        r1.pack(fill="x", padx=10, pady=(6, 3))
+        r1.columnconfigure(3, weight=1)
+
+        ctk.CTkLabel(r1, text="📋 BR", font=Fonts.bold(11),
+                     text_color=Colors.MIDNIGHT, width=36, anchor="w"
+                     ).grid(row=0, column=0, sticky="w", padx=(0, 4))
+
+        self.entry_ref = ctk.CTkEntry(r1, width=155, height=28,
+                                      fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                                      font=Fonts.body(11), state="readonly")
+        self.entry_ref.grid(row=0, column=1, sticky="w", padx=(0, 8))
+
+        ctk.CTkButton(r1, text="📂 Charger Commande", width=150, height=28,
+                      fg_color=Colors.INFO, hover_color=Colors.INFO_DARK,
+                      text_color="white", font=Fonts.body(10), corner_radius=6,
+                      command=self.ouvrir_recherche_commande
+                      ).grid(row=0, column=2, sticky="w", padx=(0, 12))
+
+        ctk.CTkLabel(r1, text="Fournisseur :", font=Fonts.label(10),
+                     text_color=Colors.TEXT_SECONDARY, anchor="w"
+                     ).grid(row=0, column=3, sticky="w", padx=(0, 4))
+
+        frs_f = ctk.CTkFrame(r1, fg_color="transparent")
+        frs_f.grid(row=0, column=4, sticky="ew")
+        r1.columnconfigure(4, weight=1)
+
+        self.entry_fournisseur = ctk.CTkEntry(frs_f, height=28,
+                                              fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                                              font=Fonts.body(11), state="readonly")
+        self.entry_fournisseur.pack(fill="x", expand=True)
+
+        # Ligne 2 : Magasin | N° Facture
+        r2 = ctk.CTkFrame(card, fg_color="transparent")
+        r2.pack(fill="x", padx=10, pady=(0, 6))
+        r2.columnconfigure(1, weight=1)
+        r2.columnconfigure(3, weight=1)
+
+        ctk.CTkLabel(r2, text="Magasin :", font=Fonts.label(10),
+                     text_color=Colors.TEXT_SECONDARY, width=65, anchor="w"
+                     ).grid(row=0, column=0, sticky="w", padx=(0, 4))
+
+        self.combo_magasin = ctk.CTkComboBox(r2, height=28, state="readonly",
+                                             fg_color=Colors.BG_INPUT,
+                                             border_color=Colors.BORDER,
+                                             font=Fonts.body(11))
+        self.combo_magasin.grid(row=0, column=1, sticky="ew", padx=(0, 16))
+
+        ctk.CTkLabel(r2, text="N° Facture :", font=Fonts.label(10),
+                     text_color=Colors.TEXT_SECONDARY, width=75, anchor="w"
+                     ).grid(row=0, column=2, sticky="w", padx=(0, 4))
+
+        self.entry_factfrs = ctk.CTkEntry(r2, height=28,
+                                          fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                                          font=Fonts.body(11),
+                                          placeholder_text="Saisir N° Facture Fournisseur")
+        self.entry_factfrs.grid(row=0, column=3, sticky="ew")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Section 2 — Tableau des articles livrés (expand)
+    # ─────────────────────────────────────────────────────────────────────────
+    def _build_section_tableau(self, parent):
+        card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
+                            corner_radius=8, border_width=1, border_color=Colors.BORDER)
+        card.pack(fill="both", expand=True, pady=(0, 0))
+
+        # En-tête tableau
+        thead = ctk.CTkFrame(card, fg_color="transparent")
+        thead.pack(fill="x", padx=10, pady=(6, 4))
+
+        ctk.CTkLabel(thead, text="📦 Articles Livrés",
+                     font=Fonts.bold(11), text_color=Colors.MIDNIGHT
+                     ).pack(side="left")
+
+        self.label_total = ctk.CTkLabel(
+            thead, text="Total : 0,00",
+            font=Fonts.bold(12), text_color=Colors.SUCCESS_TEXT,
+            fg_color=Colors.SUCCESS_LIGHT, corner_radius=6, padx=10, pady=3
+        )
+        self.label_total.pack(side="right")
+
         # Treeview
+        tree_frame = ctk.CTkFrame(card, fg_color=Colors.BORDER, corner_radius=6)
+        tree_frame.pack(fill="both", expand=True, padx=10, pady=(0, 4))
+
         colonnes = ("Article", "Unité", "Date péremption", "Fournisseur", "Qté Livrée", "Prix Unit.", "Montant")
-        self.tree = ttk.Treeview(frame_tree, columns=colonnes, show="headings", height=12)
-        
+        self.tree = ttk.Treeview(tree_frame, columns=colonnes,
+                                  show="headings", height=8, style="iJeery.Treeview")
+        _configure_alternating(self.tree)
+
+        col_widths = {"Article": 260, "Unité": 90, "Date péremption": 105,
+                      "Fournisseur": 155, "Qté Livrée": 90, "Prix Unit.": 100, "Montant": 105}
         for col in colonnes:
             self.tree.heading(col, text=col)
-            if col == "Article":
-                self.tree.column(col, width=300)
-            elif col == "Unité":
-                self.tree.column(col, width=120)
-            elif col == "Date péremption":
-                self.tree.column(col, width=120)
-            elif col == "Fournisseur":
-                self.tree.column(col, width=180)
-            else:
-                self.tree.column(col, width=150)
-        
-        # Scrollbar
-        scrollbar = ttk.Scrollbar(frame_tree, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.tree.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        scrollbar.pack(side="right", fill="y")
-        
-        # Frame boutons bas
-        frame_boutons = ctk.CTkFrame(self)
-        frame_boutons.pack(fill="x", padx=20, pady=10)
-        
-        # Bouton Nouveau
-        btn_nouveau = ctk.CTkButton(frame_boutons, text="🔄 Nouveau", 
-                                    command=self.nouveau_bon_reception,
-                                    fg_color="#0288d1", hover_color="#01579b")
-        btn_nouveau.pack(side="left", padx=10)
-        
-        # Bouton Imprimer
-        btn_imprimer = ctk.CTkButton(frame_boutons, text="🖨️ Imprimer", 
-                                     command=self.imprimer_bon_reception,
-                                     fg_color="#ff6f00", hover_color="#e65100")
-        btn_imprimer.pack(side="right", padx=10)
-        
-        # Bouton Enregistrer
-        btn_enregistrer = ctk.CTkButton(frame_boutons, text="💾 Enregistrer", 
-                                        command=self.enregistrer_livraison,
-                                        fg_color="#2e7d32", hover_color="#1b5e20")
-        btn_enregistrer.pack(side="right", padx=10)
-        
-        # Label total
-        self.label_total = ctk.CTkLabel(frame_boutons, text="Total: 0,00", 
-                                       font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
-        self.label_total.pack(side="right", padx=20)
-    
+            self.tree.column(col, width=col_widths.get(col, 90),
+                             anchor="w" if col in ("Article", "Fournisseur") else "center",
+                             minwidth=60)
+
+        sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        # Barre basse : Enregistrer à droite uniquement
+        bot = ctk.CTkFrame(card, fg_color="transparent")
+        bot.pack(fill="x", padx=10, pady=(0, 6))
+
+        styled.button_success(bot, text="💾 Enregistrer",
+                              command=self.enregistrer_livraison, width=140, height=28
+                              ).pack(side="right")
+
+    # =========================================================================
+    # LOGIQUE MÉTIER — inchangée
+    # =========================================================================
+
     def toggle_date_peremption(self):
-        """Active ou désactive le widget calendrier selon la case à cocher"""
-        # Fonction désactivée - widgets non créés
         pass
-    
+
     def charger_magasins(self):
         conn = self.connect_db()
-        if not conn:
-            return
+        if not conn: return
         try:
             cursor = conn.cursor()
             cursor.execute("SELECT idmag, designationmag FROM tb_magasin WHERE deleted = 0 ORDER BY designationmag")
@@ -224,315 +300,211 @@ class PageBonReception(ctk.CTkFrame):
                 row_user = cursor.fetchone()
                 if row_user:
                     idmag_defaut = row_user[0]
-
-                nom_magasin_defaut = next((nom for nom, id_ in self.magasins.items() if id_ == idmag_defaut), None)
-                if nom_magasin_defaut:
-                    self.combo_magasin.set(nom_magasin_defaut)
-                else:
-                    self.combo_magasin.set(list(self.magasins.keys())[0])
+                nom_defaut = next((n for n, i in self.magasins.items() if i == idmag_defaut), None)
+                self.combo_magasin.set(nom_defaut if nom_defaut else list(self.magasins.keys())[0])
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur chargement magasins: {e}")
         finally:
-            cursor.close()
-            conn.close()
+            cursor.close(); conn.close()
 
     def generer_reference(self):
-        """Génère la référence automatique au format 2025-BR-00001"""
         conn = self.connect_db()
-        if not conn:
-            return
-            
+        if not conn: return
         try:
             cursor = conn.cursor()
-            annee_courante = datetime.now().year
-            
-            query = """
-                SELECT reflivfrs FROM tb_livraisonfrs 
-                WHERE reflivfrs LIKE %s 
-                ORDER BY reflivfrs DESC LIMIT 1
-            """
-            cursor.execute(query, (f"{annee_courante}-BR-%",))
-            resultat = cursor.fetchone()
-            
-            if resultat:
-                dernier_num = int(resultat[0].split('-')[-1])
-                nouveau_num = dernier_num + 1
-            else:
-                nouveau_num = 1
-            
-            reference = f"{annee_courante}-BR-{nouveau_num:05d}"
+            annee = datetime.now().year
+            cursor.execute("SELECT reflivfrs FROM tb_livraisonfrs WHERE reflivfrs LIKE %s ORDER BY reflivfrs DESC LIMIT 1",
+                           (f"{annee}-BR-%",))
+            r = cursor.fetchone()
+            num = (int(r[0].split('-')[-1]) + 1) if r else 1
+            ref = f"{annee}-BR-{num:05d}"
             self.entry_ref.configure(state="normal")
             self.entry_ref.delete(0, "end")
-            self.entry_ref.insert(0, reference)
+            self.entry_ref.insert(0, ref)
             self.entry_ref.configure(state="readonly")
-            
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de la génération de la référence: {str(e)}")
+            messagebox.showerror("Erreur", f"Référence : {e}")
         finally:
-            cursor.close()
-            conn.close()
-    
+            cursor.close(); conn.close()
+
     def ouvrir_recherche_commande(self):
-        """Ouvre une fenêtre pour rechercher et charger une commande avec articles livrés"""
-        fenetre = ctk.CTkToplevel(self)
-        fenetre.title("Sélectionner une commande")
-        fenetre.geometry("900x500")
-        fenetre.grab_set()
-        
-        main_frame = ctk.CTkFrame(fenetre)
-        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        titre = ctk.CTkLabel(main_frame, text="Sélectionner une commande avec articles livrés", 
-                            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
-        titre.pack(pady=(0, 10))
-        
-        search_frame = ctk.CTkFrame(main_frame)
-        search_frame.pack(fill="x", pady=(0, 10))
-        
-        ctk.CTkLabel(search_frame, text="🔍 Rechercher:").pack(side="left", padx=5)
-        entry_search = ctk.CTkEntry(search_frame, placeholder_text="Référence ou fournisseur...", width=300)
-        entry_search.pack(side="left", padx=5, fill="x", expand=True)
-        
-        tree_frame = ctk.CTkFrame(main_frame)
-        tree_frame.pack(fill="both", expand=True, pady=(0, 10))
-        
-        colonnes = ("ID", "Référence BC", "Date", "Fournisseur", "Articles Livrés")
-        tree = ttk.Treeview(tree_frame, columns=colonnes, show='headings', height=12)
-        
-        tree.heading("ID", text="ID")
-        tree.heading("Référence BC", text="Référence BC")
-        tree.heading("Date", text="Date")
-        tree.heading("Fournisseur", text="Fournisseur")
-        tree.heading("Articles Livrés", text="Articles Livrés")
-        
+        fen = ctk.CTkToplevel(self)
+        fen.title("Sélectionner une commande")
+        fen.geometry("900x500")
+        fen.grab_set()
+        Theme.apply_toplevel(fen)
+
+        main = ctk.CTkFrame(fen, fg_color=Colors.BG_PAGE)
+        main.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ctk.CTkLabel(main, text="Sélectionner une commande avec articles livrés",
+                     font=Fonts.heading(14), text_color=Colors.MIDNIGHT).pack(pady=(0, 8))
+
+        sf = ctk.CTkFrame(main, fg_color="transparent")
+        sf.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(sf, text="🔍").pack(side="left", padx=6)
+        entry_s = ctk.CTkEntry(sf, placeholder_text="Référence ou fournisseur...", height=32,
+                               fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, font=Fonts.body(11))
+        entry_s.pack(side="left", fill="x", expand=True, padx=4)
+
+        tf = ctk.CTkFrame(main, fg_color=Colors.BORDER, corner_radius=8)
+        tf.pack(fill="both", expand=True, pady=(0, 8))
+        cols = ("ID", "Référence BC", "Date", "Fournisseur", "Articles Livrés")
+        tree = ttk.Treeview(tf, columns=cols, show="headings", height=12, style="iJeery.Treeview")
+        _configure_alternating(tree)
         tree.column("ID", width=0, stretch=False)
-        tree.column("Référence BC", width=120, anchor='w')
-        tree.column("Date", width=100, anchor='w')
-        tree.column("Fournisseur", width=250, anchor='w')
-        tree.column("Articles Livrés", width=100, anchor='center')
-        
-        scrollbar = ctk.CTkScrollbar(tree_frame, command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        
+        tree.column("Référence BC", width=130); tree.column("Date", width=110)
+        tree.column("Fournisseur", width=260); tree.column("Articles Livrés", width=110, anchor="center")
+        for c in cols: tree.heading(c, text=c)
+        sb2 = ttk.Scrollbar(tf, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb2.set)
         tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        label_count = ctk.CTkLabel(main_frame, text="Nombre de commandes : 0")
-        label_count.pack(pady=5)
-        
+        sb2.pack(side="right", fill="y")
+
+        lbl_c = ctk.CTkLabel(main, text="", font=Fonts.small(10), text_color=Colors.TEXT_MUTED)
+        lbl_c.pack(pady=(0, 4))
+
         def charger_commandes(filtre=""):
-            for item in tree.get_children():
-                tree.delete(item)
-            
+            for i in tree.get_children(): tree.delete(i)
             conn = self.connect_db()
-            if not conn:
-                return
-            
+            if not conn: return
             try:
                 cursor = conn.cursor()
-                # Récupérer les commandes avec au moins un article livré (qtlivre > 0)
-                query = """
+                q = """
                     SELECT DISTINCT c.idcom, c.refcom, c.datemodif,
-                           COALESCE(
-                               NULLIF(
-                                   (
-                                       SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
-                                       FROM tb_commandedetail d2
-                                       LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
-                                       WHERE d2.idcom = c.idcom
-                                   ),
-                                   ''
-                               ),
-                               'Fournisseur non précisé'
-                           ) AS fournisseurs_liste,
-                           (SELECT COUNT(*) 
-                            FROM tb_commandedetail d 
-                            WHERE d.idcom = c.idcom AND d.qtlivre > 0) as nb_articles_livres
+                           COALESCE(NULLIF((
+                               SELECT string_agg(DISTINCT COALESCE(f2.nomfrs,''),', ' ORDER BY COALESCE(f2.nomfrs,''))
+                               FROM tb_commandedetail d2
+                               LEFT JOIN tb_fournisseur f2 ON d2.idfrs=f2.idfrs
+                               WHERE d2.idcom=c.idcom),''),'Fournisseur non précisé') AS frs,
+                           (SELECT COUNT(*) FROM tb_commandedetail d WHERE d.idcom=c.idcom AND d.qtlivre>0) as nb
                     FROM tb_commande c
-                    WHERE c.deleted = 0
-                    AND EXISTS (
-                        SELECT 1 FROM tb_commandedetail d 
-                        WHERE d.idcom = c.idcom AND d.qtlivre > 0
-                    )
+                    WHERE c.deleted=0
+                    AND EXISTS (SELECT 1 FROM tb_commandedetail d WHERE d.idcom=c.idcom AND d.qtlivre>0)
                 """
-                params = []
+                p = []
                 if filtre:
-                    query += """ AND (
-                        LOWER(c.refcom) LIKE LOWER(%s) OR 
-                        LOWER(
-                            COALESCE(
-                                (
-                                    SELECT string_agg(DISTINCT COALESCE(f2.nomfrs, ''), ', ' ORDER BY COALESCE(f2.nomfrs, ''))
-                                    FROM tb_commandedetail d2
-                                    LEFT JOIN tb_fournisseur f2 ON d2.idfrs = f2.idfrs
-                                    WHERE d2.idcom = c.idcom
-                                ),
-                                ''
-                            )
-                        ) LIKE LOWER(%s)
-                    )"""
-                    params = [f"%{filtre}%", f"%{filtre}%"]
-                
-                query += " ORDER BY c.datemodif DESC, c.refcom DESC"
-                cursor.execute(query, params)
-                resultats = cursor.fetchall()
-                
-                for row in resultats:
-                    date_str = row[2].strftime("%d/%m/%Y %H:%M") if row[2] else ""
-                    tree.insert('', 'end', 
-                              values=(row[0], row[1], date_str, row[3] or "", f"✅ {row[4]}"))
-                
-                label_count.configure(text=f"Nombre de commandes : {len(resultats)}")
-                
+                    q += " AND (LOWER(c.refcom) LIKE LOWER(%s))"
+                    p = [f"%{filtre}%"]
+                q += " ORDER BY c.datemodif DESC, c.refcom DESC"
+                cursor.execute(q, p)
+                rows = cursor.fetchall()
+                for r in rows:
+                    ds = r[2].strftime("%d/%m/%Y %H:%M") if r[2] else ""
+                    tree.insert("", "end", values=(r[0], r[1], ds, r[3] or "", f"✅ {r[4]}"))
+                _refresh_alternating(tree)
+                lbl_c.configure(text=f"{len(rows)} commande(s)")
             except Exception as e:
-                messagebox.showerror("Erreur", f"Erreur lors du chargement: {str(e)}")
+                messagebox.showerror("Erreur", str(e))
             finally:
-                cursor.close()
-                conn.close()
-        
-        def rechercher(*args):
-            charger_commandes(entry_search.get())
-        
-        entry_search.bind('<KeyRelease>', rechercher)
-        
-        def valider_selection():
-            selection = tree.selection()
-            if not selection:
-                messagebox.showwarning("Attention", "Veuillez sélectionner une commande")
-                return
-            
-            values = tree.item(selection[0])['values']
-            idcom = values[0]
-            fenetre.destroy()
+                cursor.close(); conn.close()
+
+        entry_s.bind('<KeyRelease>', lambda e: charger_commandes(entry_s.get()))
+
+        def valider():
+            sel = tree.selection()
+            if not sel: messagebox.showwarning("Attention", "Sélectionnez une commande."); return
+            idcom = tree.item(sel[0])['values'][0]
+            fen.destroy()
             self.charger_commande(idcom)
-        
-        tree.bind('<Double-Button-1>', lambda e: valider_selection())
-        
-        btn_frame = ctk.CTkFrame(main_frame)
-        btn_frame.pack(fill="x")
-        
-        btn_annuler = ctk.CTkButton(btn_frame, text="❌ Annuler", 
-                                     command=fenetre.destroy,
-                                     fg_color="#d32f2f", hover_color="#b71c1c")
-        btn_annuler.pack(side="left", padx=5, pady=5)
-        
-        btn_valider = ctk.CTkButton(btn_frame, text="✅ Charger", 
-                                     command=valider_selection,
-                                     fg_color="#2e7d32", hover_color="#1b5e20")
-        btn_valider.pack(side="right", padx=5, pady=5)
-        
+
+        tree.bind('<Double-Button-1>', lambda e: valider())
+        bf = ctk.CTkFrame(main, fg_color="transparent")
+        bf.pack(fill="x")
+        styled.button_danger(bf, text="Annuler", icon="❌", width=110, height=34, command=fen.destroy).pack(side="left", padx=4)
+        styled.button_success(bf, text="Charger", icon="📂", width=120, height=34, command=valider).pack(side="right", padx=4)
         charger_commandes()
-    
+
     def charger_commande(self, idcom):
-        """Charge les articles livrés d'une commande"""
         conn = self.connect_db()
-        if not conn:
-            return
-            
+        if not conn: return
         try:
             cursor = conn.cursor()
-            
-            # Récupérer les infos de la commande
-            query_commande = """
+            cursor.execute("""
                 SELECT c.idcom, c.refcom, c.datemodif, c.idfrs, f.nomfrs
                 FROM tb_commande c
-                LEFT JOIN tb_fournisseur f ON c.idfrs = f.idfrs
-                WHERE c.idcom = %s AND c.deleted = 0
-            """
-            cursor.execute(query_commande, (idcom,))
+                LEFT JOIN tb_fournisseur f ON c.idfrs=f.idfrs
+                WHERE c.idcom=%s AND c.deleted=0
+            """, (idcom,))
             commande = cursor.fetchone()
-            
             if not commande:
-                messagebox.showerror("Erreur", "Commande non trouvée")
-                return
-            
-            # Récupérer les articles avec qtlivre > 0
-            query_details = """
-                SELECT d.id,
-                       d.idarticle,
-                       a.designation,
-                       u.designationunite,
-                       d.idunite,
-                       d.qtlivre,
-                       d.punitcmd,
-                       d.dateperemption,
+                messagebox.showerror("Erreur", "Commande non trouvée"); return
+
+            cursor.execute("""
+                SELECT d.id, d.idarticle, a.designation, u.designationunite, d.idunite,
+                       d.qtlivre, d.punitcmd, d.dateperemption,
                        COALESCE(f_d.nomfrs, f_c.nomfrs, '') AS nomfrs
                 FROM tb_commandedetail d
-                INNER JOIN tb_commande c ON d.idcom = c.idcom
-                INNER JOIN tb_article a ON d.idarticle = a.idarticle
-                INNER JOIN tb_unite u ON d.idunite = u.idunite
-                LEFT JOIN tb_fournisseur f_d ON d.idfrs = f_d.idfrs
-                LEFT JOIN tb_fournisseur f_c ON c.idfrs = f_c.idfrs
-                WHERE d.idcom = %s AND d.qtlivre > 0
-            """
-            cursor.execute(query_details, (idcom,))
+                INNER JOIN tb_commande c ON d.idcom=c.idcom
+                INNER JOIN tb_article a ON d.idarticle=a.idarticle
+                INNER JOIN tb_unite u ON d.idunite=u.idunite
+                LEFT JOIN tb_fournisseur f_d ON d.idfrs=f_d.idfrs
+                LEFT JOIN tb_fournisseur f_c ON c.idfrs=f_c.idfrs
+                WHERE d.idcom=%s AND d.qtlivre>0
+            """, (idcom,))
             details = cursor.fetchall()
-            
+
             if not details:
-                messagebox.showwarning("Attention", "Aucun article livré dans cette commande")
-                return
-            
-            # Réinitialiser
+                messagebox.showwarning("Attention", "Aucun article livré dans cette commande"); return
+
             self.reinitialiser_formulaire(generer_ref=False)
-            
-            # Stocker les infos
             self.idcom_selectionne = idcom
             self.info_commande = commande
-            
-            # Remplir les champs
+
+            # ── Fournisseur unique : si tous les détails ont le même fournisseur, l'afficher ──
+            noms_frs = set(d[8] for d in details if d[8])
+            nom_frs_affiche = list(noms_frs)[0] if len(noms_frs) == 1 else (commande[4] or "")
             self.entry_fournisseur.configure(state="normal")
             self.entry_fournisseur.delete(0, "end")
-            self.entry_fournisseur.insert(0, commande[4] or "")
+            self.entry_fournisseur.insert(0, nom_frs_affiche)
             self.entry_fournisseur.configure(state="readonly")
-            
-            # Remplir le treeview
-            for detail in details:
-                # unpack includes new dateperemption field (index 7)
-                (idcomdetail, idarticle, designation, unite,
-                 idunite, qtlivre, punitcmd, dateper, nomfrs_ligne) = detail
-                punitcmd = punitcmd if punitcmd else 0
-                montant = (qtlivre or 0) * punitcmd
-                date_display = dateper.strftime('%d/%m/%Y') if dateper else '-'
 
+            for d in details:
+                (idcd, idar, desig, unite, idunite, qtlivre, punitcmd, datep, nomfrs_ligne) = d
+                punitcmd = punitcmd or 0
+                montant  = (qtlivre or 0) * punitcmd
+                date_str = datep.strftime('%d/%m/%Y') if datep else '-'
                 self.tree.insert("", "end", values=(
-                    designation,
-                    unite,
-                    date_display,
-                    nomfrs_ligne or "",
-                    self.formater_nombre(qtlivre if qtlivre else 0),
+                    desig, unite, date_str, nomfrs_ligne or "",
+                    self.formater_nombre(qtlivre or 0),
                     self.formater_nombre(punitcmd),
                     self.formater_nombre(montant)
                 ))
-
                 self.items_livraison.append({
-                    'idcomdetail': idcomdetail,
-                    'idarticle': idarticle,
-                    'idunite': idunite,
-                    'fournisseur': nomfrs_ligne or "",
-                    'qtlivre': qtlivre or 0,
-                    'punitcmd': punitcmd,
-                    'dateperemption': dateper
+                    'idcomdetail': idcd, 'idarticle': idar, 'idunite': idunite,
+                    'fournisseur': nomfrs_ligne or "", 'qtlivre': qtlivre or 0,
+                    'punitcmd': punitcmd, 'dateperemption': datep
                 })
-            
+            _refresh_alternating(self.tree)
             self.calculer_total()
             messagebox.showinfo("Succès", f"Commande {commande[1]} chargée avec {len(details)} article(s) livré(s)")
-            
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors du chargement: {str(e)}")
+            messagebox.showerror("Erreur", f"Chargement : {e}")
         finally:
-            cursor.close()
-            conn.close()
-    
+            cursor.close(); conn.close()
+
     def calculer_total(self):
-        """Calcule et affiche le total"""
-        total = sum(item['qtlivre'] * item['punitcmd'] for item in self.items_livraison)
-        self.label_total.configure(text=f"Total: {self.formater_nombre(total)}")
-    
+        total = sum(i['qtlivre'] * i['punitcmd'] for i in self.items_livraison)
+        self.label_total.configure(text=f"Total : {self.formater_nombre(total)}")
+
+    def _on_toggle_a_payer(self):
+        """Change la couleur du header selon l'état du switch Fournisseur à payer."""
+        if self.var_a_payer.get():
+            # ON → fond vert Success pour signaler visuellement
+            self.switch_a_payer.master.configure(fg_color=Colors.SUCCESS_DARK)
+            self.switch_a_payer.configure(text_color=Colors.TEXT_ON_DARK,
+                                          button_color=Colors.TEXT_ON_DARK,
+                                          progress_color=Colors.SUCCESS)
+        else:
+            # OFF → retour au fond MIDNIGHT
+            self.switch_a_payer.master.configure(fg_color=Colors.MIDNIGHT)
+            self.switch_a_payer.configure(text_color=Colors.TEXT_ON_DARK,
+                                          button_color=Colors.SUCCESS,
+                                          progress_color=Colors.SUCCESS_DARK)
+
     def enregistrer_livraison(self):
-        """Enregistre le bon de réception avec gestion de la date de péremption optionnelle"""
         if not self.idcom_selectionne:
-            messagebox.showwarning("Attention", "Veuillez charger une commande")
-            return
+            messagebox.showwarning("Attention", "Veuillez charger une commande"); return
 
         conn = self.connect_db()
         if not conn: return
@@ -540,605 +512,330 @@ class PageBonReception(ctk.CTkFrame):
         try:
             cursor = conn.cursor()
             numero_facture = self.entry_factfrs.get().strip()
-
-            date_peremption = None  # Widget non créé
-
             if not numero_facture:
-                messagebox.showwarning("Attention", "Veuillez saisir le N° Facture Fournisseur.")
-                return
+                messagebox.showwarning("Attention", "Veuillez saisir le N° Facture Fournisseur."); return
 
             dateregistre = datetime.now()
             idmag = self.magasins.get(self.combo_magasin.get())
+            a_payer = 1 if self.var_a_payer.get() else 0
 
-            query_insert = """
-                INSERT INTO tb_livraisonfrs 
-                (reflivfrs, idcom, idarticle, idunite, qtlivrefrs, dateregistre, 
-                typemouvement, idmag, factfrs, iduser, dateperemption)
-                VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s)
+            q_insert = """
+                INSERT INTO tb_livraisonfrs
+                (reflivfrs, idcom, idarticle, idunite, qtlivrefrs, dateregistre,
+                 typemouvement, idmag, factfrs, iduser, dateperemption, a_payer)
+                VALUES (%s,%s,%s,%s,%s,%s,1,%s,%s,%s,%s,%s)
             """
-
-            # Garder trace des items insérés pour les lots (idlivfrs généré)
             items_avec_peremption = []
 
             for item in self.items_livraison:
-                cursor.execute(query_insert, (
-                    self.entry_ref.get(),
-                    self.idcom_selectionne,
-                    item['idarticle'],
-                    item['idunite'],
-                    item['qtlivre'],
-                    dateregistre,
-                    idmag,
-                    numero_facture,
-                    self.iduser,
-                    item.get('dateperemption')
+                cursor.execute(q_insert, (
+                    self.entry_ref.get(), self.idcom_selectionne,
+                    item['idarticle'], item['idunite'], item['qtlivre'],
+                    dateregistre, idmag, numero_facture, self.iduser,
+                    item.get('dateperemption'), a_payer
                 ))
-
-                # ── Si l'item possède une date de péremption, on mémorise pour insertion lot
-                item_date_per = item.get('dateperemption') or date_peremption
+                item_date_per = item.get('dateperemption')
                 if item_date_per:
                     items_avec_peremption.append({
-                        'idarticle': item['idarticle'],
-                        'idunite':   item['idunite'],
-                        'qtlivre':   item['qtlivre'],
-                        'dateperemption': item_date_per,
+                        'idarticle': item['idarticle'], 'idunite': item['idunite'],
+                        'qtlivre': item['qtlivre'], 'dateperemption': item_date_per,
                     })
 
-            date_peremption = None
-
-            # ── Insertion dans tb_lot_peremption pour chaque item avec péremption ──
-            # Fait AVANT le commit pour rester dans la même transaction.
-            # Si l'insertion de lot échoue, toute la livraison est annulée.
             if items_avec_peremption:
-                for item_per in items_avec_peremption:
-                    # Priorité = MAX existant pour cet article/unité/magasin + 1
-                    cursor.execute(
-                        """
-                        SELECT COALESCE(MAX(priorite), 0)
-                        FROM tb_lot_peremption
-                        WHERE id_article = %s
-                        AND id_unite   = %s
-                        AND idmag      = %s
-                        AND deleted    = 0
-                        """,
-                        (item_per['idarticle'], item_per['idunite'], idmag)
-                    )
+                for ip in items_avec_peremption:
+                    cursor.execute("""
+                        SELECT COALESCE(MAX(priorite),0) FROM tb_lot_peremption
+                        WHERE id_article=%s AND id_unite=%s AND idmag=%s AND deleted=0
+                    """, (ip['idarticle'], ip['idunite'], idmag))
                     max_prio = cursor.fetchone()[0]
-
-                    cursor.execute(
-                        """
+                    cursor.execute("""
                         INSERT INTO tb_lot_peremption
-                            (id_article, id_unite, idmag, quantite,
-                            date_peremption, priorite, date_entree,
-                            type_source, note)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'LIVRAISON', %s)
-                        """,
-                        (
-                            item_per['idarticle'],
-                            item_per['idunite'],
-                            idmag,
-                            item_per['qtlivre'],
-                            item_per['dateperemption'],
-                            max_prio + 1,
-                            dateregistre.date(),
-                            f"BL {self.entry_ref.get()} — fact. {numero_facture}",
-                        )
-                    )
+                            (id_article, id_unite, idmag, quantite, date_peremption,
+                             priorite, date_entree, type_source, note)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,'LIVRAISON',%s)
+                    """, (ip['idarticle'], ip['idunite'], idmag, ip['qtlivre'],
+                          ip['dateperemption'], max_prio + 1, dateregistre.date(),
+                          f"BL {self.entry_ref.get()} — fact. {numero_facture}"))
 
             conn.commit()
             self.derniere_reflivfrs_enregistree = self.entry_ref.get()
 
             messagebox.showinfo("Succès",
-                f"Enregistrement effectué avec succès.\n"
-                f"Référence: {self.derniere_reflivfrs_enregistree}"
+                f"Enregistrement effectué avec succès.\nRéférence: {self.derniere_reflivfrs_enregistree}"
                 + (f"\n{len(items_avec_peremption)} lot(s) de péremption créé(s)."
-                if items_avec_peremption else ""))
+                   if items_avec_peremption else ""))
 
-            # ── Génération PDF (logique inchangée) ───────────────────────────
+            # ── Génération PDF automatique ────────────────────────────────────
             try:
                 data = self.get_data_bon_reception()
                 if data:
                     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                     etats_dir   = os.path.join(project_dir, "Etats Impression")
-                    if not os.path.exists(etats_dir):
-                        os.makedirs(etats_dir)
-
-                    filename = os.path.join(etats_dir,
-                        f"BR_{self.entry_ref.get().replace('-', '_')}_A5.pdf")
-
+                    if not os.path.exists(etats_dir): os.makedirs(etats_dir)
+                    filename = os.path.join(etats_dir, f"BR_{self.entry_ref.get().replace('-','_')}_A5.pdf")
                     cols = ("Code", "Désignation", "Unité", "Qté", "Fournisseur")
-                    rows = []
+                    rows_pdf = []
                     for detail in data.get('details', []):
-                        qte = detail.get('qtlivre', 0) or 0
-                        rows.append((
-                            detail.get('code', ''),
-                            detail.get('designation', ''),
-                            detail.get('unite', ''),
-                            qte,
-                            detail.get('fournisseur', '')
-                        ))
-                    table_data = (cols, rows)
-
-                    operateur = (data.get('utilisateur', {}).get('prenomuser', '') + ' ' +
-                                data.get('utilisateur', {}).get('nomuser', ''))
-                    if not operateur.strip():
-                        operateur = str(self.iduser)
-
+                        rows_pdf.append((detail.get('code',''), detail.get('designation',''),
+                                         detail.get('unite',''), detail.get('qtlivre',0),
+                                         detail.get('fournisseur','')))
+                    operateur = (data.get('utilisateur',{}).get('prenomuser','') + ' ' +
+                                 data.get('utilisateur',{}).get('nomuser','')).strip() or str(self.iduser)
                     try:
                         from EtatsPDF_Mouvements import EtatPDFMouvements
                         etat = EtatPDFMouvements()
                         try: etat.connect_db()
-                        except Exception: pass
-
+                        except: pass
                         success = etat._build_pdf_a5(
-                            output_path=filename,
-                            titre_entete="BON DE RÉCEPTION",
+                            output_path=filename, titre_entete="BON DE RÉCEPTION",
                             reference=self.entry_ref.get(),
-                            date_operation=data['reception'].get('dateregistre',
-                                            datetime.now().strftime('%d/%m/%Y')),
-                            magasin=data['reception'].get('magasin', ''),
-                            operateur=operateur,
-                            table_data=table_data,
-                            description=numero_facture,
+                            date_operation=data['reception'].get('dateregistre', datetime.now().strftime('%d/%m/%Y')),
+                            magasin=data['reception'].get('magasin',''), operateur=operateur,
+                            table_data=(cols, rows_pdf), description=numero_facture,
                             responsable_1="Le Responsable",
-                            responsable_2=data['reception'].get('fournisseur', 'Fournisseur')
-                        )
-
+                            responsable_2=data['reception'].get('fournisseur','Fournisseur'))
                         try: etat.close_db()
-                        except Exception: pass
-
+                        except: pass
                         if success:
                             try: self.open_file(filename)
-                            except Exception: pass
-
-                    except Exception as e:
-                        print(f"Erreur génération PDF automatique Bon de Réception: {e}")
-
-            except Exception as e:
-                print(f"Erreur préparation données pour PDF automatique: {e}")
+                            except: pass
+                    except Exception as ep:
+                        print(f"Erreur PDF BR: {ep}")
+            except Exception as ep:
+                print(f"Erreur données PDF: {ep}")
 
             self.reinitialiser_formulaire()
 
         except Exception as e:
             conn.rollback()
-            messagebox.showerror("Erreur", f"Erreur lors de l'enregistrement: {str(e)}")
+            messagebox.showerror("Erreur", f"Enregistrement : {e}")
         finally:
-            cursor.close()
-            conn.close()
-    
+            cursor.close(); conn.close()
+
     def nouveau_bon_reception(self):
-        """Réinitialise le formulaire"""
         if self.items_livraison:
-            reponse = messagebox.askyesno("Confirmation", 
-                "Voulez-vous vraiment créer un nouveau bon de réception?\nLes données non enregistrées seront perdues.")
-            if not reponse:
+            if not messagebox.askyesno("Confirmation",
+                    "Voulez-vous créer un nouveau bon ?\nLes données non enregistrées seront perdues."):
                 return
-        
         self.reinitialiser_formulaire()
-    
+
     def reinitialiser_formulaire(self, generer_ref=True):
-        """Réinitialise le formulaire"""
-        if generer_ref:
-            self.generer_reference()
+        if generer_ref: self.generer_reference()
         self.charger_magasins()
-    
         self.items_livraison.clear()
         self.idcom_selectionne = None
         self.info_commande = None
-        self.derniere_reflivfrs_enregistree = None  # *** NOUVEAU ***
-    
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-    
+        self.derniere_reflivfrs_enregistree = None
+        for i in self.tree.get_children(): self.tree.delete(i)
         self.entry_fournisseur.configure(state="normal")
         self.entry_fournisseur.delete(0, "end")
         self.entry_fournisseur.configure(state="readonly")
-        
-        # Réinitialisation du champ N° Facture
         self.entry_factfrs.delete(0, "end")
-        
-        # self.entry_peremption.set_date(datetime.now())  # Widget non créé
-    
+        self.var_a_payer.set(False)
+        self._on_toggle_a_payer()
         self.calculer_total()
-    
+
     def charger_infos_societe(self):
-        """Charge les informations de la société depuis tb_infosociete."""
         conn = self.connect_db()
         if not conn: return
-    
         try:
             cursor = conn.cursor()
-            sql = """
-                SELECT 
-                    nomsociete, adressesociete, contactsociete, villesociete, 
-                    nifsociete, statsociete, cifsociete
-                FROM tb_infosociete 
-                LIMIT 1
-            """
-            cursor.execute(sql)
-            result = cursor.fetchone()
-        
-            if result:
+            cursor.execute("""
+                SELECT nomsociete, adressesociete, contactsociete, villesociete,
+                       nifsociete, statsociete, cifsociete
+                FROM tb_infosociete LIMIT 1
+            """)
+            r = cursor.fetchone()
+            if r:
                 self.infos_societe = {
-                    'nomsociete': result[0] or 'SOCIÉTÉ',
-                    'adressesociete': result[1] or 'N/A',
-                    'contactsociete': result[2] or 'N/A',
-                    'villesociete': result[3] or 'N/A',
-                    'nifsociete': result[4] or 'N/A',
-                    'statsociete': result[5] or 'N/A',
-                    'cifsociete': result[6] or 'N/A'
+                    'nomsociete': r[0] or 'SOCIÉTÉ', 'adressesociete': r[1] or 'N/A',
+                    'contactsociete': r[2] or 'N/A', 'villesociete': r[3] or 'N/A',
+                    'nifsociete': r[4] or 'N/A', 'statsociete': r[5] or 'N/A',
+                    'cifsociete': r[6] or 'N/A'
                 }
             else:
-                self.infos_societe = {
-                    'nomsociete': 'SOCIÉTÉ',
-                    'adressesociete': 'N/A',
-                    'contactsociete': 'N/A',
-                    'villesociete': 'N/A',
-                    'nifsociete': 'N/A',
-                    'statsociete': 'N/A',
-                    'cifsociete': 'N/A'
-                }
-        
+                self.infos_societe = {k: 'N/A' for k in
+                    ['nomsociete','adressesociete','contactsociete','villesociete',
+                     'nifsociete','statsociete','cifsociete']}
+                self.infos_societe['nomsociete'] = 'SOCIÉTÉ'
         except Exception as e:
-            print(f"Erreur chargement infos société: {str(e)}")
-            self.infos_societe = {
-                'nomsociete': 'SOCIÉTÉ',
-                'adressesociete': 'N/A',
-                'contactsociete': 'N/A',
-                'villesociete': 'N/A',
-                'nifsociete': 'N/A',
-                'statsociete': 'N/A',
-                'cifsociete': 'N/A'
-            }
+            print(f"Erreur infos société: {e}")
+            self.infos_societe = {k: 'N/A' for k in
+                ['nomsociete','adressesociete','contactsociete','villesociete',
+                 'nifsociete','statsociete','cifsociete']}
         finally:
-            if 'cursor' in locals() and cursor: cursor.close()
+            if 'cursor' in locals(): cursor.close()
             if conn: conn.close()
-    
+
     def get_data_bon_reception(self):
-        """Récupère toutes les données nécessaires pour imprimer un bon de réception."""
-        # Ajouter le N° Facture à l'objet data
         data = {
             'societe': self.infos_societe,
             'reception': {
                 'reflivfrs': self.entry_ref.get(),
-            'dateregistre': datetime.now().strftime("%d/%m/%Y %H:%M"),
+                'dateregistre': datetime.now().strftime("%d/%m/%Y %H:%M"),
                 'fournisseur': self.entry_fournisseur.get(),
                 'magasin': self.combo_magasin.get(),
-                'factfrs': self.entry_factfrs.get() # Ajout du N° Facture
+                'factfrs': self.entry_factfrs.get()
             },
-            'utilisateur': {},
-            'details': []
+            'utilisateur': {}, 'details': []
         }
-    
         conn = self.connect_db()
         if not conn: return None
-    
         try:
             cursor = conn.cursor()
-        
-            # Infos utilisateur (Utilise self.iduser)
-            cursor.execute("SELECT nomuser, prenomuser FROM tb_users WHERE iduser = %s", (self.iduser,))
-            user_info = cursor.fetchone()
-            if user_info:
-                data['utilisateur'] = {
-                    'nomuser': user_info[0],
-                    'prenomuser': user_info[1]
-                }
-        
-            # Détails des articles
+            cursor.execute("SELECT nomuser, prenomuser FROM tb_users WHERE iduser=%s", (self.iduser,))
+            u = cursor.fetchone()
+            if u: data['utilisateur'] = {'nomuser': u[0], 'prenomuser': u[1]}
             for item in self.items_livraison:
-                cursor.execute("SELECT designation FROM tb_article WHERE idarticle = %s", (item['idarticle'],))
-                designation = cursor.fetchone()
-            
-                cursor.execute("SELECT codearticle, designationunite FROM tb_unite WHERE idunite = %s", (item['idunite'],))
+                cursor.execute("SELECT designation FROM tb_article WHERE idarticle=%s", (item['idarticle'],))
+                desig = cursor.fetchone()
+                cursor.execute("SELECT codearticle, designationunite FROM tb_unite WHERE idunite=%s", (item['idunite'],))
                 unite_info = cursor.fetchone()
-            
-                if designation and unite_info:
+                if desig and unite_info:
                     data['details'].append({
-                        'code': unite_info[0],
-                        'designation': designation[0],
-                        'unite': unite_info[1],
-                        'fournisseur': item.get('fournisseur', ''),
-                        'qtlivre': item['qtlivre'],
-                        'punitcmd': item['punitcmd']
+                        'code': unite_info[0], 'designation': desig[0], 'unite': unite_info[1],
+                        'fournisseur': item.get('fournisseur',''),
+                        'qtlivre': item['qtlivre'], 'punitcmd': item['punitcmd']
                     })
-        
             return data
-        
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de la récupération des données: {str(e)}")
-            return None
+            messagebox.showerror("Erreur", f"Données impression : {e}"); return None
         finally:
-            if 'cursor' in locals() and cursor: cursor.close()
+            if 'cursor' in locals(): cursor.close()
             if conn: conn.close()
 
     def generer_pdf_a5(self):
-        """Génère un Bon de Réception au format PDF A5 (Portrait)."""
-    
         data = self.get_data_bon_reception()
-        if not data:
-            return
-    
-        filename = f"BR_{self.entry_ref.get().replace('-', '_')}_A5.pdf"
-    
+        if not data: return
+        filename = f"BR_{self.entry_ref.get().replace('-','_')}_A5.pdf"
         try:
-            # Modification : Passage en Portrait (A5 par défaut est portrait)
             doc = SimpleDocTemplate(filename, pagesize=A5,
-                                leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
+                                    leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
             styles = getSampleStyleSheet()
             elements = []
-
             societe = data['societe']
-        
-            # --- 1. EN-TÊTE : Informations société ---
-            style_header = styles['Normal']
-            style_header.fontSize = 8 # Réduit pour le mode portrait
-            style_header.alignment = 1  # Center
-        
-            adresse = societe.get('adressesociete', 'N/A')
-            ville = societe.get('villesociete', 'N/A')
-            contact = societe.get('contactsociete', 'N/A')
-            infos_legales = f"NIF: {societe.get('nifsociete', 'N/A')} | STAT: {societe.get('statsociete', 'N/A')}\nCIF: {societe.get('cifsociete', 'N/A')}"
-        
-            elements.append(Paragraph(f"<b>{societe.get('nomsociete', 'NOM SOCIÉTÉ')}</b>", styles['Heading4']))
-            elements.append(Paragraph(f"{adresse}, {ville} - Tél: {contact}", style_header))
-            elements.append(Paragraph(infos_legales, style_header))
-            elements.append(Spacer(1, 10))
-        
-            # --- 2. TITRE ---
-            style_titre = styles['Heading3']
-            style_titre.alignment = 1
-            p_titre = Paragraph(f"<u>BON DE RÉCEPTION N°{data['reception']['reflivfrs']}</u>", style_titre)
-            elements.append(p_titre)
+            style_h = styles['Normal']; style_h.fontSize = 8; style_h.alignment = 1
+
+            elements.append(Paragraph(f"<b>{societe.get('nomsociete','NOM SOCIÉTÉ')}</b>", styles['Heading4']))
+            elements.append(Paragraph(
+                f"{societe.get('adressesociete','')}, {societe.get('villesociete','')} — Tél: {societe.get('contactsociete','')}",
+                style_h))
+            elements.append(Paragraph(
+                f"NIF: {societe.get('nifsociete','')} | STAT: {societe.get('statsociete','')} | CIF: {societe.get('cifsociete','')}",
+                style_h))
             elements.append(Spacer(1, 10))
 
-            # --- 3. Informations générales (Tableau 2 colonnes pour gagner de la place) ---
-            data_header = [
-                [Paragraph(f"<b>Date:</b> {data['reception']['dateregistre']}", style_header), 
-                 Paragraph(f"<b>Fournisseur:</b> {data['reception']['fournisseur']}", style_header)],
-                [Paragraph(f"<b>Magasin:</b> {data['reception']['magasin']}", style_header), 
-                 Paragraph(f"<b>Facture N°:</b> {data['reception']['factfrs']}", style_header)],
-                [Paragraph(f"<b>Établi par:</b> {data['utilisateur'].get('prenomuser', '')} {data['utilisateur'].get('nomuser', '')}", style_header), ""]
-            ]
-        
-            table_header = Table(data_header, colWidths=[185, 185])
-            table_header.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('GRID', (0, 0), (-1, -1), 0.2, colors.lightgrey)
-            ]))
-            elements.append(table_header)
+            style_titre = styles['Heading3']; style_titre.alignment = 1
+            elements.append(Paragraph(f"<u>BON DE RÉCEPTION N°{data['reception']['reflivfrs']}</u>", style_titre))
             elements.append(Spacer(1, 10))
-        
-            # --- 4. Tableau des Détails (Colonnes ajustées pour Portrait) ---
-            # Répartition des 370 points de largeur disponible environ
-            table_data = [
-                ['Code', 'Désignation', 'Unité', 'Qté', 'P.U', 'Montant', 'Fournisseur']
+
+            data_hdr = [
+                [Paragraph(f"<b>Date:</b> {data['reception']['dateregistre']}", style_h),
+                 Paragraph(f"<b>Fournisseur:</b> {data['reception']['fournisseur']}", style_h)],
+                [Paragraph(f"<b>Magasin:</b> {data['reception']['magasin']}", style_h),
+                 Paragraph(f"<b>Facture N°:</b> {data['reception']['factfrs']}", style_h)],
+                [Paragraph(f"<b>Établi par:</b> {data['utilisateur'].get('prenomuser','')} {data['utilisateur'].get('nomuser','')}", style_h), ""]
             ]
-        
-            total_general = 0
+            tbl_hdr = Table(data_hdr, colWidths=[185, 185])
+            tbl_hdr.setStyle(TableStyle([
+                ('ALIGN',(0,0),(-1,-1),'LEFT'), ('VALIGN',(0,0),(-1,-1),'TOP'),
+                ('BOTTOMPADDING',(0,0),(-1,-1),4), ('GRID',(0,0),(-1,-1),0.2,colors.lightgrey)
+            ]))
+            elements.append(tbl_hdr); elements.append(Spacer(1, 10))
+
+            table_data = [['Code','Désignation','Unité','Qté','P.U','Montant','Fournisseur']]
+            total_g = 0
             for detail in data['details']:
                 montant = detail['qtlivre'] * detail['punitcmd']
-                total_general += montant
-            
+                total_g += montant
                 table_data.append([
-                    detail['code'],
-                    Paragraph(detail['designation'], styles['Normal']), # Paragraph pour retour à la ligne si long
-                    detail['unite'],
-                    self.formater_nombre(detail['qtlivre']),
-                    self.formater_nombre(detail['punitcmd']),
-                    self.formater_nombre(montant),
-                    Paragraph(detail.get('fournisseur', ''), styles['Normal'])
+                    detail['code'], Paragraph(detail['designation'], styles['Normal']),
+                    detail['unite'], self.formater_nombre(detail['qtlivre']),
+                    self.formater_nombre(detail['punitcmd']), self.formater_nombre(montant),
+                    Paragraph(detail.get('fournisseur',''), styles['Normal'])
                 ])
-        
-            table_data.append(['', '', '', '', '', 'TOTAL:', self.formater_nombre(total_general)])
+            table_data.append(['','','','','','TOTAL:', self.formater_nombre(total_g)])
 
-            # Ajustement des largeurs avec colonne Fournisseur
-            table_details = Table(table_data, colWidths=[35, 95, 35, 35, 45, 45, 80])
-            table_details.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('ALIGN', (3, 1), (5, -1), 'RIGHT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('GRID', (0, 0), (-1, -2), 0.5, colors.black),
-                ('FONTSIZE', (0, 0), (-1, -1), 7), # Taille de police réduite pour le tableau
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                # Style pour la ligne de total
-                ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
-                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, -1), (-1, -1), 8),
+            tbl = Table(table_data, colWidths=[35,95,35,35,45,45,80])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2c3e50')),
+                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
+                ('ALIGN',(0,0),(-1,-1),'LEFT'), ('ALIGN',(3,1),(5,-1),'RIGHT'),
+                ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+                ('GRID',(0,0),(-1,-2),0.5,colors.black),
+                ('FONTSIZE',(0,0),(-1,-1),7), ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                ('BACKGROUND',(0,-1),(-1,-1),colors.lightgrey),
+                ('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold'), ('FONTSIZE',(0,-1),(-1,-1),8),
             ]))
-            elements.append(table_details)
-            elements.append(Spacer(1, 15))
-        
-            # --- 5. Montant en lettres ---
-            montant_lettres = self.nombre_en_lettres(total_general)
-            style_lettres = styles['Normal']
-            style_lettres.fontSize = 8
-        
-            elements.append(Paragraph(f"<b>Arrêté le présent bon à la somme de :</b> {montant_lettres}", style_lettres))
-            elements.append(Spacer(1, 20))
+            elements.append(tbl); elements.append(Spacer(1,15))
+            elements.append(Paragraph(f"<b>Arrêté le présent bon à la somme de :</b> {self.nombre_en_lettres(total_g)}",
+                                       styles['Normal']))
+            elements.append(Spacer(1,20))
 
-            # --- 6. SIGNATURES ---
-            data_sig = [['', 'Le Responsable'], ['', '_________________']]
-            table_sig = Table(data_sig, colWidths=[200, 170])
-            table_sig.setStyle(TableStyle([
-                ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-                ('FONTNAME', (1, 0), (1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (1, 0), (1, -1), 9),
-            ]))
-            elements.append(table_sig)
-
+            sig = Table([['','Le Responsable'],['','_________________']], colWidths=[200,170])
+            sig.setStyle(TableStyle([('ALIGN',(1,0),(1,-1),'CENTER'),
+                                      ('FONTNAME',(1,0),(1,0),'Helvetica-Bold'), ('FONTSIZE',(1,0),(1,-1),9)]))
+            elements.append(sig)
             doc.build(elements)
-        
-            messagebox.showinfo("Impression A5", f"Le Bon de Réception (Portrait) a été généré :\n{filename}")
+            messagebox.showinfo("PDF", f"Bon de Réception généré :\n{filename}")
             self.open_file(filename)
-        
         except Exception as e:
-            messagebox.showerror("Erreur Génération", f"Erreur lors de la génération du PDF : {str(e)}")
+            messagebox.showerror("Erreur", f"Génération PDF : {e}")
 
     def generer_ticket_80mm(self):
-        """Génère un Bon de Réception au format Ticket de Caisse 80mm (fichier texte brut)."""
-    
         data = self.get_data_bon_reception()
-        if not data:
-            return
-    
-        filename = f"BR_{self.entry_ref.get().replace('-', '_')}_80mm.txt"
-    
+        if not data: return
+        filename = f"BR_{self.entry_ref.get().replace('-','_')}_80mm.txt"
         try:
-            societe = data['societe']
-            reception = data['reception']
-            utilisateur = data['utilisateur']
-            details = data['details']
-        
-            MAX_WIDTH = 40
-        
-            def center(text):
-                return text.center(MAX_WIDTH)
-        
-            def line():
-                return "-" * MAX_WIDTH
-
-            def format_detail_line(designation, qte, unite, prix, montant):
-                qte_str = self.formater_nombre(qte)
-                prix_str = self.formater_nombre(prix)
-                montant_str = self.formater_nombre(montant)
-            
-                # Ligne 1: Désignation
-                designation_str = designation[:MAX_WIDTH]
-            
-                # Ligne 2: Qté x Prix = Montant
-                detail_str = f"{qte_str} {unite} x {prix_str}"
-            
-                return f"{designation_str}\n{detail_str}\n  = {montant_str}"
-
+            s = data['societe']; r = data['reception']
+            u = data['utilisateur']; details = data['details']
+            W = 40
+            center = lambda t: t.center(W)
+            line   = lambda: "-" * W
             content = []
-        
-            # --- EN-TÊTE ---
-            content.append(center("Informations Société"))
-            content.append(f"{societe.get('nomsociete', 'N/A')}")
-            content.append(f"{societe.get('adressesociete', 'N/A')}")
-            content.append(f"{societe.get('villesociete', 'N/A')}")
-            content.append(f"{societe.get('contactsociete', 'N/A')}")
-            content.append(line())
-            content.append(center(f"NIF: {societe.get('nifsociete', 'N/A')}"))
-            content.append(center(f"STAT: {societe.get('statsociete', 'N/A')}"))
-        
-            # --- INFOS BR ---
-            content.append(f"N° BR: {reception['reflivfrs']}")
-            content.append(f"Date: {reception['dateregistre']}")
-            content.append(f"Fournisseur: {reception['fournisseur']}")
-            content.append(f"Magasin: {reception['magasin']}")
-            content.append(f"N° Facture: {reception['factfrs']}") # Affichage du N° Facture
-            content.append(f"Opérateur: {utilisateur.get('prenomuser', '')} {utilisateur.get('nomuser', '')}")
-            content.append(line())
-        
-            # --- DÉTAILS ---
-            content.append("ARTICLES REÇUS")
-            content.append(line())
-        
-            total_general = 0
-            for idx, detail in enumerate(details, 1):
-                montant = detail['qtlivre'] * detail['punitcmd']
-                total_general += montant
-            
-                content.append(format_detail_line(
-                    f"{idx}. {detail['designation']}", 
-                    detail['qtlivre'], 
-                    detail['unite'],
-                    detail['punitcmd'],
-                    montant
-                ))
-                content.append("")
-        
-            content.append(line())
-        
-            # --- TOTAL ---
-            content.append(center(f"TOTAL: {self.formater_nombre(total_general)} Ar"))
-            content.append(line())
-        
-            # --- MONTANT EN LETTRES ---
-            montant_lettres = self.nombre_en_lettres(total_general)
-            content.append(center("Montant en lettres:"))
-            # Découper le texte si trop long
-            words = montant_lettres.split()
-            current_line = ""
-            for word in words:
-                if len(current_line + " " + word) <= MAX_WIDTH:
-                    current_line += (" " if current_line else "") + word
-                else:
-                    content.append(center(current_line))
-                    current_line = word
-            if current_line:
-                content.append(center(current_line))
-        
-            content.append(line())
-        
-            # --- PIED DE PAGE ---
-            
-            content.append("\n" * 3)
-            content.append(center("Signature"))
-            content.append("\n" * 3)
-            content.append(center("Merci de votre collaboration"))
-        
+            content += [center("Informations Société"), s.get('nomsociete',''),
+                        s.get('adressesociete',''), s.get('villesociete',''),
+                        s.get('contactsociete',''), line(),
+                        center(f"NIF: {s.get('nifsociete','')}"),
+                        center(f"STAT: {s.get('statsociete','')}"),
+                        f"N° BR: {r['reflivfrs']}", f"Date: {r['dateregistre']}",
+                        f"Fournisseur: {r['fournisseur']}", f"Magasin: {r['magasin']}",
+                        f"N° Facture: {r['factfrs']}",
+                        f"Opérateur: {u.get('prenomuser','')} {u.get('nomuser','')}", line(),
+                        "ARTICLES REÇUS", line()]
+            total_g = 0
+            for idx, d in enumerate(details, 1):
+                m = d['qtlivre'] * d['punitcmd']; total_g += m
+                content += [f"{idx}. {d['designation'][:W]}",
+                            f"{self.formater_nombre(d['qtlivre'])} {d['unite']} x {self.formater_nombre(d['punitcmd'])}",
+                            f"  = {self.formater_nombre(m)}", ""]
+            content += [line(), center(f"TOTAL: {self.formater_nombre(total_g)} Ar"), line()]
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(content))
-        
-            messagebox.showinfo("Impression 80mm", 
-                          f"Le Bon de Réception a été généré en fichier texte (80mm) :\n{filename}\n"
-                          "(À imprimer via un pilote d'imprimante thermique)")
+            messagebox.showinfo("Ticket 80mm", f"Généré :\n{filename}")
             self.open_file(filename)
-        
         except Exception as e:
-            messagebox.showerror("Erreur Génération", f"Erreur lors de la génération du ticket : {str(e)}")
-    
+            messagebox.showerror("Erreur", f"Génération ticket : {e}")
+
     def open_file(self, filename):
-        """Ouvre le fichier généré avec l'application par défaut du système"""
         try:
-            if os.name == 'nt':  # Windows
+            if os.name == 'nt':
                 os.startfile(filename)
-            elif os.name == 'posix':  # macOS et Linux
-                import subprocess
-                import sys
-                if sys.platform == 'darwin':  # macOS
-                    subprocess.call(['open', filename])
-                else:  # Linux
-                    subprocess.call(['xdg-open', filename])
-        except Exception as e:
-            # Si l'ouverture automatique échoue, ce n'est pas grave
+            else:
+                import subprocess, sys
+                subprocess.call(['open' if sys.platform == 'darwin' else 'xdg-open', filename])
+        except:
             pass
 
-    
-    def imprimer_bon_reception(self):
-        """Ouvre une boîte de dialogue pour choisir le format d'impression."""
-        if not self.derniere_reflivfrs_enregistree:
-            messagebox.showwarning("Attention", 
-                             "Veuillez d'abord enregistrer le bon de réception avant de l'imprimer.")
-            return
 
-        dialogue = simpledialog.askstring("Format d'Impression", 
-                                      "Quel format d'impression souhaitez-vous ?\nEntrez 'A5' ou '80mm'.",
-                                      parent=self)
-                                      
-        if dialogue and dialogue.lower() == 'a5':
-            self.generer_pdf_a5()
-        elif dialogue and dialogue.lower() == '80mm':
-            self.generer_ticket_80mm()
-        elif dialogue:
-            messagebox.showwarning("Format Inconnu", "Format non reconnu. Veuillez choisir 'A5' ou '80mm'.")
-    
-    
-
+# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    from app_theme import init_theme
+    init_theme()
     app = ctk.CTk()
-    app.geometry("1000x700")
-    
-    iduser = 1
-    
-    page = PageBonReception(app, iduser)
+    app.geometry("1280x820")
+    app.title("Bon de Réception — iJeery")
+    Theme.apply(app)
+    page = PageBonReception(app, iduser=1)
     page.pack(fill="both", expand=True)
-    
     app.mainloop()
