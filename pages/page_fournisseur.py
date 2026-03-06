@@ -39,9 +39,8 @@ class PageFournisseur(ctk.CTkFrame):
             self.cursor = self.conn.cursor()
             self.create_table()
 
-        # Variables pour le tri interactif
-        self.sort_column = "Dette en cours"  # Colonne par défaut
-        self.sort_ascending = False  # DESC par défaut
+        self.sort_column = "Dette en cours"
+        self.sort_ascending = False
 
         self.setup_ui()
         self.load_fournisseur()
@@ -99,7 +98,6 @@ class PageFournisseur(ctk.CTkFrame):
         input_frame = ctk.CTkFrame(self)
         input_frame.pack(fill="x", pady=10)
 
-        # Ligne 1
         row1 = ctk.CTkFrame(input_frame)
         row1.pack(fill="x", pady=5)
 
@@ -115,7 +113,6 @@ class PageFournisseur(ctk.CTkFrame):
         self.adresseFrs_entry = ctk.CTkEntry(row1, width=150)
         self.adresseFrs_entry.pack(side="left", padx=5)
 
-        # Ligne 2
         row2 = ctk.CTkFrame(input_frame)
         row2.pack(fill="x", pady=5)
 
@@ -131,7 +128,6 @@ class PageFournisseur(ctk.CTkFrame):
         self.cifFrs_entry = ctk.CTkEntry(row2, width=120)
         self.cifFrs_entry.pack(side="left", padx=5)
 
-        # Boutons
         button_frame = ctk.CTkFrame(self)
         button_frame.pack(fill="x", pady=10)
 
@@ -142,7 +138,6 @@ class PageFournisseur(ctk.CTkFrame):
         ctk.CTkButton(button_frame, text="Supprimer", command=self.delete_fournisseur,
                       fg_color="#e74c3c", hover_color="#c0392b").pack(side="left", padx=5)
 
-        # Recherche
         search_frame = ctk.CTkFrame(self)
         search_frame.pack(fill="x", pady=10)
 
@@ -154,7 +149,6 @@ class PageFournisseur(ctk.CTkFrame):
         self.all_frs_data = []
         self.search_entry.bind("<KeyRelease>", self.filter_fournisseurs)
 
-        # Treeview
         columns = ("Nom du Fournisseur", "Contact", "Adresse", "NIF", "STAT", "CIF", "Dette en cours")
         self.tree = ttk.Treeview(self, columns=columns, show="headings")
         self.tree.tag_configure("even", background="#FFFFFF", foreground="#000000")
@@ -188,8 +182,7 @@ class PageFournisseur(ctk.CTkFrame):
                 WHERE deleted = 0
             """)
             fournisseurs = self.cursor.fetchall()
-            
-            # Charger les dettes pour chaque fournisseur
+
             fournisseurs_avec_dettes = []
             for frs in fournisseurs:
                 try:
@@ -197,21 +190,18 @@ class PageFournisseur(ctk.CTkFrame):
                 except Exception:
                     dette_restante = 0
                 fournisseurs_avec_dettes.append((frs, dette_restante))
-            
-            # Trier par dette en cours (DESC par défaut)
+
             fournisseurs_avec_dettes.sort(key=lambda x: x[1], reverse=True)
             self.all_frs_data = fournisseurs_avec_dettes
-            
-            # Afficher les fournisseurs avec les dettes triées
+
             self.display_fournisseurs(fournisseurs_avec_dettes)
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
 
     def display_fournisseurs(self, fournisseurs_avec_dettes):
-        """Affiche les fournisseurs dans le treeview avec les tags alternés."""
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
+
         for idx, (frs, dette_restante) in enumerate(fournisseurs_avec_dettes):
             tag = "even" if idx % 2 == 0 else "odd"
             dette_str = self._formater_nombre(dette_restante)
@@ -220,42 +210,28 @@ class PageFournisseur(ctk.CTkFrame):
             ), tags=(tag,))
 
     def sort_by_column(self, column):
-        """Trie le treeview par la colonne cliquée. Active le tri bi-direction."""
-        # Déterminer le sens du tri
         if self.sort_column == column:
-            # Si on clique sur la même colonne, inverser le sens
             self.sort_ascending = not self.sort_ascending
         else:
-            # Si on clique sur une nouvelle colonne, commencer en ascendant
             self.sort_column = column
             self.sort_ascending = True
-        
-        # Réindexer les données
+
         if not self.all_frs_data:
             return
-        
-        # Index des colonnes
+
         col_index = {
-            "Nom du Fournisseur": 1,
-            "Contact": 2,
-            "Adresse": 3,
-            "NIF": 4,
-            "STAT": 5,
-            "CIF": 6,
-            "Dette en cours": "dette"  # Special case
+            "Nom du Fournisseur": 1, "Contact": 2, "Adresse": 3,
+            "NIF": 4, "STAT": 5, "CIF": 6, "Dette en cours": "dette"
         }
-        
+
         if column == "Dette en cours":
-            # Trier par montant de dette (numérique)
             sorted_data = sorted(self.all_frs_data, key=lambda x: x[1], reverse=not self.sort_ascending)
         else:
-            # Trier par colonne texte
             idx = col_index.get(column, 1)
-            sorted_data = sorted(self.all_frs_data, 
-                               key=lambda x: str(x[0][idx] or "").lower(),
-                               reverse=not self.sort_ascending)
-        
-        # Afficher les données triées
+            sorted_data = sorted(self.all_frs_data,
+                                 key=lambda x: str(x[0][idx] or "").lower(),
+                                 reverse=not self.sort_ascending)
+
         self.display_fournisseurs(sorted_data)
 
     def add_fournisseur(self):
@@ -339,28 +315,16 @@ class PageFournisseur(ctk.CTkFrame):
 
     def filter_fournisseurs(self, event=None):
         search_query = self.search_entry.get().lower().strip()
-
-        # Filtrer dynamiquement sur toutes les infos de la ligne (id, nom, contact,
-        # adresse, NIF, STAT, CIF, dette brute et dette formatée affichée).
         filtered_data = []
         for frs, dette_restante in self.all_frs_data:
             searchable_parts = [
-                str(frs[0] or ""),  # idfrs
-                str(frs[1] or ""),  # nomfrs
-                str(frs[2] or ""),  # contactfrs
-                str(frs[3] or ""),  # adressefrs
-                str(frs[4] or ""),  # niffrs
-                str(frs[5] or ""),  # statfrs
-                str(frs[6] or ""),  # ciffrs
-                str(dette_restante or 0),  # valeur numérique brute
-                self._formater_nombre(dette_restante),  # valeur affichée dans le tableau
+                str(frs[0] or ""), str(frs[1] or ""), str(frs[2] or ""),
+                str(frs[3] or ""), str(frs[4] or ""), str(frs[5] or ""),
+                str(frs[6] or ""), str(dette_restante or 0),
+                self._formater_nombre(dette_restante),
             ]
-            searchable_text = " ".join(searchable_parts).lower()
-
-            if not search_query or search_query in searchable_text:
+            if not search_query or search_query in " ".join(searchable_parts).lower():
                 filtered_data.append((frs, dette_restante))
-
-        # Afficher les résultats filtrés
         self.display_fournisseurs(filtered_data)
 
     # ──────────────────────────────────────────────────────────────────
@@ -374,7 +338,6 @@ class PageFournisseur(ctk.CTkFrame):
         self.open_frs_dette_details(selected[0])
 
     def open_frs_dette_details(self, idfrs):
-        """Ouvre la fenêtre de détails des dettes pour un fournisseur."""
         try:
             self.cursor.execute("""
                 SELECT idfrs, nomfrs, contactfrs, adressefrs, niffrs, statfrs, ciffrs
@@ -414,7 +377,6 @@ class PageFournisseur(ctk.CTkFrame):
         detail_window.grid_columnconfigure(1, weight=1)
         detail_window.grid_rowconfigure(0, weight=1)
 
-        # ── SIDEBAR GAUCHE ──
         sidebar_frame = ctk.CTkFrame(detail_window, fg_color="#fff8f0")
         sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         sidebar_frame.grid_rowconfigure(2, weight=1)
@@ -470,14 +432,12 @@ class PageFournisseur(ctk.CTkFrame):
         )
         btn_ajouter_dette.pack(padx=10, pady=10, fill="x")
 
-        # ── CONTENU DROIT ──
         right_frame = ctk.CTkFrame(detail_window)
         right_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         right_frame.grid_columnconfigure(0, weight=1)
         right_frame.grid_rowconfigure(0, weight=1)
         right_frame.grid_rowconfigure(1, weight=1)
 
-        # Tableau des dettes
         table_frame = ctk.CTkFrame(right_frame)
         table_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_columnconfigure(0, weight=1)
@@ -532,14 +492,12 @@ class PageFournisseur(ctk.CTkFrame):
             dette_id = values[0]
             type_dette = values[1]
             if type_dette == "Livraison Reçue":
-                # values[2] = Bon de Réception = reflivfrs
                 self._open_livraison_detail_window(values[2], idfrs, detail_window)
             else:
                 self._open_dette_manuelle_detail_window(dette_id, detail_window)
 
         tree_dettes.bind("<Double-1>", on_dette_double_click)
 
-        # Tableau historique des paiements
         payment_frame = ctk.CTkFrame(right_frame)
         payment_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(5, 0))
         payment_frame.grid_columnconfigure(0, weight=1)
@@ -613,16 +571,13 @@ class PageFournisseur(ctk.CTkFrame):
     def _fetch_frs_dettes(self, idfrs):
         """
         Retourne la liste unifiée des dettes d'un fournisseur :
-          1. Livraisons reçues : groupées par reflivfrs depuis tb_livraisonfrs,
-             en passant par tb_commandedetail.idfrs pour s'assurer que ces
-             livraisons appartiennent bien au fournisseur demandé.
+          1. Livraisons reçues avec a_payer = 1 uniquement : seules ces livraisons
+             constituent une dette envers le fournisseur.
           2. Dettes manuelles : depuis tb_autredette.
-        Format de chaque ligne :
-          (id_ou_ref, type, ref, date, montant, dateecheance, bon_reception, num_facture)
+
+        Les livraisons avec a_payer = 0 (fournisseur non à payer) sont exclues.
         """
-        # ── 1. Dettes issues des livraisons reçues ──────────────────────
-        # reflivfrs  = bon de réception
-        # factfrs    = n° facture enregistré par le fournisseur
+        # ── 1. Dettes issues des livraisons reçues (a_payer = 1 uniquement) ──
         self.cursor.execute("""
             SELECT
                 lf.reflivfrs                                    AS id_ref,
@@ -639,12 +594,13 @@ class PageFournisseur(ctk.CTkFrame):
                AND cd.idarticle = lf.idarticle
             WHERE cd.idfrs = %s
               AND lf.deleted = 0
+              AND lf.a_payer = 1
             GROUP BY lf.reflivfrs
             ORDER BY MIN(lf.dateregistre) DESC
         """, (idfrs,))
         dettes_livraison = self.cursor.fetchall()
 
-        # ── 2. Dettes manuelles ─────────────────────────────────────────
+        # ── 2. Dettes manuelles (inchangées) ─────────────────────────────────
         self._ensure_autredette_table()
         self.cursor.execute("""
             SELECT id, 'Dette Manuelle' AS type, numfact, dateregistre, montant, dateecheance,
@@ -660,7 +616,6 @@ class PageFournisseur(ctk.CTkFrame):
         return toutes_dettes
 
     def _ensure_autredette_table(self):
-        """Crée la table tb_autredette si elle n'existe pas (équivalent tb_autrecreance côté client)."""
         try:
             self.cursor.execute("""
                 CREATE TABLE IF NOT EXISTS tb_autredette (
@@ -680,10 +635,6 @@ class PageFournisseur(ctk.CTkFrame):
                 pass
 
     def _compute_dette_status_fifo(self, idfrs):
-        """
-        Calcule les statuts des dettes avec paiement global FIFO :
-        répartition du total payé du plus ancien vers le plus récent.
-        """
         toutes_dettes_desc = self._fetch_frs_dettes(idfrs)
 
         self.cursor.execute("""
@@ -726,7 +677,6 @@ class PageFournisseur(ctk.CTkFrame):
         return toutes_dettes_desc, total_initial, total_paye_global, total_restant, status_map
 
     def _render_dette_table(self, tree_dettes, idfrs, label_montant_restant=None):
-        """Rafraîchit le tableau récapitulatif des dettes avec la logique FIFO globale."""
         for item in tree_dettes.get_children():
             tree_dettes.delete(item)
 
@@ -740,10 +690,7 @@ class PageFournisseur(ctk.CTkFrame):
                 key, (0.0, float(montant_initial or 0), "✗ Impayé", "impaye"))
 
             tree_dettes.insert('', 'end', iid=key, values=(
-                dette_id,
-                type_dette,
-                bon_rec or "",
-                num_fact or "",
+                dette_id, type_dette, bon_rec or "", num_fact or "",
                 date_dette.strftime("%d/%m/%Y %H:%M") if date_dette else "N/A",
                 f"{float(montant_initial or 0):,.2f}",
                 f"{montant_paye_ligne:,.2f}",
@@ -756,11 +703,8 @@ class PageFournisseur(ctk.CTkFrame):
 
         return total_initial, total_paye_global, total_restant
 
-
     def _open_livraison_detail_window(self, reflivfrs, idfrs, parent_window):
-        """Affiche les détails des livraisons regroupées sous un bon de réception fournisseur."""
         try:
-            # Infos générales du bon de réception (via la 1ère ligne correspondante)
             self.cursor.execute("""
                 SELECT
                     lf.reflivfrs,
@@ -775,7 +719,7 @@ class PageFournisseur(ctk.CTkFrame):
                 JOIN tb_commande c ON c.idcom = lf.idcom
                 LEFT JOIN tb_users u ON lf.iduser = u.iduser
                 LEFT JOIN tb_magasin m ON lf.idmag = m.idmag
-                WHERE lf.reflivfrs = %s AND cd.idfrs = %s AND lf.deleted = 0
+                WHERE lf.reflivfrs = %s AND cd.idfrs = %s AND lf.deleted = 0 AND lf.a_payer = 1
                 GROUP BY lf.reflivfrs, c.refcom
                 LIMIT 1
             """, (reflivfrs, idfrs))
@@ -785,7 +729,6 @@ class PageFournisseur(ctk.CTkFrame):
                 return
             ref, date_liv, num_fact, date_ech, operateur, magasin, refcom = entete
 
-            # Détail des articles livrés
             self.cursor.execute("""
                 SELECT
                     a.designation,
@@ -797,7 +740,7 @@ class PageFournisseur(ctk.CTkFrame):
                 JOIN tb_commandedetail cd ON cd.idcom = lf.idcom AND cd.idarticle = lf.idarticle
                 LEFT JOIN tb_article a ON a.idarticle = lf.idarticle
                 LEFT JOIN tb_unite u ON u.idunite = lf.idunite
-                WHERE lf.reflivfrs = %s AND cd.idfrs = %s AND lf.deleted = 0
+                WHERE lf.reflivfrs = %s AND cd.idfrs = %s AND lf.deleted = 0 AND lf.a_payer = 1
             """, (reflivfrs, idfrs))
             details = self.cursor.fetchall()
 
@@ -811,7 +754,6 @@ class PageFournisseur(ctk.CTkFrame):
             messagebox.showerror("Erreur", f"Erreur chargement livraison : {err}")
             return
 
-        # --- Fenêtre ---
         win = ctk.CTkToplevel(parent_window)
         win.title(f"Détails Livraison — {reflivfrs}")
         parent_window.update_idletasks()
@@ -826,7 +768,6 @@ class PageFournisseur(ctk.CTkFrame):
         win.grid_columnconfigure(0, weight=1)
         win.grid_rowconfigure(1, weight=1)
 
-        # --- Panel infos entête ---
         info_frame = ctk.CTkFrame(win, fg_color="#fff8f0")
         info_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
 
@@ -843,7 +784,6 @@ class PageFournisseur(ctk.CTkFrame):
             ("Magasin :", magasin),
             ("Opérateur :", operateur),
         ]
-        # Affichage sur 2 lignes (4 infos + 3 infos)
         row1_infos = infos[:4]
         row2_infos = infos[4:]
         for col_idx, (label, value) in enumerate(row1_infos):
@@ -861,7 +801,6 @@ class PageFournisseur(ctk.CTkFrame):
                          font=ctk.CTkFont(size=10), text_color="#2c3e50"
                          ).grid(row=2, column=col_idx * 2 + 1, sticky="w", padx=(0, 14), pady=(0, 8))
 
-        # --- Tableau des articles ---
         detail_frame = ctk.CTkFrame(win)
         detail_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(4, 4))
         detail_frame.grid_columnconfigure(0, weight=1)
@@ -880,8 +819,7 @@ class PageFournisseur(ctk.CTkFrame):
         col_anchor = {"Quantité": "e", "Prix Unitaire": "e", "Montant": "e"}
         for col in cols:
             tree_detail.heading(col, text=col)
-            tree_detail.column(col, width=col_widths.get(col, 100),
-                               anchor=col_anchor.get(col, "w"))
+            tree_detail.column(col, width=col_widths.get(col, 100), anchor=col_anchor.get(col, "w"))
 
         sb = ttk.Scrollbar(detail_frame, command=tree_detail.yview)
         tree_detail.configure(yscrollcommand=sb.set)
@@ -892,14 +830,10 @@ class PageFournisseur(ctk.CTkFrame):
             designation, unite, qte, pu, montant_ligne = d
             tag = "even" if idx % 2 == 0 else "odd"
             tree_detail.insert("", "end", tags=(tag,), values=(
-                designation or "-",
-                unite or "-",
-                f"{qte or 0:,.2f}",
-                f"{pu or 0:,.2f}",
-                f"{montant_ligne or 0:,.2f}",
+                designation or "-", unite or "-",
+                f"{qte or 0:,.2f}", f"{pu or 0:,.2f}", f"{montant_ligne or 0:,.2f}",
             ))
 
-        # --- Total ---
         total_frame = ctk.CTkFrame(win, fg_color="#f3e5f5")
         total_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 4))
         ctk.CTkLabel(total_frame, text=f"Montant Total :  {montant_total:,.2f} Ar",
@@ -910,7 +844,6 @@ class PageFournisseur(ctk.CTkFrame):
                       fg_color="#7f8c8d", width=100).grid(row=3, column=0, pady=(0, 10))
 
     def _open_dette_manuelle_detail_window(self, dette_id, parent_window):
-        """Affiche les informations d'une dette manuelle fournisseur (tb_autredette)."""
         try:
             self.cursor.execute("""
                 SELECT ad.id, ad.numfact, ad.dateregistre, ad.montant, ad.dateecheance,
@@ -937,8 +870,7 @@ class PageFournisseur(ctk.CTkFrame):
         parent_window.update_idletasks()
         pw = max(parent_window.winfo_width(), 1)
         ph = max(parent_window.winfo_height(), 1)
-        px = parent_window.winfo_x()
-        py = parent_window.winfo_y()
+        px = parent_window.winfo_x(); py = parent_window.winfo_y()
         ww, wh = 460, 300
         win.geometry(f"{ww}x{wh}+{px + (pw - ww)//2}+{py + (ph - wh)//2}")
         win.resizable(False, False)
@@ -976,7 +908,6 @@ class PageFournisseur(ctk.CTkFrame):
     # ──────────────────────────────────────────────────────────────────
 
     def _open_global_payment_window(self, idfrs, parent_window, tree_dettes, label_montant_restant):
-        """Ouvre une fenêtre pour effectuer un paiement global (décaissement) sur toutes les dettes."""
         payment_window = ctk.CTkToplevel(parent_window)
         payment_window.title("Paiement Global des Dettes Fournisseur")
         parent_window.update_idletasks()
@@ -1032,7 +963,6 @@ class PageFournisseur(ctk.CTkFrame):
                      font=ctk.CTkFont(family="Segoe UI", size=10, slant="italic")).grid(
             row=5, column=0, sticky="ew", padx=8, pady=(0, 8))
 
-        # Mode de paiement
         try:
             self.cursor.execute("SELECT idmode, modedepaiement FROM tb_modepaiement ORDER BY modedepaiement")
             modes = self.cursor.fetchall()
@@ -1072,7 +1002,6 @@ class PageFournisseur(ctk.CTkFrame):
 
                 date_pmt = datetime.now()
                 ref_ticket = f"PMTF-{idfrs}-{date_pmt.strftime('%Y%m%d%H%M%S')}"
-
                 iduser = self._get_connected_user_id()
 
                 self.cursor.execute("""
@@ -1085,13 +1014,10 @@ class PageFournisseur(ctk.CTkFrame):
 
                 messagebox.showinfo("Succès", f"Paiement de {montant_global:,.2f} Ar enregistré avec succès!")
 
-                # Générer PDF
                 societe_data = self._get_societe_info()
                 societe_tuple = (
-                    societe_data.get('name', ''),
-                    societe_data.get('addr', ''),
-                    societe_data.get('ville', ''),
-                    societe_data.get('tel', ''),
+                    societe_data.get('name', ''), societe_data.get('addr', ''),
+                    societe_data.get('ville', ''), societe_data.get('tel', ''),
                 )
                 username = self._get_username_by_id(iduser)
                 articles = [("", "Paiement global dette fournisseur", "", 1,
@@ -1099,17 +1025,10 @@ class PageFournisseur(ctk.CTkFrame):
 
                 result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le PDF de paiement ?")
                 self._generer_ticket_pdf_paiement_dette(
-                    societe=societe_tuple,
-                    username=username,
-                    articles=articles,
-                    montant=float(montant_global),
-                    mode_nom=selected_mode or "Espèces",
-                    refpmt=ref_ticket,
-                    idfrs=idfrs,
-                    frs_nom=frs_nom,
-                    observation=observation_full,
-                    date_paiement=date_pmt,
-                    open_after=result
+                    societe=societe_tuple, username=username, articles=articles,
+                    montant=float(montant_global), mode_nom=selected_mode or "Espèces",
+                    refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
+                    observation=observation_full, date_paiement=date_pmt, open_after=result
                 )
 
                 self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
@@ -1137,7 +1056,6 @@ class PageFournisseur(ctk.CTkFrame):
     # ──────────────────────────────────────────────────────────────────
 
     def _open_add_dette_window(self, idfrs, parent_window):
-        """Ouvre une fenêtre pour ajouter une dette manuelle fournisseur."""
         dette_window = ctk.CTkToplevel(parent_window)
         dette_window.title("Ajouter une Dette Fournisseur")
         parent_window.update_idletasks()
@@ -1188,13 +1106,10 @@ class PageFournisseur(ctk.CTkFrame):
                     messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
                     return
 
-                # Resynchroniser la séquence
                 self.cursor.execute("""
                     SELECT setval(
                         pg_get_serial_sequence('tb_autredette', 'id'),
-                        COALESCE((SELECT MAX(id) FROM tb_autredette), 0) + 1,
-                        false
-                    )
+                        COALESCE((SELECT MAX(id) FROM tb_autredette), 0) + 1, false)
                 """)
                 self.cursor.execute("""
                     INSERT INTO tb_autredette (idfrs, dateregistre, numfact, montant)
@@ -1204,27 +1119,18 @@ class PageFournisseur(ctk.CTkFrame):
 
                 messagebox.showinfo("Succès", f"Dette de {montant:,.2f} Ar enregistrée avec succès!")
 
-                # Générer ticket PDF
                 username = self._get_username_by_id(self._get_connected_user_id())
                 societe_data = self._get_societe_info()
                 societe_tuple = (
-                    societe_data.get('name', ''),
-                    societe_data.get('addr', ''),
-                    societe_data.get('ville', ''),
-                    societe_data.get('tel', ''),
+                    societe_data.get('name', ''), societe_data.get('addr', ''),
+                    societe_data.get('ville', ''), societe_data.get('tel', ''),
                 )
                 articles = [("", "Dette manuelle fournisseur", "", 1, float(montant), float(montant))]
                 result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le ticket PDF de dette ?")
                 self._generer_ticket_pdf_dette(
-                    societe=societe_tuple,
-                    username=username,
-                    articles=articles,
-                    montant=float(montant),
-                    mode_nom="Dette",
-                    refpmt=num_fact,
-                    frs_nom=self._get_frs_name(idfrs),
-                    montant_total=float(montant),
-                    open_after=result
+                    societe=societe_tuple, username=username, articles=articles,
+                    montant=float(montant), mode_nom="Dette", refpmt=num_fact,
+                    frs_nom=self._get_frs_name(idfrs), montant_total=float(montant), open_after=result
                 )
 
                 dette_window.destroy()
@@ -1246,325 +1152,218 @@ class PageFournisseur(ctk.CTkFrame):
                       fg_color="#e74c3c").pack(side="left", padx=5)
 
     # ──────────────────────────────────────────────────────────────────
-    # GÉNÉRATION PDF — PAIEMENT DETTE FOURNISSEUR (A5 paysage)
+    # GÉNÉRATION PDF — inchangée
     # ──────────────────────────────────────────────────────────────────
 
     def _generer_ticket_pdf_paiement_dette(self, societe, username, articles, montant,
                                            mode_nom, refpmt, idfrs, frs_nom,
                                            observation, date_paiement, open_after=False):
-        """Génère un document A5 paysage pour validation de paiement de dette fournisseur."""
         try:
-            frs_adresse = "-"
-            frs_contact = "-"
+            frs_adresse = "-"; frs_contact = "-"
             try:
                 self.cursor.execute(
                     "SELECT adressefrs, contactfrs FROM tb_fournisseur WHERE idfrs = %s", (idfrs,))
                 row = self.cursor.fetchone()
-                if row:
-                    frs_adresse = row[0] or "-"
-                    frs_contact = row[1] or "-"
+                if row: frs_adresse = row[0] or "-"; frs_contact = row[1] or "-"
             except Exception:
-                try:
-                    self.conn.rollback()
-                except Exception:
-                    pass
+                try: self.conn.rollback()
+                except: pass
 
             temp_dir = tempfile.gettempdir()
-            path = os.path.join(
-                temp_dir,
-                f"Paiement_Dette_Frs_{refpmt}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            )
+            path = os.path.join(temp_dir,
+                f"Paiement_Dette_Frs_{refpmt}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
 
             page_width, _ = landscape(A5)
             margin = 5 * mm
             usable_width = page_width - 2 * margin
 
-            doc = SimpleDocTemplate(
-                path,
-                pagesize=landscape(A5),
-                rightMargin=margin, leftMargin=margin,
-                topMargin=margin, bottomMargin=margin,
-            )
-
+            doc = SimpleDocTemplate(path, pagesize=landscape(A5),
+                                    rightMargin=margin, leftMargin=margin,
+                                    topMargin=margin, bottomMargin=margin)
             elements = []
             styles = getSampleStyleSheet()
-            color_header = colors.HexColor("#7d3c98")  # violet pour fournisseur
+            color_header = colors.HexColor("#7d3c98")
 
             verse_title = Paragraph(
                 "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
                 ParagraphStyle("VerseFrs", parent=styles["Normal"], fontSize=10,
                                textColor=colors.black, alignment=TA_CENTER,
-                               fontName="Helvetica-Bold", spaceAfter=3),
-            )
+                               fontName="Helvetica-Bold", spaceAfter=3))
             verse_table = Table([[verse_title]], colWidths=[usable_width])
             verse_table.setStyle(TableStyle([
-                ("BOX", (0, 0), (-1, -1), 1, colors.black),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ]))
+                ("BOX",(0,0),(-1,-1),1,colors.black), ("ALIGN",(0,0),(-1,-1),"CENTER"),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("TOPPADDING",(0,0),(-1,-1),0),
+                ("BOTTOMPADDING",(0,0),(-1,-1),3)]))
             elements.append(verse_table)
 
             company_width = usable_width * 0.33
-            right_width = usable_width * 0.67 - 2 * mm
-            title_width = right_width * 0.55
-            info_width = right_width * 0.45
+            right_width   = usable_width * 0.67 - 2 * mm
+            title_width   = right_width * 0.55
+            info_width    = right_width * 0.45
             header_height = 28 * mm
 
-            nom_soc = societe[0] if societe else "IJEERY"
-            adr_soc = societe[1] if societe and len(societe) > 1 else ""
-            ville_soc = societe[2] if societe and len(societe) > 2 else ""
+            nom_soc  = societe[0] if societe else "IJEERY"
+            adr_soc  = societe[1] if societe and len(societe) > 1 else ""
+            ville_soc= societe[2] if societe and len(societe) > 2 else ""
             contact_soc = societe[3] if societe and len(societe) > 3 else ""
 
             company_details = Paragraph(
-                f"<b>{nom_soc}</b><br/>"
-                f"Adresse : {adr_soc}<br/>"
-                f"Ville : {ville_soc}<br/>"
-                f"Contact : {contact_soc}<br/>",
-                ParagraphStyle("CompanyFrs", parent=styles["Normal"], fontSize=9,
-                               alignment=TA_LEFT, leading=12),
-            )
-            company_table = Table([[company_details]], colWidths=[company_width - 2 * mm],
-                                   rowHeights=[header_height])
+                f"<b>{nom_soc}</b><br/>Adresse : {adr_soc}<br/>Ville : {ville_soc}<br/>Contact : {contact_soc}<br/>",
+                ParagraphStyle("CompanyFrs", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=12))
+            company_table = Table([[company_details]], colWidths=[company_width - 2*mm], rowHeights=[header_height])
             company_table.setStyle(TableStyle([
-                ("BOX", (0, 0), (-1, -1), 1, colors.black),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ]))
+                ("BOX",(0,0),(-1,-1),1,colors.black), ("VALIGN",(0,0),(-1,-1),"TOP"),
+                ("TOPPADDING",(0,0),(-1,-1),6), ("BOTTOMPADDING",(0,0),(-1,-1),6),
+                ("LEFTPADDING",(0,0),(-1,-1),6), ("RIGHTPADDING",(0,0),(-1,-1),6)]))
 
-            operation_title = Paragraph(
-                "PAIEMENT DE DETTE FOURNISSEUR",
+            operation_title = Paragraph("PAIEMENT DE DETTE FOURNISSEUR",
                 ParagraphStyle("OpFrsTitle", parent=styles["Normal"], fontSize=12,
-                               fontName="Helvetica-Bold", alignment=TA_CENTER,
-                               textColor=color_header),
-            )
+                               fontName="Helvetica-Bold", alignment=TA_CENTER, textColor=color_header))
             operation_info = Paragraph(
                 f"<b>Reference :</b> {refpmt}<br/>"
                 f"<b>Date et heure :</b> {date_paiement.strftime('%d/%m/%Y %H:%M')}<br/>"
                 f"<b>Mode de paiement :</b> {mode_nom}<br/>"
                 f"<b>Operateur :</b> {username}",
-                ParagraphStyle("OpFrsInfo", parent=styles["Normal"], fontSize=9,
-                               alignment=TA_LEFT, leading=12),
-            )
+                ParagraphStyle("OpFrsInfo", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=12))
             operation_table = Table([[operation_title, operation_info]],
-                                     colWidths=[title_width, info_width],
-                                     rowHeights=[header_height])
+                                     colWidths=[title_width, info_width], rowHeights=[header_height])
             operation_table.setStyle(TableStyle([
-                ("BOX", (0, 0), (-1, -1), 1, colors.black),
-                ("ALIGN", (0, 0), (0, 0), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ]))
+                ("BOX",(0,0),(-1,-1),1,colors.black), ("ALIGN",(0,0),(0,0),"CENTER"),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"), ("TOPPADDING",(0,0),(-1,-1),6),
+                ("BOTTOMPADDING",(0,0),(-1,-1),6), ("LEFTPADDING",(0,0),(-1,-1),6),
+                ("RIGHTPADDING",(0,0),(-1,-1),6)]))
 
-            header_table = Table([[company_table, operation_table]],
-                                  colWidths=[company_width, right_width])
+            header_table = Table([[company_table, operation_table]], colWidths=[company_width, right_width])
             header_table.setStyle(TableStyle([
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (0, 0), 8),
-                ("LEFTPADDING", (1, 0), (1, 0), 8),
-            ]))
+                ("VALIGN",(0,0),(-1,-1),"TOP"), ("TOPPADDING",(0,0),(-1,-1),4),
+                ("BOTTOMPADDING",(0,0),(-1,-1),4), ("RIGHTPADDING",(0,0),(0,0),8),
+                ("LEFTPADDING",(1,0),(1,0),8)]))
             elements.append(header_table)
-            elements.append(Spacer(1, 3 * mm))
+            elements.append(Spacer(1, 3*mm))
 
-            elements.append(Paragraph(
-                "<b><u>Infos Paiement Dette Fournisseur</u></b><br/>",
+            elements.append(Paragraph("<b><u>Infos Paiement Dette Fournisseur</u></b><br/>",
                 ParagraphStyle("InfoDetteLine", parent=styles["Normal"], fontSize=9,
-                               alignment=TA_CENTER, leading=11),
-            ))
-            elements.append(Spacer(1, 2 * mm))
-
-            columns_table = ["Reference", "Nom Fournisseur", "Montant"]
-            row_data = [[refpmt, frs_nom, self._formater_nombre(montant) + " Ar"]]
+                               alignment=TA_CENTER, leading=11)))
+            elements.append(Spacer(1, 2*mm))
 
             try:
                 _, _, _, total_restant, _ = self._compute_dette_status_fifo(idfrs)
-            except Exception:
-                total_restant = 0
-
-            footer_row = ["Reste de Dette", "", self._formater_nombre(total_restant) + " Ar"]
+            except: total_restant = 0
 
             table_width = usable_width * 0.95
-            col_widths_t = [table_width * 0.25, table_width * 0.43, table_width * 0.32]
-            table_data = [columns_table] + row_data + [footer_row]
-
-            dette_table = Table(table_data, colWidths=col_widths_t, repeatRows=1)
+            col_widths_t = [table_width*0.25, table_width*0.43, table_width*0.32]
+            table_data = [["Reference","Nom Fournisseur","Montant"],
+                          [refpmt, frs_nom, self._formater_nombre(montant) + " Ar"],
+                          ["Reste de Dette", "", self._formater_nombre(total_restant) + " Ar"]]
             last_row = len(table_data) - 1
-            style_list = [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F3E5F5")),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 12),
-                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                ("ALIGN", (0, 1), (1, -2), "LEFT"),
-                ("ALIGN", (2, 1), (2, -2), "CENTER"),
-                ("FONTSIZE", (0, 1), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 1, colors.black),
-                ("LINEBEFORE", (1, 0), (1, -1), 1, color_header),
-                ("LINEBEFORE", (2, 0), (2, -1), 1, color_header),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("SPAN", (0, last_row), (1, last_row)),
-                ("ALIGN", (0, last_row), (1, last_row), "RIGHT"),
-                ("ALIGN", (2, last_row), (2, last_row), "CENTER"),
-                ("FONTNAME", (0, last_row), (2, last_row), "Helvetica-Bold"),
-                ("FONTSIZE", (0, last_row), (2, last_row), 10),
-                ("BACKGROUND", (0, last_row), (2, last_row), colors.HexColor("#F5F5F5")),
-                ("LINEABOVE", (0, last_row), (2, last_row), 1, color_header),
-            ]
-            dette_table.setStyle(TableStyle(style_list))
+            dette_table = Table(table_data, colWidths=col_widths_t, repeatRows=1)
+            dette_table.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#F3E5F5")),
+                ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"), ("FONTSIZE",(0,0),(-1,0),12),
+                ("ALIGN",(0,0),(-1,0),"CENTER"), ("ALIGN",(0,1),(1,-2),"LEFT"),
+                ("ALIGN",(2,1),(2,-2),"CENTER"), ("FONTSIZE",(0,1),(-1,-1),8),
+                ("BOX",(0,0),(-1,-1),1,colors.black), ("LINEBEFORE",(1,0),(1,-1),1,color_header),
+                ("LINEBEFORE",(2,0),(2,-1),1,color_header), ("TOPPADDING",(0,0),(-1,-1),4),
+                ("BOTTOMPADDING",(0,0),(-1,-1),4), ("SPAN",(0,last_row),(1,last_row)),
+                ("ALIGN",(0,last_row),(1,last_row),"RIGHT"), ("ALIGN",(2,last_row),(2,last_row),"CENTER"),
+                ("FONTNAME",(0,last_row),(2,last_row),"Helvetica-Bold"),
+                ("FONTSIZE",(0,last_row),(2,last_row),10),
+                ("BACKGROUND",(0,last_row),(2,last_row),colors.HexColor("#F5F5F5")),
+                ("LINEABOVE",(0,last_row),(2,last_row),1,color_header)]))
             elements.append(dette_table)
-            elements.append(Spacer(1, 3 * mm))
-
-            elements.append(Paragraph(
-                f"<br/>&nbsp;&nbsp;&nbsp;<b><u>Description :</u></b> {observation}",
-                ParagraphStyle("DescFrs", parent=styles["Normal"], fontSize=9,
-                               alignment=TA_LEFT, leading=11),
-            ))
-            elements.append(Spacer(1, 1.5 * mm))
-
+            elements.append(Spacer(1, 3*mm))
+            elements.append(Paragraph(f"<br/>&nbsp;&nbsp;&nbsp;<b><u>Description :</u></b> {observation}",
+                ParagraphStyle("DescFrs", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=11)))
+            elements.append(Spacer(1, 1.5*mm))
             elements.append(Paragraph(
                 f"<br/>&nbsp;&nbsp;&nbsp;<b><u>Coordonnées fournisseur :</u></b> {frs_adresse} ; Tel : {frs_contact}",
-                ParagraphStyle("CoordFrs", parent=styles["Normal"], fontSize=9,
-                               alignment=TA_LEFT, leading=11),
-            ))
-            elements.append(Spacer(1, 1.5 * mm))
+                ParagraphStyle("CoordFrs", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=11)))
+            elements.append(Spacer(1, 1.5*mm))
 
-            sig_left = Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;<u>Le Responsable</u>",
-                                  ParagraphStyle("SigRespoFrs", parent=styles["Normal"],
-                                                 fontSize=9, alignment=TA_LEFT))
+            sig_left  = Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;<u>Le Responsable</u>",
+                ParagraphStyle("SigRespoFrs", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT))
             sig_right = Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;<u>Le Fournisseur</u>",
-                                   ParagraphStyle("SigFrs", parent=styles["Normal"],
-                                                  fontSize=9, alignment=TA_LEFT))
-            sig_table = Table([[sig_left, "", sig_right]],
-                               colWidths=[usable_width * 0.35, usable_width * 0.30, usable_width * 0.35])
+                ParagraphStyle("SigFrs", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT))
+            sig_table = Table([[sig_left,"",sig_right]],
+                colWidths=[usable_width*0.35, usable_width*0.30, usable_width*0.35])
             sig_table.setStyle(TableStyle([
-                ("TOPPADDING", (0, 0), (-1, -1), 10),
-                ("ALIGN", (0, 0), (0, 0), "LEFT"),
-                ("ALIGN", (2, 0), (2, 0), "RIGHT"),
-            ]))
+                ("TOPPADDING",(0,0),(-1,-1),10), ("ALIGN",(0,0),(0,0),"LEFT"),
+                ("ALIGN",(2,0),(2,0),"RIGHT")]))
             elements.append(sig_table)
-
             doc.build(elements)
 
             if open_after:
-                if os.name == 'nt':
-                    os.startfile(path)
-                else:
-                    subprocess.Popen(['xdg-open', path])
+                if os.name == 'nt': os.startfile(path)
+                else: subprocess.Popen(['xdg-open', path])
             return path
 
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération PDF paiement dette: {e}")
             return None
 
-    # ──────────────────────────────────────────────────────────────────
-    # GÉNÉRATION PDF — ENREGISTREMENT DETTE (ticket 80mm)
-    # ──────────────────────────────────────────────────────────────────
-
     def _generer_ticket_pdf_dette(self, societe, username, articles, montant,
                                    mode_nom, refpmt, frs_nom, montant_total, open_after=False):
-        """Génère un ticket PDF (80mm) pour validation d'ajout de dette fournisseur."""
         try:
             fd, path = tempfile.mkstemp(prefix='ticket_dette_frs_', suffix='.pdf')
             os.close(fd)
-
             total_height = (160 + (len(articles) * 10)) * mm
-            c = canvas.Canvas(path, pagesize=(80 * mm, total_height))
-            y = total_height - 10 * mm
+            c = canvas.Canvas(path, pagesize=(80*mm, total_height))
+            y = total_height - 10*mm
 
             if societe:
                 c.setFont("Helvetica-Bold", 11)
-                c.drawCentredString(40 * mm, y, str(societe[0]).upper())
-                y -= 5 * mm
+                c.drawCentredString(40*mm, y, str(societe[0]).upper()); y -= 5*mm
                 c.setFont("Helvetica", 8)
-                c.drawCentredString(40 * mm, y, f"{societe[1] or ''}")
-                y -= 4 * mm
-                c.drawCentredString(40 * mm, y, f"{societe[2] or ''}")
-                y -= 4 * mm
-                c.drawCentredString(40 * mm, y, f"Tel: {societe[3] or ''}")
-                y -= 2 * mm
+                c.drawCentredString(40*mm, y, f"{societe[1] or ''}"); y -= 4*mm
+                c.drawCentredString(40*mm, y, f"{societe[2] or ''}"); y -= 4*mm
+                c.drawCentredString(40*mm, y, f"Tel: {societe[3] or ''}"); y -= 2*mm
             else:
                 c.setFont("Helvetica-Bold", 10)
-                c.drawCentredString(40 * mm, y, "MA SOCIETE")
-                y -= 4 * mm
+                c.drawCentredString(40*mm, y, "MA SOCIETE"); y -= 4*mm
 
-            y -= 4 * mm
-            c.line(5 * mm, y, 75 * mm, y)
-            y -= 6 * mm
-
+            y -= 4*mm; c.line(5*mm, y, 75*mm, y); y -= 6*mm
             c.setFont("Helvetica-Bold", 9)
-            c.drawCentredString(40 * mm, y, "ENREGISTREMENT DETTE FRS")
-            y -= 6 * mm
-
+            c.drawCentredString(40*mm, y, "ENREGISTREMENT DETTE FRS"); y -= 6*mm
             c.setFont("Helvetica", 8)
-            c.drawString(5 * mm, y, f"Ref: {refpmt}")
-            y -= 4 * mm
-            c.drawString(5 * mm, y, f"Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-            y -= 4 * mm
-            c.drawString(5 * mm, y, f"Fournisseur: {frs_nom}")
+            c.drawString(5*mm, y, f"Ref: {refpmt}"); y -= 4*mm
+            c.drawString(5*mm, y, f"Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}"); y -= 4*mm
+            c.drawString(5*mm, y, f"Fournisseur: {frs_nom}")
 
-            y -= 10 * mm
-            c.setFont("Helvetica-Bold", 7)
-            c.drawString(5 * mm, y, "Designation")
-            c.drawRightString(48 * mm, y, "Qte")
-            c.drawRightString(62 * mm, y, "P.U")
-            c.drawRightString(77 * mm, y, "Total")
-            y -= 2 * mm
-            c.line(5 * mm, y, 75 * mm, y)
-            y -= 4 * mm
-
+            y -= 10*mm; c.setFont("Helvetica-Bold", 7)
+            c.drawString(5*mm, y, "Designation"); c.drawRightString(48*mm, y, "Qte")
+            c.drawRightString(62*mm, y, "P.U"); c.drawRightString(77*mm, y, "Total")
+            y -= 2*mm; c.line(5*mm, y, 75*mm, y); y -= 4*mm
             c.setFont("Helvetica", 6.5)
             for art in articles:
                 designation = f"{art[1]} ({art[2]})" if art[2] else str(art[1])
-                designation = designation[:25]
-                c.drawString(5 * mm, y, designation)
-                c.drawRightString(48 * mm, y, str(art[3]))
-                c.drawRightString(62 * mm, y, f"{art[4]:,.0f}".replace(',', ' '))
-                c.drawRightString(77 * mm, y, f"{art[5]:,.0f}".replace(',', ' '))
-                y -= 8 * mm
+                c.drawString(5*mm, y, designation[:25])
+                c.drawRightString(48*mm, y, str(art[3]))
+                c.drawRightString(62*mm, y, f"{art[4]:,.0f}".replace(',', ' '))
+                c.drawRightString(77*mm, y, f"{art[5]:,.0f}".replace(',', ' ')); y -= 8*mm
 
             c.setFont("Helvetica-Bold", 10)
-            c.drawString(5 * mm, y, "MONTANT DETTE :")
-            c.drawRightString(75 * mm, y, f"{montant:,.2f} Ar".replace(',', ' ').replace('.', ','))
-
-            y -= 8 * mm
+            c.drawString(5*mm, y, "MONTANT DETTE :")
+            c.drawRightString(75*mm, y, f"{montant:,.2f} Ar".replace(',', ' ').replace('.', ','))
+            y -= 8*mm
             if num2words:
                 c.setFont("Helvetica-Oblique", 6)
                 try:
                     lettres = num2words(int(montant), lang='fr').upper()
                     if len(lettres) > 45:
-                        c.drawString(5 * mm, y, f"Arrete a: {lettres[:45]}")
-                        y -= 3 * mm
-                        c.drawString(5 * mm, y, f"{lettres[45:]} ARIARY")
+                        c.drawString(5*mm, y, f"Arrete a: {lettres[:45]}"); y -= 3*mm
+                        c.drawString(5*mm, y, f"{lettres[45:]} ARIARY")
                     else:
-                        c.drawString(5 * mm, y, f"Arrete a: {lettres} ARIARY")
-                except Exception:
-                    pass
+                        c.drawString(5*mm, y, f"Arrete a: {lettres} ARIARY")
+                except: pass
 
-            y -= 10 * mm
-            c.line(5 * mm, y + 2 * mm, 75 * mm, y + 2 * mm)
-            c.setFont("Helvetica", 7)
-            c.drawString(5 * mm, y, f"Mode: {mode_nom}")
-            y -= 5 * mm
-            c.setFont("Helvetica-Bold", 8)
-            c.drawString(5 * mm, y, f"Enregistre par: {username}")
-
-            c.showPage()
-            c.save()
+            y -= 10*mm; c.line(5*mm, y+2*mm, 75*mm, y+2*mm)
+            c.setFont("Helvetica", 7); c.drawString(5*mm, y, f"Mode: {mode_nom}"); y -= 5*mm
+            c.setFont("Helvetica-Bold", 8); c.drawString(5*mm, y, f"Enregistre par: {username}")
+            c.showPage(); c.save()
 
             if open_after:
-                if os.name == 'nt':
-                    os.startfile(path)
-                else:
-                    subprocess.Popen(['xdg-open', path])
+                if os.name == 'nt': os.startfile(path)
+                else: subprocess.Popen(['xdg-open', path])
             return path
 
         except Exception as e:
@@ -1583,8 +1382,7 @@ class PageFournisseur(ctk.CTkFrame):
     def _get_societe_info(self):
         defaults = {'name': 'IJEERY', 'addr': '', 'ville': '', 'tel': '',
                     'nif': '', 'stat': '', 'cif': ''}
-        if not self.conn:
-            return defaults
+        if not self.conn: return defaults
         try:
             self.cursor.execute("""
                 SELECT nomsociete, adressesociete, villesociete, contactsociete,
@@ -1592,43 +1390,33 @@ class PageFournisseur(ctk.CTkFrame):
                 FROM tb_infosociete LIMIT 1
             """)
             societe = self.cursor.fetchone()
-            if not societe:
-                return defaults
+            if not societe: return defaults
             return {
-                'name': societe[0] or defaults['name'],
-                'addr': societe[1] or defaults['addr'],
-                'ville': societe[2] or defaults['ville'],
-                'tel': societe[3] or defaults['tel'],
-                'nif': societe[4] or defaults['nif'],
-                'stat': societe[5] or defaults['stat'],
+                'name': societe[0] or defaults['name'], 'addr': societe[1] or defaults['addr'],
+                'ville': societe[2] or defaults['ville'], 'tel': societe[3] or defaults['tel'],
+                'nif': societe[4] or defaults['nif'], 'stat': societe[5] or defaults['stat'],
                 'cif': societe[6] or defaults['cif']
             }
         except psycopg2.Error:
             try:
                 if self.conn: self.conn.rollback()
-            except Exception:
-                pass
+            except: pass
             return defaults
 
     def _get_username_by_id(self, iduser=1):
-        if iduser is None:
-            iduser = self._get_connected_user_id()
-        if not self.conn:
-            return "Utilisateur"
+        if iduser is None: iduser = self._get_connected_user_id()
+        if not self.conn: return "Utilisateur"
         try:
             self.cursor.execute("SELECT username FROM tb_users WHERE iduser = %s", (iduser,))
             row = self.cursor.fetchone()
             return row[0] if row and row[0] else "Utilisateur"
         except Exception:
-            try:
-                self.conn.rollback()
-            except Exception:
-                pass
+            try: self.conn.rollback()
+            except: pass
             return "Utilisateur"
 
     def _get_connected_user_id(self):
-        if self.id_user_connecte is not None:
-            return self.id_user_connecte
+        if self.id_user_connecte is not None: return self.id_user_connecte
         session_id = self.session_data.get("user_id") or self.session_data.get("iduser")
         if session_id is not None:
             self.id_user_connecte = session_id
@@ -1643,23 +1431,19 @@ class PageFournisseur(ctk.CTkFrame):
         return 1
 
     def _get_frs_name(self, idfrs):
-        if not self.conn:
-            return "FOURNISSEUR"
+        if not self.conn: return "FOURNISSEUR"
         try:
             self.cursor.execute("SELECT nomfrs FROM tb_fournisseur WHERE idfrs = %s", (idfrs,))
             row = self.cursor.fetchone()
             return row[0] if row and row[0] else "FOURNISSEUR"
         except Exception:
-            try:
-                self.conn.rollback()
-            except Exception:
-                pass
+            try: self.conn.rollback()
+            except: pass
             return "FOURNISSEUR"
 
     def __del__(self):
         if hasattr(self, 'conn') and self.conn:
-            if hasattr(self, 'cursor') and self.cursor:
-                self.cursor.close()
+            if hasattr(self, 'cursor') and self.cursor: self.cursor.close()
             self.conn.close()
 
 
