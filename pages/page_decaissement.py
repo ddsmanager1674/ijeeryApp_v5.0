@@ -29,7 +29,7 @@ class PageDecaissement(ctk.CTkToplevel):
         super().__init__(master)
         self.title("Nouveau Décaissement")
         # taille et centrage
-        self.geometry("600x450")
+        self.geometry("500x350")
         self.transient(master)
         self.grab_set()
         self.center_window()
