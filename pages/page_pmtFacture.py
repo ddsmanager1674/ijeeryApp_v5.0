@@ -96,14 +96,17 @@ class PagePmtFacture(ctk.CTkToplevel):
         )
         self.cal_echeance.grid(row=1, column=3, padx=10, pady=10, sticky="w")
 
-        # Ligne 3 : Description crédit
-        ctk.CTkLabel(saisie_frame, text="Description crédit :").grid(row=2, column=0, padx=10, pady=10, sticky="w")
-        self.entry_description_credit = ctk.CTkEntry(saisie_frame, width=420, placeholder_text="Motif / détails du crédit")
+        # Ligne 3 : Description (optionnelle, tous modes)
+        ctk.CTkLabel(saisie_frame, text="Description :").grid(row=2, column=0, padx=10, pady=10, sticky="w")
+        self.entry_description_credit = ctk.CTkEntry(saisie_frame, width=420, placeholder_text="Observation / détails du paiement")
         self.entry_description_credit.grid(row=2, column=1, columnspan=3, padx=10, pady=10, sticky="w")
-        
+
+        # Option description (désactivée par défaut)
+        self.var_use_description = ctk.BooleanVar(value=True)
+       
         # Désactiver par défaut au démarrage
         self._verifier_mode_credit(self.option_mode_pmt.get())
-
+        
         btns_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         btns_frame.pack(fill="x", pady=20)
         # Bouton validateur stocké pour pouvoir le désactiver rapidement
@@ -347,11 +350,10 @@ class PagePmtFacture(ctk.CTkToplevel):
         """Active ou désactive le calendrier selon le mode choisi"""
         if choix.lower() == "crédit":
             self.cal_echeance.configure(state="normal")
-            self.entry_description_credit.configure(state="normal")
         else:
             self.cal_echeance.configure(state="disabled")
-            self.entry_description_credit.delete(0, "end")
-            self.entry_description_credit.configure(state="disabled")
+
+    
 
     def verifier_code_autorisation(self, code_saisi: str) -> bool:
         """
@@ -527,10 +529,22 @@ class PagePmtFacture(ctk.CTkToplevel):
         # Récupération de la date d'échéance si mode Crédit
         date_echeance = None
         description_credit = ""
+        description = ""
+        if self.var_use_description.get():
+            description = (self.entry_description_credit.get() or "").strip()
+
         if nom_mode_pmt.lower() == "crédit":
             date_echeance = self.cal_echeance.get_date() # Objet datetime.date
-            #description_credit = (self.entry_description_credit.get() or "").strip()
             description_credit = f"Acceptation du crédit pour la facture {self.refvente} [CL: {self.client}] - Échéance: {date_echeance.strftime('%d/%m/%Y')}"
+
+        if nom_mode_pmt.lower() == "crédit":
+            observation_pmt = description_credit
+            if description != "":
+                observation_pmt = f"{description_credit} (Obs: {description})"
+        else:
+            observation_pmt = f"PMT {self.refvente} - {self.client}"
+            if description != "":
+                observation_pmt = f"PMT {self.refvente} - {self.client} (Obs: {description})"
 
         conn = self.connect_db()
         if not conn: return
@@ -725,13 +739,15 @@ class PagePmtFacture(ctk.CTkToplevel):
                     refvente, mtpaye, datepmt, idmode, iduser, observation, refpmt, dateecheance, idclient
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
+
+            
             params_pmt = (
                 self.refvente, 
                 montant_saisi, 
                 datetime.now(), 
                 id_mode_selectionne, 
                 self.iduser, 
-                description_credit if nom_mode_pmt.lower() == "crédit" else f"PMT {self.refvente} - {self.client}",
+                observation_pmt,
                 refpmt,
                 date_echeance,
                 idclient
@@ -853,7 +869,10 @@ class PagePmtFacture(ctk.CTkToplevel):
             
             print(f"📋 ClientAPayer_ImpressionTicket = {imprimer_ticket}")
             
-            self._generer_ticket_pdf(info_soc, username, articles_pdf, montant_saisi, nom_mode_pmt, refpmt, date_echeance, imprimer_ticket)
+            self._generer_ticket_pdf(
+                info_soc, username, articles_pdf, montant_saisi, nom_mode_pmt,
+                refpmt, date_echeance, imprimer_ticket, description
+            )
             if nom_mode_pmt.lower() == "crédit":
                 self._generer_etat_credit_pdf(
                     info_soc=info_soc,
@@ -1123,7 +1142,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             print(f"❌ Erreur génération état crédit PDF : {e}")
             traceback.print_exc()
 
-    def _generer_ticket_pdf(self, info_soc, username, articles, montant_paye, mode_paiement, refpmt, date_echeance=None, imprimer_ticket=1):
+    def _generer_ticket_pdf(self, info_soc, username, articles, montant_paye, mode_paiement, refpmt, date_echeance=None, imprimer_ticket=1, description=""):
         """Génère un ticket de paiement PDF au format 80mm"""
         try:
             # Création fichier temporaire
@@ -1245,6 +1264,17 @@ class PagePmtFacture(ctk.CTkToplevel):
             c.setFont("Helvetica", 9)
             c.drawString(5*mm, y, f"Mode de paiement: {mode_paiement}")
             y -= 5*mm
+
+            # --- DESCRIPTION (si renseignée) ---
+            description = (description or "").strip()
+            if description:
+                c.setFont("Helvetica", 8)
+                c.drawString(5*mm, y, "Observation:")
+                y -= 3.5*mm
+                for ligne in self._couper_texte(description, 35):
+                    c.drawString(7*mm, y, ligne)
+                    y -= 3.5*mm
+                y -= 1.5*mm
             
             # --- DATE D'ÉCHÉANCE (si mode crédit) ---
             if mode_paiement.lower() == "crédit" and date_echeance:
