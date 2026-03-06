@@ -233,22 +233,22 @@ class Fonts:
         return cls.get(size, "bold")
 
     @classmethod
-    def label(cls, size: int = 11) -> ctk.CTkFont:
+    def label(cls, size: int = 12) -> ctk.CTkFont:
         """Étiquettes de champs, petits textes."""
         return cls.get(size)
 
     @classmethod
-    def small(cls, size: int = 10) -> ctk.CTkFont:
+    def small(cls, size: int = 12) -> ctk.CTkFont:
         """Texte discret — footers, métadonnées."""
         return cls.get(size)
 
     @classmethod
-    def heading(cls, size: int = 16) -> ctk.CTkFont:
+    def heading(cls, size: int = 15) -> ctk.CTkFont:
         """Titre de section / card header."""
         return cls.get(size, "bold")
 
     @classmethod
-    def title(cls, size: int = 20) -> ctk.CTkFont:
+    def title(cls, size: int = 18) -> ctk.CTkFont:
         """Grand titre de page."""
         return cls.get(size, "bold")
 
@@ -263,17 +263,17 @@ class Fonts:
         return cls.get(size, "bold")
 
     @classmethod
-    def table_header(cls, size: int = 12) -> ctk.CTkFont:
+    def table_header(cls, size: int = 13) -> ctk.CTkFont:
         """En-tête de colonne de tableau."""
         return cls.get(size, "bold")
 
     @classmethod
-    def table_body(cls, size: int = 12) -> ctk.CTkFont:
+    def table_body(cls, size: int = 13) -> ctk.CTkFont:
         """Cellule de tableau."""
         return cls.get(size)
 
     @classmethod
-    def badge(cls, size: int = 10) -> ctk.CTkFont:
+    def badge(cls, size: int = 12) -> ctk.CTkFont:
         """Texte de badge/tag."""
         return cls.get(size, "bold")
 
@@ -283,17 +283,17 @@ class Fonts:
         return cls.get(size, "bold")
 
     @classmethod
-    def input(cls, size: int = 12) -> ctk.CTkFont:
+    def input(cls, size: int = 13) -> ctk.CTkFont:
         """Texte dans les champs de saisie."""
         return cls.get(size)
 
     @classmethod
-    def tooltip(cls, size: int = 10) -> ctk.CTkFont:
+    def tooltip(cls, size: int = 12) -> ctk.CTkFont:
         """Tooltip / aide contextuelle."""
         return cls.get(size, "normal", italic=True)
 
     @classmethod
-    def monospace(cls, size: int = 11) -> ctk.CTkFont:
+    def monospace(cls, size: int = 12) -> ctk.CTkFont:
         """Codes, références, valeurs techniques."""
         return ctk.CTkFont(family="Courier New", size=size)
 
@@ -353,7 +353,7 @@ class styled:
 
     @staticmethod
     def button_primary(parent, text="", command=None, width=140,
-                       height=38, icon="", **kwargs) -> ctk.CTkButton:
+                       height=30, icon="", **kwargs) -> ctk.CTkButton:
         """Bouton d'action principale — bleu Peter River."""
         return ctk.CTkButton(
             parent,
@@ -367,7 +367,7 @@ class styled:
 
     @staticmethod
     def button_success(parent, text="", command=None, width=140,
-                       height=38, icon="", **kwargs) -> ctk.CTkButton:
+                       height=30, icon="", **kwargs) -> ctk.CTkButton:
         """Bouton validation / enregistrement — vert Emerald."""
         return ctk.CTkButton(
             parent,
@@ -381,7 +381,7 @@ class styled:
 
     @staticmethod
     def button_danger(parent, text="", command=None, width=140,
-                      height=38, icon="", **kwargs) -> ctk.CTkButton:
+                      height=30, icon="", **kwargs) -> ctk.CTkButton:
         """Bouton suppression / danger — rouge Alizarin."""
         return ctk.CTkButton(
             parent,
@@ -395,7 +395,7 @@ class styled:
 
     @staticmethod
     def button_warning(parent, text="", command=None, width=140,
-                       height=38, icon="", **kwargs) -> ctk.CTkButton:
+                       height=30, icon="", **kwargs) -> ctk.CTkButton:
         """Bouton avertissement — orange."""
         return ctk.CTkButton(
             parent,
@@ -409,7 +409,7 @@ class styled:
 
     @staticmethod
     def button_secondary(parent, text="", command=None, width=140,
-                         height=38, icon="", **kwargs) -> ctk.CTkButton:
+                         height=30, icon="", **kwargs) -> ctk.CTkButton:
         """Bouton secondaire neutre — fond clair."""
         return ctk.CTkButton(
             parent,
@@ -424,7 +424,7 @@ class styled:
 
     @staticmethod
     def button_info(parent, text="", command=None, width=140,
-                    height=38, icon="", **kwargs) -> ctk.CTkButton:
+                    height=30, icon="", **kwargs) -> ctk.CTkButton:
         """Bouton info / tech — Turquoise."""
         return ctk.CTkButton(
             parent,
@@ -438,7 +438,7 @@ class styled:
 
     @staticmethod
     def button_premium(parent, text="", command=None, width=140,
-                       height=38, icon="", **kwargs) -> ctk.CTkButton:
+                       height=30, icon="", **kwargs) -> ctk.CTkButton:
         """Bouton premium / export — Amethyst."""
         return ctk.CTkButton(
             parent,
@@ -496,7 +496,7 @@ class styled:
     # ── Champs de saisie ─────────────────────────────────────────────────────
 
     @staticmethod
-    def entry(parent, placeholder="", height=38,
+    def entry(parent, placeholder="", height=30,
               show=None, **kwargs) -> ctk.CTkEntry:
         """Champ de saisie standard."""
         kw = dict(
