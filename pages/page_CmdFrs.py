@@ -1462,12 +1462,101 @@ class PageCommandeFrs(ctk.CTkFrame):
                 <td>{escape(designation)}</td>
                 <td class="center">{escape(unite)}</td>
                 <td class="right">{self.formater_nombre(item['qtcmd'])}</td>
-                <td class="right">{self.formater_nombre(item['punitcmd'])}</td>
-                <td class="right">{self.formater_nombre(total)}</td>
+                {"<td class=\"right\">" + self.formater_nombre(item['punitcmd']) + "</td>" if total != 0 or True else ""}
+                {"<td class=\"right\">" + self.formater_nombre(total) + "</td>" if total != 0 or True else ""}
             </tr>"""
             numero += 1
 
+        afficher_montants = montant_total != 0
+        if not afficher_montants:
+            # Reconstruire les lignes sans colonnes prix/montant
+            lignes_html = ""
+            numero = 1
+            for item in self.items_commande:
+                conn2 = self.connect_db()
+                designation, unite = "Article inconnu", "N/A"
+                if conn2:
+                    try:
+                        cur2 = conn2.cursor()
+                        cur2.execute("""
+                            SELECT a.designation, u.designationunite FROM tb_article a
+                            INNER JOIN tb_unite u ON a.idarticle=u.idarticle
+                            WHERE a.idarticle=%s AND u.idunite=%s
+                        """, (item['idarticle'], item['idunite']))
+                        r2 = cur2.fetchone()
+                        if r2:
+                            designation, unite = r2[0], r2[1]
+                        cur2.close()
+                    except:
+                        pass
+                    finally:
+                        conn2.close()
+                lignes_html += f"""
+                <tr>
+                    <td class="center">{numero}</td>
+                    <td>{escape(designation)}</td>
+                    <td class="center">{escape(unite)}</td>
+                    <td class="right">{self.formater_nombre(item['qtcmd'])}</td>
+                </tr>"""
+                numero += 1
+
         total_lettres = self.nombre_en_lettres(montant_total)
+
+        montant_cols_header_html = ""
+        montant_cols_row_html = ""
+        total_row_html = ""
+        montant_lettres_html = ""
+        if afficher_montants:
+            montant_cols_header_html = """
+    <th style="width:120px" class="right">Prix Unitaire</th>
+    <th style="width:120px" class="right">Total</th>"""
+            montant_cols_row_html_template = """
+                <td class="right">{prix}</td>
+                <td class="right">{total}</td>"""
+            # Injection des colonnes montant dans les lignes déjà construites
+            lignes_html = ""
+            numero = 1
+            for item in self.items_commande:
+                total = item['qtcmd'] * item['punitcmd']
+                conn2 = self.connect_db()
+                designation, unite = "Article inconnu", "N/A"
+                if conn2:
+                    try:
+                        cur2 = conn2.cursor()
+                        cur2.execute("""
+                            SELECT a.designation, u.designationunite FROM tb_article a
+                            INNER JOIN tb_unite u ON a.idarticle=u.idarticle
+                            WHERE a.idarticle=%s AND u.idunite=%s
+                        """, (item['idarticle'], item['idunite']))
+                        r2 = cur2.fetchone()
+                        if r2:
+                            designation, unite = r2[0], r2[1]
+                        cur2.close()
+                    except:
+                        pass
+                    finally:
+                        conn2.close()
+                montant_cols_row_html = montant_cols_row_html_template.format(
+                    prix=self.formater_nombre(item['punitcmd']),
+                    total=self.formater_nombre(total)
+                )
+                lignes_html += f"""
+                <tr>
+                    <td class="center">{numero}</td>
+                    <td>{escape(designation)}</td>
+                    <td class="center">{escape(unite)}</td>
+                    <td class="right">{self.formater_nombre(item['qtcmd'])}</td>
+                    {montant_cols_row_html}
+                </tr>"""
+                numero += 1
+
+            total_row_html = f"""
+<tr class="total-row">
+    <td colspan="5" style="text-align:right">MONTANT TOTAL (Ariary)</td>
+    <td class="right">{self.formater_nombre(montant_total)}</td>
+</tr>"""
+            montant_lettres_html = f"""
+<div class="montant-lettres"><strong>En lettres :</strong> {total_lettres}</div>"""
 
         # Bloc transporteur dans le HTML (si présent)
         transporteur_html = ""
@@ -1549,19 +1638,15 @@ table th {{ background:#2C3E50; color:#fff; font-size:9.5pt; text-transform:uppe
     <th>Désignation</th>
     <th style="width:76px" class="center">Unité</th>
     <th style="width:110px" class="right">Quantité</th>
-    <th style="width:120px" class="right">Prix Unitaire</th>
-    <th style="width:120px" class="right">Total</th>
+    {montant_cols_header_html}
 </tr></thead>
 <tbody>
 {lignes_html}
-<tr class="total-row">
-    <td colspan="5" style="text-align:right">MONTANT TOTAL (Ariary)</td>
-    <td class="right">{self.formater_nombre(montant_total)}</td>
-</tr>
+{total_row_html}
 </tbody>
 </table>
 
-<div class="montant-lettres"><strong>En lettres :</strong> {total_lettres}</div>
+{montant_lettres_html}
 
 <div class="signatures">
 <div class="signature-box"><div class="sig-title">Le Responsable</div></div>
