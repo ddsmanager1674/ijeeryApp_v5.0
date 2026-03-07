@@ -1,3 +1,15 @@
+# -*- coding: utf-8 -*-
+"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                  iJeery — page_prixListe.py  (refonte v2)                  ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  • Thème iJeery (app_theme) appliqué — même patron que page_ArticleMouvement║
+║  • Chargement asynchrone (thread) pour ne pas bloquer l'UI                  ║
+║  • Treeview stylisé Mouv.Treeview / en-têtes BG_HEADER                     ║
+║  • Double-clic protégé + fenêtre de progression thémée                     ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
@@ -10,513 +22,499 @@ try:
 except ImportError:
     PagePrixSaisie = None
 
+# ── Thème iJeery ──────────────────────────────────────────────────────────────
+try:
+    from app_theme import Colors, Fonts, styled, Theme
+    _T = True
+except ImportError:
+    _T = False
 
+
+class _C:
+    """Fallback couleurs si app_theme absent."""
+    MIDNIGHT        = "#2C3E50"
+    BG_PAGE         = "#ECF0F1"
+    BG_CARD         = "#FFFFFF"
+    BG_HEADER       = "#2C3E50"
+    BG_INPUT        = "#F4F6F8"
+    BG_ROW_ALT      = "#F0F4F8"
+    PRIMARY         = "#3498DB"
+    PRIMARY_HOVER   = "#2980B9"
+    SUCCESS         = "#2ECC71"
+    SUCCESS_DARK    = "#27AE60"
+    DANGER          = "#E74C3C"
+    DANGER_DARK     = "#C0392B"
+    TEXT_PRIMARY    = "#2C3E50"
+    TEXT_SECONDARY  = "#5D6D7E"
+    TEXT_MUTED      = "#95A5A6"
+    BORDER          = "#D5D8DC"
+    DIVIDER         = "#E8EAED"
+    SILVER          = "#BDC3C7"
+    CLOUDS          = "#ECF0F1"
+    DANGER_TEXT     = "#922B21"
+    WARNING_TEXT    = "#9A6A00"
+
+
+C = Colors if _T else _C
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Page principale
+# ─────────────────────────────────────────────────────────────────────────────
 class PagePrixListe(ctk.CTkFrame):
-    def __init__(self, parent, db_connector=None, initial_idarticle=None, iduser=1):
-        """
-        parent          : conteneur parent (frame)
-        db_connector    : optionnel (non utilisé directement ici, gardé pour compatibilité)
-        initial_idarticle: code article (string ou int). Si fourni, la liste est filtrée sur ce code.
-        iduser          : identifiant utilisateur (utilisé pour PagePrixSaisie)
-        """
-        super().__init__(parent)
+    """
+    Page Liste des Prix articles.
 
-        # Stocker les paramètres
-        self.db_connector = db_connector
-        # On préfère travailler avec le 'code article' : on accepte initial_idarticle comme tel
-        self.code_article = str(initial_idarticle).zfill(10) if initial_idarticle else None
-        self.iduser = iduser
-        
-        # Protection contre les double-clics multiples
-        self.is_opening_window = False
-        
-        # Flag pour indiquer que le widget est en cours de destruction
-        self._destroyed = False
+    Chargement asynchrone :
+    - thread dédié pour la requête SQL
+    - after() pour mettre à jour le treeview dans le thread principal
+    """
 
-        self.configure(fg_color="white")
+    def __init__(self, parent, db_connector=None,
+                 initial_idarticle=None, iduser=1):
+        super().__init__(parent, fg_color=C.BG_PAGE)
 
-        # Mapping item_id -> code_article (brut tel que dans DB)
-        self.code_mapping = {}
-
-        # Grille
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        # Widgets
-        self.create_search_frame()
-        self.create_treeview()
+        self.db_connector  = db_connector
+        self.code_article  = (str(initial_idarticle).zfill(10)
+                              if initial_idarticle else None)
+        self.iduser        = iduser
 
-        # Label compteur
-        self.lbl_count = ctk.CTkLabel(self, text="Nombre d'articles: 0", font=("Segoe UI", 11))
-        self.lbl_count.grid(row=2, column=0, pady=10, sticky="w", padx=20)
+        # Protection contre les double-clics
+        self.is_opening_window = False
+        self._destroyed        = False
 
-        # Chargement initial asynchrone pour ne pas bloquer l'interface
-        self.after(100, lambda: self.load_data_async())
-        
-        # Gérer la destruction propre du widget
+        # Mapping item_id → code_article brut
+        self.code_mapping = {}
+
+        self._apply_tree_style()
+        self._build_ui()
+
+        # Chargement initial différé
+        self.after(100, self.load_data_async)
+
         self.bind("<Destroy>", self._on_destroy)
-    
+
+    # ── helpers ──────────────────────────────────────────────────────────────
     def _on_destroy(self, event):
-        """Marquer le widget comme détruit"""
         if event.widget == self:
             self._destroyed = True
 
-    def create_search_frame(self):
-        """Créer le cadre de recherche"""
-        search_frame = ctk.CTkFrame(self, fg_color="transparent")
-        search_frame.grid(row=0, column=0, pady=20, padx=20, sticky="ew")
-        search_frame.grid_columnconfigure(1, weight=1)
+    def _f(self, size=11, weight="normal"):
+        return ctk.CTkFont(
+            family="Roboto" if _T else "Segoe UI",
+            size=size, weight=weight)
 
-        lbl_search = ctk.CTkLabel(search_frame, text="Rechercher:", font=("Segoe UI", 12, "bold"))
-        lbl_search.grid(row=0, column=0, padx=(0, 10))
-
-        self.entry_search = ctk.CTkEntry(
-            search_frame,
-            placeholder_text="Code Article, Nom, Unité ou Prix...",
-            height=34,
-            font=("Segoe UI", 11)
-        )
-        self.entry_search.grid(row=0, column=1, sticky="ew", padx=(0, 10))
-        self.entry_search.bind("<KeyRelease>", self.search_data)
-
-        btn_search = ctk.CTkButton(
-            search_frame,
-            text="🔍 Rechercher",
-            command=self.search_data,
-            height=34,
-            font=("Segoe UI", 11)
-        )
-        btn_search.grid(row=0, column=2)
-
-    def create_treeview(self):
-        """Créer le treeview avec les colonnes"""
-        tree_frame = ctk.CTkFrame(self, fg_color="white")
-        tree_frame.grid(row=1, column=0, pady=10, padx=20, sticky="nsew")
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
-
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical")
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal")
-
-        self.tree = ttk.Treeview(
-            tree_frame,
-            columns=("code", "nom", "unite", "prix"),
-            show="headings",
-            yscrollcommand=vsb.set,
-            xscrollcommand=hsb.set,
-            height=15
-        )
-
-        vsb.config(command=self.tree.yview)
-        hsb.config(command=self.tree.xview)
-
-        self.tree.heading("code", text="Code Article")
-        self.tree.heading("nom", text="Nom d'article")
-        self.tree.heading("unite", text="Unité")
-        self.tree.heading("prix", text="Prix")
-
-        self.tree.column("code", width=150, anchor="center")
-        self.tree.column("nom", width=300, anchor="w")
-        self.tree.column("unite", width=150, anchor="center")
-        self.tree.column("prix", width=150, anchor="e")
-
-        # mapping initialisé
-        self.code_mapping = {}
-
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        style.configure(
-            "Treeview",
-            background="#FFFFFF",
-            foreground="#000000",
-            rowheight=22,
-            fieldbackground="#FFFFFF",
-            font=("Segoe UI", 9)
-        )
-        style.configure(
-            "Treeview.Heading",
-            background="#E8E8E8",
-            foreground="#000000",
-            font=("Segoe UI", 9, "bold")
-        )
-        style.map("Treeview", background=[("selected", "#1f538d")])
-        self.tree.tag_configure("even", background="#FFFFFF", foreground="#000000")
-        self.tree.tag_configure("odd", background="#E6EFF8", foreground="#000000")
-        self.tree.tag_configure("even_zero", background="#FFFFFF", foreground="#f55f5f")
-        self.tree.tag_configure("odd_zero", background="#E6EFF8", foreground="#f55f5f")
-
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-
-        # Double-clic avec protection
-        self.tree.bind("<Double-Button-1>", self.on_double_click)
-
-    def connect_db(self):
-        """Connexion à la base de données PostgreSQL via config.json"""
+    def _connect(self):
         try:
             with open('config.json', 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                db_config = config.get('database', {})
-            conn = psycopg2.connect(
-                host=db_config.get('host'),
-                user=db_config.get('user'),
-                password=db_config.get('password'),
-                database=db_config.get('database'),
-                port=db_config.get('port')
-            )
-            return conn
+                cfg = json.load(f).get('database', {})
+            return psycopg2.connect(
+                host=cfg.get('host'), user=cfg.get('user'),
+                password=cfg.get('password'), database=cfg.get('database'),
+                port=cfg.get('port'))
         except FileNotFoundError:
-            messagebox.showerror("Erreur de configuration", "Fichier 'config.json' non trouvé.")
-            return None
+            messagebox.showerror("Configuration",
+                                 "Fichier 'config.json' introuvable.")
         except KeyError:
-            messagebox.showerror("Erreur de configuration", "Clés de base de données manquantes dans 'config.json'.")
-            return None
+            messagebox.showerror("Configuration",
+                                 "Clés DB manquantes dans 'config.json'.")
         except psycopg2.Error as err:
-            messagebox.showerror("Erreur de connexion", f"Erreur de connexion à PostgreSQL : {err}")
-            return None
-        except UnicodeDecodeError as err:
-            messagebox.showerror("Erreur d'encodage", f"Problème d'encodage du fichier de configuration : {err}")
-            return None
+            messagebox.showerror("Connexion",
+                                 f"Erreur PostgreSQL : {err}")
+        return None
 
-    def load_data_async(self, search_term=""):
-        """Charger les données de manière asynchrone pour éviter de bloquer l'interface"""
-        # Afficher un indicateur de chargement
-        self.lbl_count.configure(text="Chargement en cours...")
-        
-        # Lancer le chargement dans un thread séparé
-        thread = threading.Thread(target=self.load_data, args=(search_term,), daemon=True)
-        thread.start()
-
-    def load_data(self, search_term=""):
-        """
-        Charger les données :
-        - si search_term non vide => recherche flexible
-        - elif self.code_article fourni => filtrage exact sur code article (LPAD 10)
-        - sinon => lister tout
-        """
-        conn = self.connect_db()
-        if not conn:
-            try:
-                self.after(0, lambda: self.lbl_count.configure(text="Erreur de connexion"))
-            except:
-                pass
-            return
-
+    @staticmethod
+    def _fmt_prix(prix):
+        """Formate un prix en notation française : 1 234,56"""
         try:
-            cursor = conn.cursor()
+            return (f"{float(prix):,.2f}"
+                    .replace('.', '#')
+                    .replace(',', '.')
+                    .replace('#', ','))
+        except (ValueError, TypeError):
+            return "0,00"
 
-            # Requête OPTIMISÉE avec window function ROW_NUMBER (plus rapide que LATERAL)
+    # ── Style treeview ────────────────────────────────────────────────────────
+    def _apply_tree_style(self):
+        s = ttk.Style()
+        try:
+            s.theme_use("clam")
+        except Exception:
+            pass
+        s.configure("Prix.Treeview",
+                    background=C.BG_CARD, foreground=C.TEXT_PRIMARY,
+                    fieldbackground=C.BG_CARD, rowheight=24,
+                    font=("Roboto" if _T else "Segoe UI", 10),
+                    borderwidth=0)
+        s.configure("Prix.Treeview.Heading",
+                    background=C.BG_HEADER, foreground="#FFFFFF",
+                    font=("Roboto" if _T else "Segoe UI", 10, "bold"),
+                    relief="flat", padding=(6, 4))
+        s.map("Prix.Treeview",
+              background=[("selected", C.PRIMARY)],
+              foreground=[("selected", "#FFFFFF")])
+
+    # ── Construction UI ───────────────────────────────────────────────────────
+    def _build_ui(self):
+        # ── En-tête ──────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
+        hdr.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(hdr, text="Liste des Prix",
+                     font=self._f(18, "bold"),
+                     text_color="#FFFFFF"
+                     ).pack(side="left", padx=16, pady=8)
+
+        # ── Barre de filtres ─────────────────────────────────────────────────
+        panel = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        panel.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
+        inner = ctk.CTkFrame(panel, fg_color="transparent")
+        inner.pack(fill="x", padx=10, pady=8)
+
+        ctk.CTkLabel(inner, text="Rechercher :",
+                     font=self._f(10),
+                     text_color=C.TEXT_MUTED
+                     ).pack(side="left", padx=(0, 4))
+
+        self._var_search = ctk.StringVar()
+        self._entry_search = ctk.CTkEntry(
+            inner, textvariable=self._var_search,
+            placeholder_text="Code Article, Nom, Unité ou Prix…",
+            width=320, height=28,
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            text_color=C.TEXT_PRIMARY, font=self._f(10))
+        self._entry_search.pack(side="left", padx=(0, 6))
+        self._entry_search.bind("<KeyRelease>", self._on_search)
+
+        ctk.CTkButton(
+            inner, text="🔍  Rechercher",
+            command=self._on_search,
+            fg_color=C.PRIMARY, hover_color=C.PRIMARY_HOVER,
+            text_color="#FFFFFF", height=28, width=130,
+            font=self._f(10, "bold")
+        ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            inner, text="Reset",
+            command=self._reset,
+            fg_color="transparent", hover_color=C.DIVIDER,
+            text_color=C.TEXT_SECONDARY,
+            border_width=1, border_color=C.BORDER,
+            height=28, width=60, font=self._f(10)
+        ).pack(side="left")
+
+        # ── Tableau ──────────────────────────────────────────────────────────
+        tbl = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        tbl.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 4))
+        tbl.grid_rowconfigure(0, weight=1)
+        tbl.grid_columnconfigure(0, weight=1)
+
+        cols = ("Code Article", "Nom d'article", "Unité", "Prix")
+        self.tree = ttk.Treeview(tbl, columns=cols, show="headings",
+                                 style="Prix.Treeview", height=20)
+
+        # Tags
+        self.tree.tag_configure("even",      background=C.BG_CARD)
+        self.tree.tag_configure("odd",       background="#F0F4F8")
+        self.tree.tag_configure("even_zero", background=C.BG_CARD,
+                                foreground=C.DANGER)
+        self.tree.tag_configure("odd_zero",  background="#F0F4F8",
+                                foreground=C.DANGER)
+
+        col_cfg = {
+            "Code Article": (150, "center"),
+            "Nom d'article": (340, "w"),
+            "Unité":         (150, "center"),
+            "Prix":          (150, "e"),
+        }
+        for col in cols:
+            w, anchor = col_cfg[col]
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=w, anchor=anchor)
+
+        sy = ctk.CTkScrollbar(tbl, orientation="vertical",
+                              command=self.tree.yview)
+        sx = ctk.CTkScrollbar(tbl, orientation="horizontal",
+                              command=self.tree.xview)
+        self.tree.configure(yscrollcommand=sy.set,
+                            xscrollcommand=sx.set)
+        self.tree.grid(row=0, column=0, sticky="nsew",
+                       padx=(6, 0), pady=(6, 0))
+        sy.grid(row=0, column=1, sticky="ns", pady=(6, 0))
+        sx.grid(row=1, column=0, sticky="ew", padx=(6, 0))
+
+        self.tree.bind("<Double-Button-1>", self._on_double_click)
+
+        # ── Footer ───────────────────────────────────────────────────────────
+        footer = ctk.CTkFrame(self, fg_color="transparent")
+        footer.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 8))
+        self._lbl_count = ctk.CTkLabel(
+            footer, text="0 article(s)",
+            font=self._f(10, "bold"), text_color=C.PRIMARY)
+        self._lbl_count.pack(side="left")
+        self._lbl_status = ctk.CTkLabel(
+            footer, text="",
+            font=self._f(9), text_color=C.TEXT_MUTED)
+        self._lbl_status.pack(side="right")
+
+    # ── Chargement des données ────────────────────────────────────────────────
+    def load_data_async(self, search_term=""):
+        """Lance le chargement SQL dans un thread séparé."""
+        self._lbl_count.configure(text="Chargement…")
+        self._lbl_status.configure(text="")
+        t = threading.Thread(target=self._load_data,
+                             args=(search_term,), daemon=True)
+        t.start()
+
+    def _load_data(self, search_term=""):
+        conn = self._connect()
+        if not conn:
+            self.after(0, lambda: self._lbl_count.configure(
+                text="Erreur de connexion"))
+            return
+        try:
+            cur = conn.cursor()
             query = """
-            SELECT 
-                u.codearticle::TEXT,
-                a.designation,
-                u.designationunite,
-                COALESCE(prix_recent.prix, 0) as prix
-            FROM tb_unite u
-            INNER JOIN tb_article a ON u.idarticle = a.idarticle
-            LEFT JOIN (
-                SELECT 
-                    idunite, 
-                    prix,
-                    ROW_NUMBER() OVER (PARTITION BY idunite ORDER BY dateregistre DESC) as rn
-                FROM tb_prix 
-                WHERE deleted = 0
-            ) prix_recent ON u.idunite = prix_recent.idunite AND prix_recent.rn = 1
-            WHERE a.deleted = 0
+                SELECT
+                    u.codearticle::TEXT,
+                    a.designation,
+                    u.designationunite,
+                    COALESCE(p.prix, 0) AS prix
+                FROM tb_unite u
+                INNER JOIN tb_article a ON u.idarticle = a.idarticle
+                LEFT JOIN (
+                    SELECT idunite, prix,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY idunite
+                               ORDER BY dateregistre DESC) AS rn
+                    FROM tb_prix WHERE deleted = 0
+                ) p ON u.idunite = p.idunite AND p.rn = 1
+                WHERE a.deleted = 0
             """
-
             params = []
 
             if search_term:
-                # recherche insensible à la casse pour designation/unite, codearticle et prix (text)
                 query += """
-                AND (
-                    LPAD(u.codearticle::TEXT, 10, '0') LIKE %s OR
-                    LOWER(a.designation) LIKE LOWER(%s) OR
-                    LOWER(u.designationunite) LIKE LOWER(%s) OR
-                    COALESCE(prix_recent.prix, 0)::TEXT LIKE %s
-                )
+                    AND (
+                        LPAD(u.codearticle::TEXT, 10, '0') LIKE %s OR
+                        LOWER(a.designation)      LIKE LOWER(%s) OR
+                        LOWER(u.designationunite) LIKE LOWER(%s) OR
+                        COALESCE(p.prix, 0)::TEXT LIKE %s
+                    )
                 """
-                pattern = f"%{search_term}%"
-                params = [pattern, pattern, pattern, pattern]
-                cursor.execute(query + " ORDER BY a.designation ASC, u.codearticle ASC", params)
-
+                pat = f"%{search_term}%"
+                params = [pat, pat, pat, pat]
             elif self.code_article:
-                # Filtrer exactement par code article (format 10 chiffres)
                 query += " AND LPAD(u.codearticle::TEXT, 10, '0') = %s"
                 params = [self.code_article.zfill(10)]
-                cursor.execute(query + " ORDER BY a.designation ASC, u.codearticle ASC", params)
-            else:
-                cursor.execute(query + " ORDER BY a.designation ASC, u.codearticle ASC")
 
-            rows = cursor.fetchall()
-
-            # Vérifier que le widget existe toujours avant de mettre à jour
-            try:
-                if self.winfo_exists():
-                    # Mettre à jour l'interface dans le thread principal
-                    self.after(0, lambda r=rows: self.update_treeview(r))
-            except:
-                pass
-
-            cursor.close()
+            query += " ORDER BY a.designation ASC, u.codearticle ASC"
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            cur.close()
             conn.close()
 
-        except psycopg2.Error as err:
             try:
-                self.after(0, lambda e=err: messagebox.showerror("Erreur", f"Erreur lors du chargement des données : {e}"))
-            except:
+                if self.winfo_exists():
+                    self.after(0, lambda r=rows: self._update_treeview(r))
+            except Exception:
                 pass
-            if conn:
-                conn.close()
-        except Exception as e:
-            try:
-                self.after(0, lambda ex=e: messagebox.showerror("Erreur", f"Erreur inattendue lors du chargement : {ex}"))
-            except:
-                pass
-            if conn:
-                conn.close()
 
-    def update_treeview(self, rows):
-        """Mettre à jour le treeview avec les résultats (appelé dans le thread principal)"""
-        # Vérifier que le widget n'est pas détruit
+        except psycopg2.Error as err:
+            conn.close()
+            self.after(0, lambda e=err: messagebox.showerror(
+                "Erreur DB", f"Chargement impossible : {e}"))
+        except Exception as err:
+            conn.close()
+            self.after(0, lambda e=err: messagebox.showerror(
+                "Erreur", f"Erreur inattendue : {e}"))
+
+    def _update_treeview(self, rows):
+        """Met à jour le treeview (thread principal)."""
         if self._destroyed:
             return
-            
-        # Vérifier que le widget existe toujours
         try:
-            if not self.winfo_exists():
+            if not self.winfo_exists() or not self.tree.winfo_exists():
                 return
-        except:
+        except Exception:
             return
-            
-        # Vérifier que le tree existe toujours
+
         try:
-            if not self.tree.winfo_exists():
-                return
-        except:
+            self.tree.delete(*self.tree.get_children())
+        except Exception:
             return
-            
-        # vider treeview
-        try:
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-        except:
-            return
-            
+
         self.code_mapping = {}
 
         for idx, row in enumerate(rows):
             if self._destroyed:
                 return
-                
             try:
-                code_db = row[0] if row[0] is not None else ""
-                nom = row[1] if row[1] is not None else ""
-                unite = row[2] if row[2] is not None else ""
-                prix = row[3] if row[3] is not None else 0
+                code_db = row[0] or ""
+                nom     = row[1] or ""
+                unite   = row[2] or ""
+                prix    = row[3] if row[3] is not None else 0
 
-                # Format prix en français (1 234,56)
-                try:
-                    prix_format = f"{float(prix):,.2f}".replace('.', '#').replace(',', '.').replace('#', ',')
-                except (ValueError, TypeError):
-                    prix_format = "0,00"
+                prix_fmt  = self._fmt_prix(prix)
+                is_zero   = (float(prix) == 0) if prix else True
 
-                is_zero_price = False
-                try:
-                    is_zero_price = float(prix) == 0
-                except (TypeError, ValueError):
-                    is_zero_price = True
-
-                if is_zero_price:
+                if is_zero:
                     tag = "even_zero" if idx % 2 == 0 else "odd_zero"
                 else:
                     tag = "even" if idx % 2 == 0 else "odd"
 
-                item_id = self.tree.insert("", "end", values=(code_db, nom, unite, prix_format), tags=(tag,))
+                item_id = self.tree.insert(
+                    "", "end",
+                    values=(code_db, nom, unite, prix_fmt),
+                    tags=(tag,))
                 self.code_mapping[item_id] = code_db
-            except:
-                # Si le tree a été détruit pendant l'insertion, arrêter
+
+            except Exception:
                 return
 
-        if self._destroyed:
-            return
-            
         try:
-            count = len(rows)
-            self.lbl_count.configure(text=f"Nombre d'articles: {count}")
-        except:
+            self._lbl_count.configure(text=f"{len(rows)} article(s)")
+        except Exception:
             pass
 
-    def search_data(self, event=None):
-        search_term = self.entry_search.get().strip()
-        # S'il y a un code_article fixé et que la recherche est vide, on conserve le filtre code_article.
-        # si la recherche est non vide, on fait une recherche globale (remplace le filtre code_article)
-        if search_term:
-            self.load_data_async(search_term)
-        else:
-            # Si aucun terme et self.code_article présent, reload filtré
-            self.load_data_async("")
+    # ── Filtres ───────────────────────────────────────────────────────────────
+    def _on_search(self, event=None):
+        term = self._var_search.get().strip()
+        self.load_data_async(term)
 
-    def on_double_click(self, event):
-        # Protection contre les doubles clics multiples
+    def _reset(self):
+        self._var_search.set("")
+        self.load_data_async()
+
+    # ── Double-clic → fenêtre saisie prix ────────────────────────────────────
+    def _on_double_click(self, event=None):
         if self.is_opening_window:
             return
-            
-        selection = self.tree.selection()
-        if not selection:
+        sel = self.tree.selection()
+        if not sel:
             return
-
-        item_id = selection[0]
-        code_article = self.code_mapping.get(item_id)
-
-        if not code_article:
-            messagebox.showwarning("Attention", "Impossible de récupérer le code article")
+        code = self.code_mapping.get(sel[0])
+        if not code:
+            messagebox.showwarning("Attention",
+                                   "Impossible de récupérer le code article.")
             return
-
         self.is_opening_window = True
         try:
-            self.open_saisie_window(code_article)
+            self._open_saisie(code)
         finally:
-            # Réactiver après 500ms
             self.after(500, lambda: setattr(self, 'is_opening_window', False))
 
-    def open_saisie_window(self, code_article):
-        """Ouvrir la fenêtre de saisie des prix avec barre de progression"""
+    def _open_saisie(self, code_article):
+        """Ouvre la fenêtre de saisie prix avec progression thémée."""
         if PagePrixSaisie is None:
-            messagebox.showerror("Erreur", "Impossible d'importer page_prixSaisie.py. Veuillez vérifier l'existence du fichier.")
+            messagebox.showerror(
+                "Erreur",
+                "Impossible d'importer page_prixSaisie.py.\n"
+                "Vérifiez l'existence du fichier.")
             return
 
-        try:
-            # Créer une fenêtre de progression
-            progress_window = ctk.CTkToplevel(self)
-            progress_window.title("Chargement...")
-            progress_window.geometry("400x150")
-            progress_window.resizable(False, False)
-            
-            # Centrer la fenêtre
-            progress_window.transient(self.winfo_toplevel())
-            progress_window.grab_set()
-            
-            # Frame de contenu
-            content_frame = ctk.CTkFrame(progress_window, fg_color="white")
-            content_frame.pack(fill="both", expand=True, padx=20, pady=20)
-            
-            # Label
-            lbl_loading = ctk.CTkLabel(
-                content_frame, 
-                text=f"Chargement de la saisie des prix...\nArticle: {code_article}",
-                font=("Segoe UI", 11)
-            )
-            lbl_loading.pack(pady=(10, 20))
-            
-            # Barre de progression
-            progress_bar = ctk.CTkProgressBar(content_frame, width=350)
-            progress_bar.pack(pady=10)
-            progress_bar.set(0)
-            
-            # Fonction pour ouvrir la fenêtre dans un thread
-            def load_saisie():
+        # Fenêtre de progression
+        prog_win = ctk.CTkToplevel(self)
+        prog_win.title("Chargement…")
+        prog_win.geometry("400x140")
+        prog_win.resizable(False, False)
+        prog_win.transient(self.winfo_toplevel())
+        prog_win.grab_set()
+        if _T:
+            Theme.apply_toplevel(prog_win)
+
+        card = ctk.CTkFrame(prog_win, fg_color=C.BG_CARD,
+                            corner_radius=12,
+                            border_width=1, border_color=C.BORDER)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
+
+        ctk.CTkLabel(
+            card,
+            text=f"Chargement saisie des prix…\nArticle : {code_article}",
+            font=self._f(11),
+            text_color=C.TEXT_PRIMARY
+        ).pack(pady=(14, 10))
+
+        bar = ctk.CTkProgressBar(card, width=340,
+                                 progress_color=C.PRIMARY,
+                                 fg_color=C.BG_INPUT,
+                                 height=8, corner_radius=4)
+        bar.pack(pady=(0, 14))
+        bar.set(0)
+
+        def _load():
+            import time
+            for v in [0.2, 0.4, 0.6]:
+                prog_win.after(0, lambda val=v: bar.set(val))
+                time.sleep(0.04)
+
+            def _create():
                 try:
-                    # Simuler la progression
-                    for i in range(20, 60, 10):
-                        progress_window.after(0, lambda val=i/100: progress_bar.set(val))
-                        import time
-                        time.sleep(0.05)
-                    
-                    # Créer la fenêtre de saisie dans le thread principal
-                    def create_saisie():
-                        try:
-                            progress_bar.set(0.7)
-                            
-                            saisie_window = ctk.CTkToplevel(self)
-                            saisie_window.title(f"Saisie Prix - {code_article}")
-                            saisie_window.geometry("900x700")
-                            
-                            progress_bar.set(0.8)
-                            
-                            # Rendre la fenêtre modale
-                            saisie_window.transient(self.winfo_toplevel())
-                            saisie_window.grab_set()
-                            
-                            progress_bar.set(0.9)
+                    bar.set(0.75)
+                    saisie_win = ctk.CTkToplevel(self)
+                    saisie_win.title(f"Saisie Prix — {code_article}")
+                    saisie_win.geometry("900x700")
+                    saisie_win.transient(self.winfo_toplevel())
+                    saisie_win.grab_set()
+                    if _T:
+                        Theme.apply_toplevel(saisie_win)
 
-                            # PagePrixSaisie : on transmet iduser puis code_article
-                            page_saisie = PagePrixSaisie(saisie_window, self.iduser, code_article)
-                            page_saisie.pack(fill="both", expand=True)
-                            
-                            progress_bar.set(1.0)
+                    bar.set(0.9)
+                    PagePrixSaisie(saisie_win, self.iduser,
+                                   code_article).pack(fill="both", expand=True)
+                    bar.set(1.0)
 
-                            # Rafraîchir après fermeture
-                            saisie_window.protocol("WM_DELETE_WINDOW", lambda: self.on_saisie_close(saisie_window))
-                            
-                            # Fermer la fenêtre de progression
-                            progress_window.after(200, lambda: self.close_progress(progress_window))
-                            
-                        except Exception as err:
-                            progress_window.after(0, lambda: self.close_progress(progress_window))
-                            messagebox.showerror("Erreur", f"Erreur lors de l'ouverture de la fenêtre : {err}")
-                            import traceback
-                            traceback.print_exc()
-                    
-                    # Lancer la création dans le thread principal
-                    progress_window.after(0, create_saisie)
-                    
+                    saisie_win.protocol(
+                        "WM_DELETE_WINDOW",
+                        lambda: self._on_saisie_close(saisie_win))
+
+                    prog_win.after(200, lambda: self._close_toplevel(prog_win))
+
                 except Exception as err:
-                    progress_window.after(0, lambda: self.close_progress(progress_window))
-                    messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
-                    import traceback
-                    traceback.print_exc()
-            
-            # Lancer le chargement dans un thread séparé
-            import threading
-            thread = threading.Thread(target=load_saisie, daemon=True)
-            thread.start()
+                    self._close_toplevel(prog_win)
+                    messagebox.showerror("Erreur",
+                                         f"Ouverture impossible : {err}")
+                    import traceback; traceback.print_exc()
 
-        except Exception as err:
-            messagebox.showerror("Erreur", f"Erreur lors de l'ouverture : {err}")
-            import traceback
-            traceback.print_exc()
-    
-    def close_progress(self, window):
-        """Fermer la fenêtre de progression proprement"""
+            prog_win.after(0, _create)
+
+        threading.Thread(target=_load, daemon=True).start()
+
+    # ── Helpers fenêtres ──────────────────────────────────────────────────────
+    @staticmethod
+    def _close_toplevel(win):
         try:
-            window.grab_release()
-            window.destroy()
+            win.grab_release()
+            win.destroy()
         except Exception:
             pass
 
-    def on_saisie_close(self, window):
-        try:
-            window.grab_release()
-            window.destroy()
-        except Exception:
-            pass
-        # Recharger: si un code_article est fixé, la reload prendra compte du filtre
+    def _on_saisie_close(self, win):
+        self._close_toplevel(win)
         self.load_data_async()
 
 
-# Test manuel
+# ── Test standalone ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    ctk.set_appearance_mode("light")
-    ctk.set_default_color_theme("blue")
+    try:
+        from app_theme import init_theme, Theme
+        init_theme()
+    except ImportError:
+        ctk.set_appearance_mode("light")
+        ctk.set_default_color_theme("blue")
 
     root = ctk.CTk()
-    root.title("Liste des Prix")
+    root.title("Liste des Prix — iJeery")
     root.geometry("1000x700")
+    root.grid_rowconfigure(0, weight=1)
+    root.grid_columnconfigure(0, weight=1)
 
-    # Exemple 1 : sans filtre
-    # page = PagePrixListe(root, db_connector=None, initial_idarticle=None, iduser=1)
+    try:
+        Theme.apply(root)
+    except Exception:
+        pass
 
-    # Exemple 2 : filtrer sur code article (format 10 chiffres ou pas)
-    # page = PagePrixListe(root, db_connector=None, initial_idarticle="1009", iduser=1)
-
-    # Pour tester la page sans filtrage :
-    page = PagePrixListe(root, db_connector=None, initial_idarticle=None, iduser=1)
-    page.pack(fill="both", expand=True)
-
+    PagePrixListe(root).grid(row=0, column=0, sticky="nsew")
     root.mainloop()

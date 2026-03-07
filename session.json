@@ -117,6 +117,10 @@
             "PageEtatSalaireHoraire"
         ],
         [
+            "Facturation",
+            "PageFacturation"
+        ],
+        [
             "Facture Liste",
             "PageFactureListe"
         ],
@@ -233,6 +237,14 @@
             "PageStock"
         ],
         [
+            "Stock Livraison",
+            "PageStockLivraison"
+        ],
+        [
+            "Suivi Commande",
+            "PageSuiviCommande"
+        ],
+        [
             "TABLEAU DE BORD",
             "page_home"
         ],
@@ -267,6 +279,10 @@
         [
             "Utilisateurs",
             "PageUsers"
+        ],
+        [
+            "Ventes",
+            "PageVente"
         ],
         [
             "Ventes par Dépôt",

@@ -20,6 +20,50 @@ try:
 except ImportError:
     num2words = None
 
+# ── Constantes de police (cohérence globale) ─────────────────────────────────
+_FONT_FAMILY  = "Segoe UI"
+_FONT_SIZE_SM = 10   # labels secondaires, infos
+_FONT_SIZE_MD = 11   # corps standard, entrées
+_FONT_SIZE_LG = 13   # titres de section
+
+def _F(size=_FONT_SIZE_MD, weight="normal"):
+    return ctk.CTkFont(family=_FONT_FAMILY, size=size, weight=weight)
+
+# ── Style TTK centralisé ─────────────────────────────────────────────────────
+def _apply_treeview_theme():
+    """Configure le style ttk global : en-têtes dark, lignes lisibles, police Segoe UI."""
+    style = ttk.Style()
+    style.theme_use("default")
+
+    style.configure(
+        "Treeview.Heading",
+        background="#2C3E50",
+        foreground="#FFFFFF",
+        font=(_FONT_FAMILY, _FONT_SIZE_MD, "bold"),
+        relief="flat",
+        padding=(8, 6),
+    )
+    style.map(
+        "Treeview.Heading",
+        background=[("active", "#34495E")],
+        relief=[("active", "flat")],
+    )
+
+    style.configure(
+        "Treeview",
+        background="#FFFFFF",
+        foreground="#2C3E50",
+        fieldbackground="#FFFFFF",
+        font=(_FONT_FAMILY, _FONT_SIZE_MD),
+        rowheight=28,
+        borderwidth=0,
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", "#D6EAF8")],
+        foreground=[("selected", "#1A5276")],
+    )
+
 
 class PageFournisseur(ctk.CTkFrame):
     def __init__(self, master, db_conn=None, session_data=None, id_user_connecte=None):
@@ -42,6 +86,7 @@ class PageFournisseur(ctk.CTkFrame):
         self.sort_column = "Dette en cours"
         self.sort_ascending = False
 
+        _apply_treeview_theme()   # ← appliqué une seule fois à l'init
         self.setup_ui()
         self.load_fournisseur()
 
@@ -101,64 +146,70 @@ class PageFournisseur(ctk.CTkFrame):
         row1 = ctk.CTkFrame(input_frame)
         row1.pack(fill="x", pady=5)
 
-        ctk.CTkLabel(row1, text="Nom du Fournisseur:").pack(side="left", padx=5)
-        self.nomFrs_entry = ctk.CTkEntry(row1, width=150)
+        ctk.CTkLabel(row1, text="Nom du Fournisseur:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.nomFrs_entry = ctk.CTkEntry(row1, width=150, font=_F(_FONT_SIZE_MD))
         self.nomFrs_entry.pack(side="left", padx=5)
 
-        ctk.CTkLabel(row1, text="Contact:").pack(side="left", padx=5)
-        self.contactFrs_entry = ctk.CTkEntry(row1, width=150)
+        ctk.CTkLabel(row1, text="Contact:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.contactFrs_entry = ctk.CTkEntry(row1, width=150, font=_F(_FONT_SIZE_MD))
         self.contactFrs_entry.pack(side="left", padx=5)
 
-        ctk.CTkLabel(row1, text="Adresse:").pack(side="left", padx=5)
-        self.adresseFrs_entry = ctk.CTkEntry(row1, width=150)
+        ctk.CTkLabel(row1, text="Adresse:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.adresseFrs_entry = ctk.CTkEntry(row1, width=150, font=_F(_FONT_SIZE_MD))
         self.adresseFrs_entry.pack(side="left", padx=5)
 
         row2 = ctk.CTkFrame(input_frame)
         row2.pack(fill="x", pady=5)
 
-        ctk.CTkLabel(row2, text="NIF:").pack(side="left", padx=5)
-        self.nifFrs_entry = ctk.CTkEntry(row2, width=120)
+        ctk.CTkLabel(row2, text="NIF:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.nifFrs_entry = ctk.CTkEntry(row2, width=120, font=_F(_FONT_SIZE_MD))
         self.nifFrs_entry.pack(side="left", padx=5)
 
-        ctk.CTkLabel(row2, text="STAT:").pack(side="left", padx=5)
-        self.statFrs_entry = ctk.CTkEntry(row2, width=120)
+        ctk.CTkLabel(row2, text="STAT:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.statFrs_entry = ctk.CTkEntry(row2, width=120, font=_F(_FONT_SIZE_MD))
         self.statFrs_entry.pack(side="left", padx=5)
 
-        ctk.CTkLabel(row2, text="CIF:").pack(side="left", padx=5)
-        self.cifFrs_entry = ctk.CTkEntry(row2, width=120)
+        ctk.CTkLabel(row2, text="CIF:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.cifFrs_entry = ctk.CTkEntry(row2, width=120, font=_F(_FONT_SIZE_MD))
         self.cifFrs_entry.pack(side="left", padx=5)
 
         button_frame = ctk.CTkFrame(self)
         button_frame.pack(fill="x", pady=10)
 
         ctk.CTkButton(button_frame, text="Ajouter", command=self.add_fournisseur,
-                      fg_color="#2ecc71", hover_color="#27ae60").pack(side="left", padx=5)
+                      fg_color="#2ecc71", hover_color="#27ae60",
+                      font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
         ctk.CTkButton(button_frame, text="Modifier", command=self.modify_fournisseur,
-                      fg_color="#3498db", hover_color="#2980b9").pack(side="left", padx=5)
+                      fg_color="#3498db", hover_color="#2980b9",
+                      font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
         ctk.CTkButton(button_frame, text="Supprimer", command=self.delete_fournisseur,
-                      fg_color="#e74c3c", hover_color="#c0392b").pack(side="left", padx=5)
+                      fg_color="#e74c3c", hover_color="#c0392b",
+                      font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
 
         search_frame = ctk.CTkFrame(self)
         search_frame.pack(fill="x", pady=10)
 
         ctk.CTkLabel(search_frame, text="Rechercher Fournisseur :",
-                     font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5)
+                     font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
         self.search_entry = ctk.CTkEntry(search_frame, width=300,
-                                         placeholder_text="Nom, contact, adresse, NIF...")
+                                         placeholder_text="Nom, contact, adresse, NIF...",
+                                         font=_F(_FONT_SIZE_MD))
         self.search_entry.pack(side="left", padx=5, fill="x", expand=True)
         self.all_frs_data = []
         self.search_entry.bind("<KeyRelease>", self.filter_fournisseurs)
 
+        # Treeview — tags couleur lignes alternées
         columns = ("Nom du Fournisseur", "Contact", "Adresse", "NIF", "STAT", "CIF", "Dette en cours")
         self.tree = ttk.Treeview(self, columns=columns, show="headings")
-        self.tree.tag_configure("even", background="#FFFFFF", foreground="#000000")
-        self.tree.tag_configure("odd", background="#FFF3E0", foreground="#000000")
+        self.tree.tag_configure("even", background="#FFFFFF", foreground="#2C3E50")
+        self.tree.tag_configure("odd",  background="#FEF9F0", foreground="#2C3E50")
 
         col_widths = {"Nom du Fournisseur": 160, "Contact": 110, "Adresse": 140,
                       "NIF": 90, "STAT": 90, "CIF": 90, "Dette en cours": 130}
         for col in columns:
             self.tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
             self.tree.column(col, width=col_widths.get(col, 110))
+        self.tree.column("Dette en cours", anchor="e")
 
         self.tree.pack(fill="both", expand=True, pady=10)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
@@ -193,7 +244,6 @@ class PageFournisseur(ctk.CTkFrame):
 
             fournisseurs_avec_dettes.sort(key=lambda x: x[1], reverse=True)
             self.all_frs_data = fournisseurs_avec_dettes
-
             self.display_fournisseurs(fournisseurs_avec_dettes)
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
@@ -377,12 +427,13 @@ class PageFournisseur(ctk.CTkFrame):
         detail_window.grid_columnconfigure(1, weight=1)
         detail_window.grid_rowconfigure(0, weight=1)
 
+        # ── SIDEBAR GAUCHE ────────────────────────────────────────────────────
         sidebar_frame = ctk.CTkFrame(detail_window, fg_color="#fff8f0")
         sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         sidebar_frame.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(sidebar_frame, text="Informations Fournisseur",
-                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     font=_F(_FONT_SIZE_LG, "bold"),
                      text_color="#2c3e50").pack(anchor="w", padx=10, pady=(10, 5))
 
         info_data = [
@@ -396,30 +447,30 @@ class PageFournisseur(ctk.CTkFrame):
         for label, value in info_data:
             row_f = ctk.CTkFrame(sidebar_frame, fg_color="transparent")
             row_f.pack(anchor="w", padx=10, pady=2, fill="x")
-            ctk.CTkLabel(row_f, text=label, font=ctk.CTkFont(weight="bold", size=10),
+            ctk.CTkLabel(row_f, text=label, font=_F(_FONT_SIZE_SM, "bold"),
                          text_color="#34495e", width=80).pack(side="left", anchor="nw")
-            ctk.CTkLabel(row_f, text=value, font=ctk.CTkFont(size=10),
+            ctk.CTkLabel(row_f, text=value, font=_F(_FONT_SIZE_SM),
                          text_color="#2c3e50").pack(side="left", anchor="nw", padx=(5, 0))
 
         ctk.CTkLabel(sidebar_frame, text="", fg_color="#bdc3c7", height=1).pack(fill="x", pady=10, padx=10)
 
         ctk.CTkLabel(sidebar_frame, text="Situation Dettes",
-                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                     font=_F(_FONT_SIZE_LG, "bold"),
                      text_color="#2c3e50").pack(anchor="w", padx=10, pady=(5, 10))
 
         dette_info_frame = ctk.CTkFrame(sidebar_frame, fg_color="transparent")
         dette_info_frame.pack(anchor="w", padx=10, pady=2, fill="x")
-        ctk.CTkLabel(dette_info_frame, text="Total Restant:", font=ctk.CTkFont(weight="bold", size=10),
+        ctk.CTkLabel(dette_info_frame, text="Total Restant:", font=_F(_FONT_SIZE_SM, "bold"),
                      text_color="#34495e").pack(side="left", anchor="nw")
         label_montant_restant = ctk.CTkLabel(dette_info_frame, text="0,00 Ar",
-                                             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                                             font=_F(_FONT_SIZE_LG, "bold"),
                                              text_color="#e74c3c")
         label_montant_restant.pack(side="left", anchor="nw", padx=(5, 0))
 
         btn_paiement_global = ctk.CTkButton(
             sidebar_frame, text="💸 Effectuer Paiement",
             fg_color="#e67e22", hover_color="#d35400",
-            height=40, font=ctk.CTkFont(size=11, weight="bold"),
+            height=40, font=_F(_FONT_SIZE_MD, "bold"),
             command=lambda: None
         )
         btn_paiement_global.pack(padx=10, pady=10, fill="x")
@@ -427,17 +478,19 @@ class PageFournisseur(ctk.CTkFrame):
         btn_ajouter_dette = ctk.CTkButton(
             sidebar_frame, text="➕ Ajouter Dette",
             fg_color="#8e44ad", hover_color="#7d3c98",
-            height=40, font=ctk.CTkFont(size=11, weight="bold"),
+            height=40, font=_F(_FONT_SIZE_MD, "bold"),
             command=lambda: self._open_add_dette_window(idfrs, detail_window)
         )
         btn_ajouter_dette.pack(padx=10, pady=10, fill="x")
 
+        # ── ZONE DROITE ───────────────────────────────────────────────────────
         right_frame = ctk.CTkFrame(detail_window)
         right_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         right_frame.grid_columnconfigure(0, weight=1)
         right_frame.grid_rowconfigure(0, weight=1)
         right_frame.grid_rowconfigure(1, weight=1)
 
+        # ── Tableau dettes ────────────────────────────────────────────────────
         table_frame = ctk.CTkFrame(right_frame)
         table_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_columnconfigure(0, weight=1)
@@ -446,14 +499,15 @@ class PageFournisseur(ctk.CTkFrame):
         table_frame.grid_rowconfigure(1, weight=1)
 
         ctk.CTkLabel(table_frame, text="Récapitulatif des Dettes",
-                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold")).grid(
+                     font=_F(_FONT_SIZE_LG, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
 
-        colonnes_dettes = ("ID", "Type", "Bon de Réception", "N° Facture Frs", "Date", "Montant", "Montant Payé", "Solde Restant", "Statut")
+        colonnes_dettes = ("ID", "Type", "Bon de Réception", "N° Facture Frs", "Date",
+                           "Montant", "Montant Payé", "Solde Restant", "Statut")
         tree_dettes = ttk.Treeview(table_frame, columns=colonnes_dettes, show='headings', height=10)
-        tree_dettes.tag_configure("complet", background="#C8E6C9", foreground="#000000")
-        tree_dettes.tag_configure("partiel", background="#FFF9C4", foreground="#000000")
-        tree_dettes.tag_configure("impaye", background="#FFCDD2", foreground="#000000")
+        tree_dettes.tag_configure("complet", background="#D5F5E3", foreground="#1E8449")
+        tree_dettes.tag_configure("partiel", background="#FEF9E7", foreground="#9A6A00")
+        tree_dettes.tag_configure("impaye",  background="#FADBD8", foreground="#922B21")
 
         for col in colonnes_dettes:
             tree_dettes.heading(col, text=col)
@@ -498,6 +552,7 @@ class PageFournisseur(ctk.CTkFrame):
 
         tree_dettes.bind("<Double-1>", on_dette_double_click)
 
+        # ── Tableau paiements ─────────────────────────────────────────────────
         payment_frame = ctk.CTkFrame(right_frame)
         payment_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(5, 0))
         payment_frame.grid_columnconfigure(0, weight=1)
@@ -506,13 +561,13 @@ class PageFournisseur(ctk.CTkFrame):
         payment_frame.grid_rowconfigure(1, weight=1)
 
         ctk.CTkLabel(payment_frame, text="Historique des Paiements",
-                     font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold")).grid(
+                     font=_F(_FONT_SIZE_LG, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
 
         colonnes_pmt = ("ID", "Date Paiement", "Montant Payé", "Mode de Paiement", "Observation", "Utilisateur")
         tree_pmt = ttk.Treeview(payment_frame, columns=colonnes_pmt, show='headings', height=8)
-        tree_pmt.tag_configure("even", background="#FFFFFF", foreground="#000000")
-        tree_pmt.tag_configure("odd", background="#FFF3E0", foreground="#000000")
+        tree_pmt.tag_configure("even", background="#FFFFFF", foreground="#2C3E50")
+        tree_pmt.tag_configure("odd",  background="#FEF9F0", foreground="#2C3E50")
 
         for col in colonnes_pmt:
             tree_pmt.heading(col, text=col)
@@ -559,7 +614,7 @@ class PageFournisseur(ctk.CTkFrame):
 
             if not paiements:
                 ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré",
-                             text_color="gray", font=ctk.CTkFont(size=11)).grid(row=1, column=0, pady=20)
+                             text_color="gray", font=_F(_FONT_SIZE_MD)).grid(row=1, column=0, pady=20)
 
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
@@ -569,15 +624,6 @@ class PageFournisseur(ctk.CTkFrame):
     # ──────────────────────────────────────────────────────────────────
 
     def _fetch_frs_dettes(self, idfrs):
-        """
-        Retourne la liste unifiée des dettes d'un fournisseur :
-          1. Livraisons reçues avec a_payer = 1 uniquement : seules ces livraisons
-             constituent une dette envers le fournisseur.
-          2. Dettes manuelles : depuis tb_autredette.
-
-        Les livraisons avec a_payer = 0 (fournisseur non à payer) sont exclues.
-        """
-        # ── 1. Dettes issues des livraisons reçues (a_payer = 1 uniquement) ──
         self.cursor.execute("""
             SELECT
                 lf.reflivfrs                                    AS id_ref,
@@ -600,7 +646,6 @@ class PageFournisseur(ctk.CTkFrame):
         """, (idfrs,))
         dettes_livraison = self.cursor.fetchall()
 
-        # ── 2. Dettes manuelles (inchangées) ─────────────────────────────────
         self._ensure_autredette_table()
         self.cursor.execute("""
             SELECT id, 'Dette Manuelle' AS type, numfact, dateregistre, montant, dateecheance,
@@ -743,7 +788,6 @@ class PageFournisseur(ctk.CTkFrame):
                 WHERE lf.reflivfrs = %s AND cd.idfrs = %s AND lf.deleted = 0 AND lf.a_payer = 1
             """, (reflivfrs, idfrs))
             details = self.cursor.fetchall()
-
             montant_total = sum(float(d[4] or 0) for d in details)
 
         except psycopg2.Error as err:
@@ -772,7 +816,7 @@ class PageFournisseur(ctk.CTkFrame):
         info_frame.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
 
         ctk.CTkLabel(info_frame, text="Informations du Bon de Réception",
-                     font=ctk.CTkFont(size=12, weight="bold"), text_color="#2c3e50"
+                     font=_F(_FONT_SIZE_LG, "bold"), text_color="#2c3e50"
                      ).grid(row=0, column=0, columnspan=6, sticky="w", padx=10, pady=(8, 4))
 
         infos = [
@@ -788,17 +832,17 @@ class PageFournisseur(ctk.CTkFrame):
         row2_infos = infos[4:]
         for col_idx, (label, value) in enumerate(row1_infos):
             ctk.CTkLabel(info_frame, text=label,
-                         font=ctk.CTkFont(weight="bold", size=10), text_color="#34495e"
+                         font=_F(_FONT_SIZE_SM, "bold"), text_color="#34495e"
                          ).grid(row=1, column=col_idx * 2, sticky="w", padx=(10, 2), pady=(0, 4))
             ctk.CTkLabel(info_frame, text=value,
-                         font=ctk.CTkFont(size=10), text_color="#2c3e50"
+                         font=_F(_FONT_SIZE_SM), text_color="#2c3e50"
                          ).grid(row=1, column=col_idx * 2 + 1, sticky="w", padx=(0, 14), pady=(0, 4))
         for col_idx, (label, value) in enumerate(row2_infos):
             ctk.CTkLabel(info_frame, text=label,
-                         font=ctk.CTkFont(weight="bold", size=10), text_color="#34495e"
+                         font=_F(_FONT_SIZE_SM, "bold"), text_color="#34495e"
                          ).grid(row=2, column=col_idx * 2, sticky="w", padx=(10, 2), pady=(0, 8))
             ctk.CTkLabel(info_frame, text=value,
-                         font=ctk.CTkFont(size=10), text_color="#2c3e50"
+                         font=_F(_FONT_SIZE_SM), text_color="#2c3e50"
                          ).grid(row=2, column=col_idx * 2 + 1, sticky="w", padx=(0, 14), pady=(0, 8))
 
         detail_frame = ctk.CTkFrame(win)
@@ -807,13 +851,13 @@ class PageFournisseur(ctk.CTkFrame):
         detail_frame.grid_rowconfigure(1, weight=1)
 
         ctk.CTkLabel(detail_frame, text="Articles Livrés",
-                     font=ctk.CTkFont(size=12, weight="bold")
+                     font=_F(_FONT_SIZE_LG, "bold")
                      ).grid(row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(8, 4))
 
         cols = ("Désignation", "Unité", "Quantité", "Prix Unitaire", "Montant")
         tree_detail = ttk.Treeview(detail_frame, columns=cols, show="headings", height=12)
-        tree_detail.tag_configure("even", background="#FFFFFF")
-        tree_detail.tag_configure("odd", background="#FFF3E0")
+        tree_detail.tag_configure("even", background="#FFFFFF", foreground="#2C3E50")
+        tree_detail.tag_configure("odd",  background="#FEF9F0", foreground="#2C3E50")
 
         col_widths = {"Désignation": 220, "Unité": 70, "Quantité": 80, "Prix Unitaire": 110, "Montant": 110}
         col_anchor = {"Quantité": "e", "Prix Unitaire": "e", "Montant": "e"}
@@ -837,11 +881,12 @@ class PageFournisseur(ctk.CTkFrame):
         total_frame = ctk.CTkFrame(win, fg_color="#f3e5f5")
         total_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 4))
         ctk.CTkLabel(total_frame, text=f"Montant Total :  {montant_total:,.2f} Ar",
-                     font=ctk.CTkFont(size=13, weight="bold"), text_color="#6c3483"
+                     font=_F(_FONT_SIZE_LG, "bold"), text_color="#6c3483"
                      ).pack(side="right", padx=20, pady=8)
 
         ctk.CTkButton(win, text="Fermer", command=win.destroy,
-                      fg_color="#7f8c8d", width=100).grid(row=3, column=0, pady=(0, 10))
+                      fg_color="#7f8c8d", width=100,
+                      font=_F(_FONT_SIZE_MD)).grid(row=3, column=0, pady=(0, 10))
 
     def _open_dette_manuelle_detail_window(self, dette_id, parent_window):
         try:
@@ -880,7 +925,7 @@ class PageFournisseur(ctk.CTkFrame):
         frame.pack(fill="both", expand=True, padx=14, pady=14)
 
         ctk.CTkLabel(frame, text="Informations de la Dette Manuelle",
-                     font=ctk.CTkFont(size=13, weight="bold"), text_color="#2c3e50"
+                     font=_F(_FONT_SIZE_LG, "bold"), text_color="#2c3e50"
                      ).pack(anchor="w", padx=10, pady=(10, 8))
 
         infos = [
@@ -895,13 +940,14 @@ class PageFournisseur(ctk.CTkFrame):
             row_f = ctk.CTkFrame(frame, fg_color="transparent")
             row_f.pack(anchor="w", padx=10, pady=3, fill="x")
             ctk.CTkLabel(row_f, text=label,
-                         font=ctk.CTkFont(weight="bold", size=11), text_color="#34495e",
+                         font=_F(_FONT_SIZE_MD, "bold"), text_color="#34495e",
                          width=190).pack(side="left")
             ctk.CTkLabel(row_f, text=value,
-                         font=ctk.CTkFont(size=11), text_color="#2c3e50").pack(side="left")
+                         font=_F(_FONT_SIZE_MD), text_color="#2c3e50").pack(side="left")
 
         ctk.CTkButton(win, text="Fermer", command=win.destroy,
-                      fg_color="#7f8c8d", width=100).pack(pady=(8, 10))
+                      fg_color="#7f8c8d", width=100,
+                      font=_F(_FONT_SIZE_MD)).pack(pady=(8, 10))
 
     # ──────────────────────────────────────────────────────────────────
     # FENÊTRE PAIEMENT GLOBAL
@@ -944,23 +990,23 @@ class PageFournisseur(ctk.CTkFrame):
         )
 
         ctk.CTkLabel(main_frame, text=info_text, justify="left", anchor="w",
-                     font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold")).grid(
+                     font=_F(_FONT_SIZE_MD, "bold")).grid(
             row=0, column=0, sticky="ew", padx=8, pady=(8, 10))
 
         ctk.CTkLabel(main_frame, text=f"Montant Global à Payer (max: {dette_total_restant:,.2f} Ar):",
-                     font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
-        entry_montant = ctk.CTkEntry(main_frame)
+                     font=_F(_FONT_SIZE_MD, "bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
+        entry_montant = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(main_frame, text="Observation (optionnel):",
-                     font=ctk.CTkFont(weight="bold")).grid(row=3, column=0, sticky="w", padx=8, pady=(2, 4))
-        entry_obs = ctk.CTkEntry(main_frame)
+                     font=_F(_FONT_SIZE_MD, "bold")).grid(row=3, column=0, sticky="w", padx=8, pady=(2, 4))
+        entry_obs = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
         entry_obs.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(main_frame,
                      text="Le paiement sera distribué automatiquement par ancienneté (commandes les plus anciennes d'abord).",
                      text_color="#95a5a6", justify="left", anchor="w", wraplength=560,
-                     font=ctk.CTkFont(family="Segoe UI", size=10, slant="italic")).grid(
+                     font=_F(_FONT_SIZE_SM)).grid(
             row=5, column=0, sticky="ew", padx=8, pady=(0, 8))
 
         try:
@@ -973,8 +1019,8 @@ class PageFournisseur(ctk.CTkFrame):
         mode_map = {m[1]: m[0] for m in modes} if modes else {}
 
         ctk.CTkLabel(main_frame, text="Mode de Paiement:",
-                     font=ctk.CTkFont(weight="bold")).grid(row=6, column=0, sticky="w", padx=8, pady=(0, 4))
-        mode_combo = ctk.CTkComboBox(main_frame, values=mode_names)
+                     font=_F(_FONT_SIZE_MD, "bold")).grid(row=6, column=0, sticky="w", padx=8, pady=(0, 4))
+        mode_combo = ctk.CTkComboBox(main_frame, values=mode_names, font=_F(_FONT_SIZE_MD))
         if mode_names:
             default_mode = "Espèces" if "Espèces" in mode_names else mode_names[0]
             mode_combo.set(default_mode)
@@ -1046,10 +1092,12 @@ class PageFournisseur(ctk.CTkFrame):
 
         ctk.CTkButton(btn_frame, text="Effectuer le Paiement",
                       command=enregistrer_paiement_global,
-                      fg_color="#e67e22", width=170).pack(side="left", padx=5)
+                      fg_color="#e67e22", width=170,
+                      font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="Annuler",
                       command=payment_window.destroy,
-                      fg_color="#e74c3c", width=130).pack(side="left", padx=5)
+                      fg_color="#e74c3c", width=130,
+                      font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
 
     # ──────────────────────────────────────────────────────────────────
     # FENÊTRE AJOUTER DETTE MANUELLE
@@ -1079,17 +1127,19 @@ class PageFournisseur(ctk.CTkFrame):
         main_frame.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(main_frame, text="Enregistrer une Dette Manuelle",
-                     font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold")).grid(
+                     font=_F(_FONT_SIZE_LG, "bold")).grid(
             row=0, column=0, sticky="w", padx=8, pady=(8, 10))
 
         ctk.CTkLabel(main_frame, text="Référence (N° Facture Fournisseur) :",
-                     font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(2, 4))
-        entry_numfact = ctk.CTkEntry(main_frame, placeholder_text="Ex: FACT-FRS-001")
+                     font=_F(_FONT_SIZE_MD, "bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(2, 4))
+        entry_numfact = ctk.CTkEntry(main_frame, placeholder_text="Ex: FACT-FRS-001",
+                                     font=_F(_FONT_SIZE_MD))
         entry_numfact.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(main_frame, text="Montant (Ar) :",
-                     font=ctk.CTkFont(weight="bold")).grid(row=3, column=0, sticky="w", padx=8, pady=(2, 4))
-        entry_montant = ctk.CTkEntry(main_frame, placeholder_text="Ex: 150000")
+                     font=_F(_FONT_SIZE_MD, "bold")).grid(row=3, column=0, sticky="w", padx=8, pady=(2, 4))
+        entry_montant = ctk.CTkEntry(main_frame, placeholder_text="Ex: 150000",
+                                     font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
 
         def enregistrer_dette():
@@ -1147,9 +1197,9 @@ class PageFournisseur(ctk.CTkFrame):
         btn_frame.grid(row=5, column=0, sticky="e", padx=8, pady=(10, 6))
 
         ctk.CTkButton(btn_frame, text="Enregistrer", command=enregistrer_dette,
-                      fg_color="#8e44ad").pack(side="left", padx=5)
+                      fg_color="#8e44ad", font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="Annuler", command=dette_window.destroy,
-                      fg_color="#e74c3c").pack(side="left", padx=5)
+                      fg_color="#e74c3c", font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
 
     # ──────────────────────────────────────────────────────────────────
     # GÉNÉRATION PDF — inchangée
