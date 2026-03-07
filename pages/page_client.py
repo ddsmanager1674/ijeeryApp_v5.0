@@ -23,8 +23,15 @@ except ImportError:
 
 from .page_clientCrédit import PageClientCrédit
 
+
+try:
+    from app_theme import Colors, Fonts, styled, Theme
+    _T = True
+except ImportError:
+    _T = False
+
 # ── Constantes de police (cohérence globale) ─────────────────────────────────
-_FONT_FAMILY  = "Segoe UI"
+_FONT_FAMILY  = "Roboto" if _T else "Segoe UI"
 _FONT_SIZE_SM = 10   # labels secondaires, infos
 _FONT_SIZE_MD = 11   # corps standard, entrées
 _FONT_SIZE_LG = 13   # titres de section
@@ -44,7 +51,7 @@ def _apply_treeview_theme():
         "Treeview.Heading",
         background="#2C3E50",        # Midnight Blue
         foreground="#FFFFFF",
-        font=(_FONT_FAMILY, _FONT_SIZE_MD, "bold"),
+        font=(_FONT_FAMILY, _FONT_SIZE_SM, "bold"),
         relief="flat",
         padding=(8, 6),
     )
@@ -60,8 +67,8 @@ def _apply_treeview_theme():
         background="#FFFFFF",
         foreground="#2C3E50",
         fieldbackground="#FFFFFF",
-        font=(_FONT_FAMILY, _FONT_SIZE_MD),
-        rowheight=28,
+        font=(_FONT_FAMILY, _FONT_SIZE_SM),
+        rowheight=25,
         borderwidth=0,
     )
     style.map(
