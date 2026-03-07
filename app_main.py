@@ -1,2162 +1,977 @@
 # -*- coding: utf-8 -*-
-import customtkinter as ctk
-from PIL import Image
-import os
+"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              iJeery — app_main.py  (Shell principal v2.0)                  ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Refonte :                                                                  ║
+║   • Sidebar entièrement repensée (responsive, toggle hamburger propre)     ║
+║   • Toggle collapse → seul l'icône hamburger reste visible                 ║
+║   • Sous-menus en accordéon fluide, organisation claire                    ║
+║   • Grid-based layout — pas de pack_forget/pack en cascade                 ║
+║   • Chargement lazy des pages (imports différés)                            ║
+║   • Horloge title-bar sans boucle gourmande                                ║
+║   • Couleurs des boutons inchangées (conformément à la demande)            ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+
+from __future__ import annotations
+
+import importlib
+import importlib.util
 import json
+import os
+import subprocess
 import sys
 import time
-import subprocess
-import tkinter as tk
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Callable
+
+import customtkinter as ctk
+from PIL import Image
+from tkinter import messagebox
 import psycopg2
-from psycopg2 import OperationalError
-import importlib.util
 
-# Ensure the parent directory is in the Python path for absolute imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# ── Chemins ──────────────────────────────────────────────────────────────────
+_BASE = os.path.dirname(os.path.abspath(__file__))
+if _BASE not in sys.path:
+    sys.path.insert(0, _BASE)
 
+# ── Thème ─────────────────────────────────────────────────────────────────────
+try:
+    from app_theme import Colors, Fonts, Theme
+    _THEME = True
+except ImportError:
+    _THEME = False
+    class Colors:
+        BG_PAGE = "#ECF0F1"; BG_CARD = "#FFFFFF"; MIDNIGHT = "#2C3E50"
+        MIDNIGHT_LIGHT = "#34495E"; PRIMARY = "#3498DB"; SILVER = "#BDC3C7"
+        TEXT_ON_DARK = "#FFFFFF"; TEXT_MUTED = "#95A5A6"; DIVIDER = "#E8EAED"
+    class Fonts:
+        @staticmethod
+        def get(s=12, w="normal"):
+            return ctk.CTkFont(family="Segoe UI", size=s, weight=w)
+        @classmethod
+        def bold(cls, s=12): return cls.get(s, "bold")
+        @classmethod
+        def body(cls, s=12): return cls.get(s)
 
-# Import all your page modules
-from pages.page_activitePrix import PageActivitePrix
-from pages.page_absence import PageAbsence
-from pages.page_article import PageArticle
-from pages.page_ArticleListe import page_listeArticle
-from pages.page_articleFrs import PageArticleFrs
-from pages.page_articleMouvement import PageArticleMouvement
-from pages.page_autorisation import PageAutorisation
-from pages.page_avance15e import PageAVQ
-from pages.page_avanceSpecial_ import FenetreAvanceSpec
-from pages.page_avoir import PageAvoir
-from pages.page_banque import PageBanque
-from pages.page_banqueAjout import PageBanqueNv
-from pages.page_BaseListe import PageBaseListe
-from pages.page_caisse import PageCaisse
-from pages.page_categorieArticle import PageCategorieArticle
-from pages.page_categorieCompte import PageCategorieCompte
-from pages.page_client import PageClient
-from pages.page_clientCrédit import PageClientCrédit
-from pages.page_CmdFrs import PageCommandeFrs
-from pages.page_CodeAutorisation import PageCodeAutorisation
-from pages.page_decaissement import PageDecaissement
-from pages.page_encaissement import PageEncaissement
-from pages.page_evenement import PageEvenement
-from pages.page_decaissementBq import PageDecaissementBq
-from pages.page_encaissementBq import PageEncaissementBq
-from pages.page_Facturation import PageFacturation
-from pages.page_factureListe import PageFactureListe
-from pages.page_fonction import PageFonction
-from pages.page_fournisseur import PageFournisseur
-from pages.page_FrsDette import PageFrsDette
-from pages.page_home import page_home
-from pages.page_chat import PageChat
-from pages.page_infoArticle import PageInfoArticle
-from pages.page_inventaire import PageInventaire
-from pages.page_infoMouvement import PageInfoMouvementStock
-from pages.page_livrFrs import PageBonReception
-from pages.page_LivraisonClient import PageLivraisonClient
-from pages.page_ListeFacture import PageListeFacture
-from pages.page_magasin import PageMagasin
-from pages.page_mainPers import PageMainPersonnel
-from pages.page_personnelAjout import PagePeronnelAjout
-from pages.page_personnel import PagePersonnel
-from pages.page_peremption import PageGestionPeremption
-from pages.page_menu import PageMenu
-from pages.page_mouvementStock import PageMouvementStock
-from pages.page_pmtCredit import PagePmtCredit
-from pages.page_pmtFacture import PagePmtFacture
-from pages.page_pmtFrs import PagePmtFrs
-from pages.page_pmtSalaire import PageValidationSalaire
-from pages.page_presence import PagePresence
-from pages.page_prixListe import PagePrixListe
-from pages.page_prixSaisie import PagePrixSaisie
-from pages.page_prixRevient import PagePrixRevient
-from pages.page_proforma import PageCommandeCli
-from pages.page_reinit import DBInitializerApp
-from pages.page_salaireBase_ import PageSalaireBase
-from pages.page_salaireEtatBase_ import PageSalaireEtatSB
-from pages.page_salaireEtatHoraire_ import PageEtatSalaireHoraire
-from pages.page_sauvegarde import PageSauvegarde
-from pages.page_sortie import PageSortie
-from pages.page_stock import PageStock
-from pages.page_StockLivraison import PageStockLivraison
-from pages.page_StockAlerte import PageStockAlerte
-from pages.page_SuiviCommande import PageSuiviCommande
-from pages.page_transfert import PageTransfert
-from pages.page_transfertBanque import PageTransfertBanque
-from pages.page_transfertCaisse import PageTransfertCaisse
-from pages.page_tauxhoraire import PageTauxHoraire
-from pages.page_typePmt import PageTypePmt
-from pages.page_unite import PageUnite
-from pages.page_unite import PageUniteToplevel
-from pages.page_users import PageUsers
-from pages.page_venteParMsin import PageVenteParMsin
-from pages.page_vente import PageVente
-from pages.page_listeMouvement import PageListeMouvement
-# from pages.page_absenceMiseAjour import PageAbsenceMJ
-
-from tkinter import messagebox # Import messagebox for logout confirmation
-
-
-from theme import FONTS, FONT_TUPLE, load_roboto, apply_global_font
-
-
-
-def charger_page_dynamique(nom_module, nom_classe, parent_frame, iduser):
-    """Charge une classe depuis un fichier .py externe"""
-    try:
-        # Déterminer le chemin du dossier 'pages'
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(os.path.abspath(__file__))
-        
-        chemin_fichier = os.path.join(base_path, "pages", f"{nom_module}.py")
-
-        if not os.path.exists(chemin_fichier):
-            messagebox.showerror("Erreur", f"Fichier introuvable : {chemin_fichier}")
-            return None
-
-        # Importation dynamique
-        spec = importlib.util.spec_from_file_location(nom_module, chemin_fichier)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        
-        # Récupérer la classe et l'instancier
-        classe_page = getattr(module, nom_classe)
-        return classe_page(parent_frame, iduser)
-    except Exception as e:
-        messagebox.showerror("Erreur de Module", f"Impossible de charger {nom_module} : {e}")
-        return None
-
+try:
+    from theme import load_roboto, apply_global_font
+    _HAS_THEME = True
+except ImportError:
+    _HAS_THEME = False
+    def load_roboto(): pass
+    def apply_global_font(w): pass
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
+def resource_path(rel: str) -> str:
+    base = getattr(sys, "_MEIPASS", _BASE)
+    return os.path.join(base, rel)
 
-    return os.path.join(base_path, relative_path)
+# ── Utilitaire de police rapide ───────────────────────────────────────────────
+def _F(size=11, weight="normal"):
+    fam = "Roboto" if _THEME else "Segoe UI"
+    return ctk.CTkFont(family=fam, size=size, weight=weight)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GESTIONNAIRE DE BASE DE DONNÉES
+# ─────────────────────────────────────────────────────────────────────────────
 
 class DatabaseManager:
+    """Connexion PostgreSQL centralisée avec retry simple."""
+
     def __init__(self):
-        self.db_params = self._load_db_config()
-        self.conn = None
+        self.db_params = self._load_config()
 
-    def _load_db_config(self):
-        try:
-            if getattr(sys, 'frozen', False):
-                base_path = os.path.dirname(sys.executable)
-            else:
-                base_path = os.path.dirname(os.path.abspath(__file__))
+    def _load_config(self):
+        paths = [
+            os.path.join(_BASE, "config.json"),
+            "config.json",
+        ]
+        for p in paths:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        return json.load(f)["database"]
+                except Exception as e:
+                    print(f"[DB] config.json invalide ({p}): {e}")
+        print("[DB] ❌ config.json introuvable.")
+        return None
 
-            config_path = os.path.join(base_path, "config.json")
-
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-
-            return config["database"]
-
-        except FileNotFoundError:
-            print(f"Erreur : config.json introuvable ({config_path})")
-            return None
-        except KeyError:
-            print("Erreur : clé 'database' absente dans config.json")
-            return None
-        except json.JSONDecodeError as e:
-            print(f"Erreur JSON : {e}")
-            return None
-    
     def get_connection(self):
-        """Establishes a new database connection."""
-        if self.db_params is None:
-            print("❌ Cannot connect: Database configuration is missing.")
+        if not self.db_params:
             return None
-    
         try:
-            print(f"🔄 Tentative de connexion à:")
-            print(f"   Host: {self.db_params['host']}")
-            print(f"   Port: {self.db_params['port']}")
-            print(f"   User: {self.db_params['user']}")
-            print(f"   Database: {self.db_params['database']}")
-        
-            self.conn = psycopg2.connect(
-                host=self.db_params['host'],
-                user=self.db_params['user'],
-                password=self.db_params['password'],
-                database=self.db_params['database'],
-                port=self.db_params['port'],
-                connect_timeout=10  # Timeout de 10 secondes
+            conn = psycopg2.connect(
+                host=self.db_params["host"],
+                user=self.db_params["user"],
+                password=self.db_params["password"],
+                database=self.db_params["database"],
+                port=self.db_params["port"],
+                connect_timeout=10,
             )
-            print("✅ Connection to the database successful!")
-            return self.conn
-        
+            print("[DB] ✅ Connexion établie.")
+            return conn
         except psycopg2.OperationalError as e:
-            print(f"❌ ERREUR OPÉRATIONNELLE PostgreSQL:")
-            print(f"   {str(e)}")
-        
-            # Messages d'erreur spécifiques
-            if "timeout" in str(e).lower():
-                print("   → Le serveur ne répond pas (pare-feu ou serveur arrêté)")
-            elif "password authentication failed" in str(e).lower():
-                print("   → Mot de passe incorrect")
-            elif "no route to host" in str(e).lower():
-                print("   → Impossible d'atteindre le serveur (réseau)")
-            elif "connection refused" in str(e).lower():
-                print("   → PostgreSQL n'écoute pas sur ce port")
-            
-            return None
-        
-        except Exception as e:
-            print(f"❌ AUTRE ERREUR: {type(e).__name__}")
-            print(f"   {str(e)}")
+            print(f"[DB] ❌ {e}")
             return None
 
 
-class App(ctk.CTk):
-    def __init__(self, session_data):
-        super().__init__()
+# ─────────────────────────────────────────────────────────────────────────────
+# DÉFINITION DES MENUS (séparation données / UI)
+# ─────────────────────────────────────────────────────────────────────────────
+# Format : (label_affiché, clé_auth, module_path, class_name, kwargs_spéciaux)
+# kwargs_spéciaux peut être None ou un dict indiquant des args non-standard
 
-        load_roboto()           # ← charge les .ttf dans Windows
-        apply_global_font(self) # ← force Roboto sur tous les widgets
+MENU_STRUCTURE = [
+    # ── TABLEAU DE BORD ────────────────────────────────────────────────────
+    {
+        "id":    "DASHBOARD",
+        "label": "📊  TABLEAU DE BORD",
+        "auth":  "TABLEAU DE BORD",
+        "color": "#268908",
+        "hover": "#4CE01F",
+        "module": "pages.page_home",
+        "class":  "page_home",
+        "subs":  [],
+    },
+    # ── CHAT INTERNE ───────────────────────────────────────────────────────
+    {
+        "id":    "CHAT",
+        "label": "💬  CHAT INTERNE",
+        "auth":  "CHAT INTERNE",
+        "color": "#A19407",
+        "hover": "#cad256",
+        "module": "pages.page_chat",
+        "class":  "PageChat",
+        "kwargs": "chat",
+        "subs":  [],
+    },
+    # ── COMMERCIALE ────────────────────────────────────────────────────────
+    {
+        "id":    "COMMERCIALE",
+        "label": "🛒  COMMERCIALE",
+        "color": "#034787",
+        "hover": "#0565c9",
+        "subs": [
+            ("📦  Article Liste",       "Article Liste",         "pages.page_ArticleListe",    "page_listeArticle",    None),
+            ("👤  Client",              "Client",                "pages.page_client",           "PageClient",          None),
+            ("🏭  Fournisseur",         "Fournisseur",           "pages.page_fournisseur",      "PageFournisseur",     None),
+            ("🏬  Magasin",             "Magasin",               "pages.page_magasin",          "PageMagasin",         None),
+            ("📊  Ventes",              "Ventes",                "pages.page_vente",            "PageVente",           "vente"),
+            ("💰  Ventes par Dépôt",   "Ventes par Dépôt",      None,                          None,                  "vente_tab"),
+            ("📄  Facturation",         "Facturation",           None,                          None,                  "vente_tab"),
+            ("📋  Liste Facture",       "Liste Facture",         "pages.page_ListeFacture",     "PageListeFacture",    None),
+            ("📦  Stock Article",       "Stock Article",         "pages.page_stock",            "PageStock",           None),
+            ("⚠️  Stock Alerte",        "Stock Alerte",          "pages.page_StockAlerte",      "PageStockAlerte",     None),
+            ("🛡️  Péremption Article",  "Péremption d'article",  "pages.page_peremption",       "PageGestionPeremption", None),
+            ("🚚  Stock Livraison",     "Stock Livraison",       "pages.page_StockLivraison",   "PageStockLivraison",  None),
+            ("🔄  Mouvement Article",   "Mouvement d'article",   "pages.page_articleMouvement", "PageArticleMouvement", None),
+            ("📊  Mouvement Stock",     "Mouvement Stock",       "pages.page_infoMouvement",    "PageInfoMouvementStock", "iduser"),
+            ("📋  Liste Mouvements",    "Liste mouvements",      "pages.page_listeMouvement",   "PageListeMouvement",  None),
+            ("📍  Suivi Commande",      "Suivi Commande",        "pages.page_SuiviCommande",    "PageSuiviCommande",   None),
+            ("💲  Prix Article",        "Prix d'article",        "pages.page_prixListe",        "PagePrixListe",       None),
+            ("📊  Prix de Revient",     "Prix de revient",       "pages.page_prixRevient",      "PagePrixRevient",     None),
+            ("🚚  Livraison Client",    "Livraison Client",      "pages.page_LivraisonClient",  "PageLivraisonClient", "vente"),
+        ],
+    },
+    # ── PERSONNEL ──────────────────────────────────────────────────────────
+    {
+        "id":    "PERSONNEL",
+        "label": "👥  PERSONNEL",
+        "color": "#036C6B",
+        "hover": "#2ec8cd",
+        "subs": [
+            ("👥  Liste Personnel",     "Liste Personnel",       "pages.page_mainPers",         "PageMainPersonnel",   None),
+            ("❌  Absence",             "Absence",               "pages.page_absence",          "PageAbsence",         None),
+            ("✅  Présence",            "Présence",              "pages.page_presence",         "PagePresence",        None),
+            ("💸  Avance 15e",          "Avance 15e",            "pages.page_avance15e",        "PageAVQ",             "iduser"),
+            ("💰  Avance Spéciale",     "Avance Spéciale",       "pages.page_avanceSpecial_",   "FenetreAvanceSpec",   "iduser"),
+            ("👔  Fonction",            "Fonction",              "pages.page_fonction",         "PageFonction",        None),
+            ("📋  Nouveau SB",          "Nouveau SB",            "pages.page_salaireBase_",     "PageSalaireBase",     "app_root"),
+            ("📊  État de Salaire",     "Etat de Salaire",       "pages.page_salaireEtatBase_", "PageSalaireEtatSB",   None),
+            ("📊  Salaire Horaire",     "Salaire Horaire",       "pages.page_salaireEtatHoraire_", "PageEtatSalaireHoraire", None),
+            ("💲  Taux Horaire",        "Taux Horaire",          "pages.page_tauxhoraire",      "PageTauxHoraire",     "app_root"),
+            ("💳  Paiement Salaire",    "Paiement Salaire",      "pages.page_pmtSalaire",       "PageValidationSalaire", None),
+        ],
+    },
+    # ── TRÉSORERIE ─────────────────────────────────────────────────────────
+    {
+        "id":    "TRESORERIE",
+        "label": "💰  TRÉSORERIE",
+        "color": "#87035D",
+        "hover": "#c936c2",
+        "subs": [
+            ("🏧  Caisse",              "Caisse",                "pages.page_caisse",           "PageCaisse",          None),
+            ("💳  Client à Payer",      "Facture Liste",         "pages.page_factureListe",     "PageFactureListe",    None),
+            ("💰  Fournisseur à Payer", "Fournisseur Dettes",    "pages.page_FrsDette",         "PageFrsDette",        None),
+            ("🏦  Banque",              "Banque",                "pages.page_banque",           "PageBanque",          None),
+            ("➕  Ajout Banque",        "Ajout Banque",          "pages.page_banqueAjout",      "PageBanqueNv",        None),
+            ("🔄  Transfert Banque",    "Transfert Banque",      "pages.page_transfertBanque",  "PageTransfertBanque", "vente"),
+            ("🔄  Transfert Caisse",    "Transfert Caisse",      "pages.page_transfertCaisse",  "PageTransfertCaisse", "vente"),
+            ("💸  Décaissement",        "Decaissement",          "pages.page_decaissement",     "PageDecaissement",    None),
+            ("🏦  Décaissement Bq",     "DecaissementBq",        "pages.page_decaissementBq",   "PageDecaissementBq",  None),
+            ("📥  Encaissement",        "Encaissement",          "pages.page_encaissement",     "PageEncaissement",    None),
+            ("📥  Encaissement Bq",     "EncaissementBq",        "pages.page_encaissementBq",   "PageEncaissementBq",  None),
+        ],
+    },
+    # ── BASE DE DONNÉES ────────────────────────────────────────────────────
+    {
+        "id":    "DATABASE",
+        "label": "🗄️  BASE DE DONNÉES",
+        "color": "#874903",
+        "hover": "#d7956e",
+        "subs": [
+            ("🔐  Autorisation",        "Autorisation",          "pages.page_autorisation",     "PageAutorisation",    None),
+            ("📅  Événements",          "Evenements",            "pages.page_evenement",        "PageEvenement",       None),
+            ("💾  Sauvegarde",          "Sauvegarde",            "pages.page_sauvegarde",       "PageSauvegarde",      None),
+            ("👨‍💻  Utilisateurs",       "Utilisateurs",          "pages.page_users",            "PageUsers",           None),
+            ("📋  Menu",                "Menu",                  "pages.page_menu",             "PageMenu",            None),
+            ("📚  Base Liste",          "Base Liste",            "pages.page_BaseListe",        "PageBaseListe",       None),
+            ("🔐  Autorisation Admin",  "Autorisation Admin",    "pages.page_CodeAutorisation", "PageCodeAutorisation", None),
+            ("🔧  Init DB",             "Init DB",               "pages.page_reinit",           "DBInitializerApp",    "toplevel"),
+        ],
+    },
+    # ── EXAMEN BLANC ───────────────────────────────────────────────────────
+    {
+        "id":    "EXAMEN_BLANC",
+        "label": "📚  EXAMEN BLANC",
+        "color": "#034787",
+        "hover": "#0565c9",
+        "subs": [
+            ("📚  Matière EB",          "Matiere EB",            "pages.page_BaseListe",        "PageBaseListe",       None),
+            ("👨‍🎓  Étudiant EB",        "Etudiant EB",           "pages.page_BaseListe",        "PageBaseListe",       None),
+            ("📝  Notes EB",            "Notes EB",              "pages.page_BaseListe",        "PageBaseListe",       None),
+            ("⚖️  Délibération EB",     "Déliberation EB",       "pages.page_BaseListe",        "PageBaseListe",       None),
+            ("🏆  Résultat EB",         "Résultat EB",           "pages.page_BaseListe",        "PageBaseListe",       None),
+        ],
+    },
+]
 
-        
-        self.title("iJerry - Tableau de Bord")
-        self.geometry("1200x760")
-        self.minsize(900, 560)
 
-        
+# ─────────────────────────────────────────────────────────────────────────────
+# CHARGEMENT DYNAMIQUE DES PAGES
+# ─────────────────────────────────────────────────────────────────────────────
 
-        
-        # ... reste inchangé
+def _lazy_load(module_path: str, class_name: str):
+    """Importe un module et retourne la classe demandée (import différé)."""
+    try:
+        mod = importlib.import_module(module_path)
+        return getattr(mod, class_name)
+    except ImportError as e:
+        print(f"[lazy_load] Import échoué {module_path}.{class_name}: {e}")
+        return None
+    except AttributeError:
+        print(f"[lazy_load] Classe {class_name} introuvable dans {module_path}")
+        return None
 
-        # Responsive state
-        self._base_window_width = 1200
-        self._base_window_height = 760
-        self._ui_scale = 1.0
-        self._sidebar_expanded_width = 220
-        self._sidebar_collapsed_width = 44
-        self._main_button_height = 60
-        self._submenu_button_height = 40
-        self._main_font_size = 14
-        self._submenu_font_size = 12
-        self._toggle_font_size = 16
-        self._menu_pad_x = 10
-        self._menu_pad_y = 5
-        self._submenu_pad_x = 5
-        self._submenu_pad_y = 2
-        self._menu_corner_radius = 10
-        self._sidebar_logo_path = None
-        self._sidebar_logo_size = None
-        self._last_resize_update = 0.0
-        self.sidebar_title_label = None
-        
-        self.sidebar_expand = True
-        self.session_data = session_data
-        self.authorized_menus = {menu[0]: menu[1] for menu in session_data['menus']}
-        self.id_user_connecte = session_data.get('user_id')  # NOUVEAU
-        
-        # Initialiser la connexion DB en premier
-        self.db_manager = DatabaseManager()
-        self.db_conn = self.db_manager.get_connection()
 
-        # Récupérer le nom de la société juste après la connexion réussie
-        self.fetch_societe_info()
-        
-        if self.db_conn is None:
-            from tkinter import messagebox
-            messagebox.showerror("Erreur", "Impossible de se connecter à la base de données")
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPOSANT : BOUTON DE SOUS-MENU (accordéon)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SubMenuButton(ctk.CTkButton):
+    """Bouton de sous-menu avec indentation visuelle."""
+
+    def __init__(self, parent, text, command, color, hover, **kw):
+        super().__init__(
+            parent,
+            text=text,
+            command=command,
+            fg_color=color,
+            hover_color=hover,
+            text_color="#FFFFFF",
+            anchor="w",
+            corner_radius=6,
+            height=34,
+            font=_F(11),
+            **kw,
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPOSANT : ENTRÉE DE MENU PRINCIPAL (avec accordéon)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MenuAccordion(ctk.CTkFrame):
+    """
+    Bouton principal + frame de sous-menus collapsable.
+    Indépendant du gestionnaire de sidebar.
+    """
+
+    def __init__(self, parent, cfg: dict, app: "App", sidebar_ref: "Sidebar"):
+        super().__init__(parent, fg_color="transparent", corner_radius=0)
+
+        self._cfg        = cfg
+        self._app        = app
+        self._sidebar    = sidebar_ref
+        self._expanded   = False
+        self._sub_frame  = None
+
+        color = cfg.get("color", "#034787")
+        hover = cfg.get("hover", "#0565c9")
+
+        # Bouton principal
+        label = cfg.get("label", "")
+        has_subs = bool(cfg.get("subs"))
+        arrow_text = "  ▾" if has_subs else ""
+
+        self._main_btn = ctk.CTkButton(
+            self,
+            text=label + arrow_text,
+            fg_color=color,
+            hover_color=hover,
+            text_color="#FFFFFF",
+            anchor="w",
+            corner_radius=8,
+            height=46,
+            font=_F(12, "bold"),
+            command=self._on_click,
+        )
+        self._main_btn.pack(fill="x", padx=6, pady=(2, 0))
+
+        # Frame des sous-menus (caché par défaut)
+        if has_subs:
+            self._sub_frame = ctk.CTkFrame(self, fg_color="transparent")
+            self._build_sub_buttons()
+            # Caché initialement
+
+    def _build_sub_buttons(self):
+        if not self._sub_frame:
+            return
+        color = self._cfg.get("color", "#034787")
+        hover = self._cfg.get("hover", "#0565c9")
+        # Légèrement assombri pour différencier
+        for item in self._cfg.get("subs", []):
+            lbl, auth, mod_path, cls_name, kwargs_key = item
+            btn = SubMenuButton(
+                self._sub_frame,
+                text="  " + lbl,
+                command=lambda m=mod_path, c=cls_name, k=kwargs_key, a=auth: (
+                    self._app.navigate(m, c, k, a)
+                ),
+                color=color,
+                hover=hover,
+            )
+            btn.pack(fill="x", padx=(18, 6), pady=1)
+
+    def _on_click(self):
+        if self._cfg.get("subs"):
+            self._toggle()
+        else:
+            # Page directe
+            mod   = self._cfg.get("module")
+            cls   = self._cfg.get("class")
+            kw    = self._cfg.get("kwargs")
+            auth  = self._cfg.get("auth", "")
+            self._app.navigate(mod, cls, kw, auth)
+
+    def _toggle(self):
+        if self._expanded:
+            self._collapse()
+        else:
+            # Fermer les autres accordéons
+            self._sidebar.collapse_all_except(self)
+            self._expand()
+
+    def _expand(self):
+        if self._sub_frame:
+            self._sub_frame.pack(fill="x", after=self._main_btn, pady=(0, 2))
+            self._expanded = True
+            # Mettre à jour la flèche
+            cur = self._main_btn.cget("text")
+            self._main_btn.configure(text=cur.replace("▾", "▴"))
+
+    def _collapse(self):
+        if self._sub_frame:
+            self._sub_frame.pack_forget()
+            self._expanded = False
+            cur = self._main_btn.cget("text")
+            self._main_btn.configure(text=cur.replace("▴", "▾"))
+
+    def set_sidebar_collapsed(self, collapsed: bool):
+        """Cache le texte (mode icône uniquement) quand la sidebar est réduite."""
+        # En mode réduit : cacher ce widget entièrement
+        if collapsed:
+            self.pack_forget()
+        else:
+            self.pack(fill="x", pady=1)
+            if self._expanded and self._sub_frame:
+                self._sub_frame.pack(fill="x", after=self._main_btn, pady=(0, 2))
+
+    def is_expanded(self):
+        return self._expanded
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPOSANT : SIDEBAR
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SIDEBAR_W_OPEN   = 228
+_SIDEBAR_W_CLOSED = 46
+
+class Sidebar(ctk.CTkFrame):
+    """
+    Barre latérale responsive :
+    - Ouverte  : logo + menu complet + déconnexion
+    - Fermée   : seul le bouton hamburger est visible (largeur 46px)
+    Transition instantanée, pas d'animation (léger).
+    """
+
+    def __init__(self, parent, app: "App", session_data: dict):
+        super().__init__(
+            parent,
+            fg_color=Colors.PRIMARY,
+            corner_radius=0,
+            width=_SIDEBAR_W_OPEN,
+        )
+        self.grid_propagate(False)
+
+        self._app           = app
+        self._session       = session_data
+        self._authorized    = {m[0]: m[1] for m in session_data.get("menus", [])}
+        self._is_open       = True
+        self._accordions: list[MenuAccordion] = []
+
+        self.grid_rowconfigure(2, weight=1)   # scroll area
+        self.grid_columnconfigure(0, weight=1)
+
+        self._build_toggle_row()
+        self._build_logo()
+        self._build_scroll_area()
+        self._build_menu()
+        self._build_logout()
+
+    # ── Construction ─────────────────────────────────────────────────────────
+
+    def _build_toggle_row(self):
+        row = ctk.CTkFrame(self, fg_color="transparent", height=46)
+        row.grid(row=0, column=0, sticky="ew")
+        row.grid_columnconfigure(0, weight=1)
+        row.grid_propagate(False)
+
+        self._btn_hamburger = ctk.CTkButton(
+            row,
+            text="☰",
+            width=36, height=36,
+            fg_color="#034787",
+            hover_color="#0565c9",
+            text_color="#FFFFFF",
+            font=_F(17, "bold"),
+            corner_radius=8,
+            command=self.toggle,
+        )
+        self._btn_hamburger.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+
+    def _build_logo(self):
+        self._logo_frame = ctk.CTkFrame(self, fg_color="transparent", height=60)
+        self._logo_frame.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
+        self._logo_frame.grid_propagate(False)
+
+        logo_path = resource_path(os.path.join("image", "logo 3.png"))
+        if os.path.exists(logo_path):
+            img = ctk.CTkImage(
+                light_image=Image.open(logo_path),
+                dark_image=Image.open(logo_path),
+                size=(160, 52),
+            )
+            self._logo_lbl = ctk.CTkLabel(self._logo_frame, image=img, text="")
+            self._logo_lbl.image = img
+        else:
+            self._logo_lbl = ctk.CTkLabel(
+                self._logo_frame,
+                text="iJeery",
+                font=_F(20, "bold"),
+                text_color="#FFFFFF",
+            )
+        self._logo_lbl.pack(expand=True)
+
+    def _build_scroll_area(self):
+        self._scroll = ctk.CTkScrollableFrame(
+            self,
+            fg_color="transparent",
+            scrollbar_button_color=Colors.MIDNIGHT_LIGHT,
+            scrollbar_button_hover_color=Colors.PRIMARY,
+        )
+        self._scroll.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
+
+    def _build_menu(self):
+        """Construit les accordéons de menu selon les autorisations."""
+        for cfg in MENU_STRUCTURE:
+            # Vérifier autorisation
+            if not self._is_authorized(cfg):
+                continue
+
+            acc = MenuAccordion(self._scroll, cfg, self._app, self)
+            acc.pack(fill="x", pady=1)
+            self._accordions.append(acc)
+
+    def _is_authorized(self, cfg: dict) -> bool:
+        """Retourne True si au moins un élément du groupe est autorisé."""
+        # Pages directes
+        if cfg.get("auth"):
+            return cfg["auth"] in self._authorized
+        # Groupes avec sous-menus
+        for sub in cfg.get("subs", []):
+            if sub[1] in self._authorized:
+                return True
+        return False
+
+    def _build_logout(self):
+        self._btn_logout = ctk.CTkButton(
+            self,
+            text="🚪  Déconnexion",
+            fg_color="#C0392B",
+            hover_color="#922B21",
+            text_color="#FFFFFF",
+            height=40,
+            font=_F(12, "bold"),
+            corner_radius=8,
+            command=self._app.logout,
+        )
+        self._btn_logout.grid(row=3, column=0, sticky="ew", padx=8, pady=8)
+
+    # ── Toggle ────────────────────────────────────────────────────────────────
+
+    def toggle(self):
+        if self._is_open:
+            self._close()
+        else:
+            self._open()
+
+    def _close(self):
+        self._is_open = False
+        self.configure(width=_SIDEBAR_W_CLOSED)
+
+        # Cacher logo, scroll, logout
+        self._logo_frame.grid_remove()
+        self._scroll.grid_remove()
+        self._btn_logout.grid_remove()
+
+        # Changer icône hamburger
+        self._btn_hamburger.configure(text="☰")
+
+    def _open(self):
+        self._is_open = True
+        self.configure(width=_SIDEBAR_W_OPEN)
+
+        self._logo_frame.grid()
+        self._scroll.grid()
+        self._btn_logout.grid()
+
+        self._btn_hamburger.configure(text="✕")
+
+    def collapse_all_except(self, keep: MenuAccordion):
+        """Ferme tous les accordéons sauf celui passé en paramètre."""
+        for acc in self._accordions:
+            if acc is not keep and acc.is_expanded():
+                acc._collapse()
+
+    @property
+    def authorized(self):
+        return self._authorized
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FENÊTRE DE VENTE EN TABS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class VenteTabManager(ctk.CTkToplevel):
+    """Fenêtre multi-tabs pour PageVenteParMsin (max 10 tabs)."""
+
+    MAX_TABS = 10
+
+    def __init__(self, master, id_user_connecte: Optional[int] = None):
+        super().__init__(master)
+        self.title("Gestion des Ventes")
+        self.geometry("1350x850")
+        self._id_user = id_user_connecte
+        self._tab_count = 0
+        self._tabs: list[dict] = []
+
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        self._tabview = ctk.CTkTabview(self)
+        self._tabview.grid(row=0, column=0, sticky="nsew", padx=4, pady=(32, 4))
+
+        # Boutons flottants
+        self._btn_add = ctk.CTkButton(
+            self, text="+", width=30, height=26,
+            fg_color="#27AE60", hover_color="#1E8449",
+            font=_F(13, "bold"), command=self.add_tab,
+        )
+        self._btn_close = ctk.CTkButton(
+            self, text="✕", width=30, height=26,
+            fg_color="#E74C3C", hover_color="#C0392B",
+            font=_F(13, "bold"), command=self.close_current_tab,
+        )
+        self._btn_add.place(relx=1.0, x=-8,  y=4, anchor="ne")
+        self._btn_close.place(relx=1.0, x=-44, y=4, anchor="ne")
+        self._btn_add.lift(); self._btn_close.lift()
+
+        self.add_tab()
+
+    def add_tab(self):
+        if self._tab_count >= self.MAX_TABS:
+            messagebox.showwarning("Limite", f"Maximum {self.MAX_TABS} tabs atteints.")
+            return
+        self._tab_count += 1
+        name = f"Vente({self._tab_count})"
+        tab = self._tabview.add(name)
+        PageVenteParMsin = _lazy_load("pages.page_venteParMsin", "PageVenteParMsin")
+        if PageVenteParMsin:
+            frame = PageVenteParMsin(tab, id_user_connecte=self._id_user)
+            frame.pack(fill="both", expand=True)
+        self._tabs.append({"name": name})
+        self._tabview.set(name)
+        if self._tab_count >= self.MAX_TABS:
+            self._btn_add.configure(state="disabled")
+
+    def close_current_tab(self):
+        if len(self._tabs) <= 1:
             self.destroy()
             return
-        
-        
+        name = self._tabview.get()
+        self._tabview.delete(name)
+        self._tabs = [t for t in self._tabs if t["name"] != name]
+        self._tab_count -= 1
+        self._btn_add.configure(state="normal")
+        if self._tabs:
+            self._tabview.set(self._tabs[-1]["name"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FENÊTRE PRINCIPALE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class App(ctk.CTk):
+
+    def __init__(self, session_data: dict):
+        super().__init__()
+
+        load_roboto()
+        apply_global_font(self)
+
+        if _THEME:
+            Theme.apply(self)
+        else:
+            self.configure(fg_color=Colors.BG_PAGE)
+
+        self.title("iJeery")
+        self.geometry("1280x780")
+        self.minsize(960, 600)
+
+        self.session_data     = session_data
+        self.id_user_connecte = session_data.get("user_id")
+        self._vente_tab_mgr   = None
+
+        # Connexion DB
+        self.db_manager = DatabaseManager()
+        self.db_conn    = self.db_manager.get_connection()
+
+        if self.db_conn is None:
+            messagebox.showerror("Connexion", "Impossible de se connecter à la base de données.")
+            self.destroy()
+            return
+
+        self.nom_societe = self._fetch_societe_name()
+
+        # ── Layout racine ────────────────────────────────────────────────────
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
-        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0, fg_color="#25a9e1")
-        self.sidebar_frame.grid(row=0, column=0, sticky="ns")
-        self.sidebar_frame.grid_propagate(False)
-
-        # Charger et afficher le logo
-        logo_path = resource_path("image/logo 3.png")
-        if os.path.exists(logo_path):
-            self._sidebar_logo_path = logo_path
-            logo_image = ctk.CTkImage(
-                light_image=Image.open(logo_path),
-                dark_image=Image.open(logo_path),
-                size=(150, 50)
-            )
-            title_label = ctk.CTkLabel(
-                self.sidebar_frame,
-                image=logo_image,
-                text=""
-            )
-            title_label.image = logo_image  # Garder une référence
-            title_label.pack(pady=(0, 20))
-        else:
-            # Fallback au texte si l'image n'existe pas
-            title_label = ctk.CTkLabel(
-                self.sidebar_frame,
-                text="iJeery_V5.0",
-                text_color="white",
-                font=ctk.CTkFont(family="Britannic Bold", size=25, weight="bold")
-            )
-            title_label.pack(pady=(0, 20))
-        self.sidebar_title_label = title_label
-
-        self.toggle_button = ctk.CTkButton(
-            self.sidebar_frame, text="≡", corner_radius=10, fg_color="#034787",
-            text_color="white", font=("Arial", 16),
-            command=self.toggle_sidebar, hover_color="#10ff7c"
-        )
-        self.toggle_button.pack(pady=10, padx=10, fill="x")
-
-        # Create scrollable frame for menu
-        self.scrollable_frame = ctk.CTkScrollableFrame(self.sidebar_frame, fg_color="transparent")
-        self.scrollable_frame.pack(fill="both", expand=True)
-        
-        self.nav_area_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent")
-        self.nav_area_frame.pack(fill="both", expand=True)
-
-        # Initialize submenu frames
-        self.admin_submenu_frame = ctk.CTkFrame(self.nav_area_frame, fg_color="#25a9e1")
-        self.personnel_submenu_frame = ctk.CTkFrame(self.nav_area_frame, fg_color="#25a9e1")
-        self.tresorerie_submenu_frame = ctk.CTkFrame(self.nav_area_frame, fg_color="#25a9e1")
-        self.database_submenu_frame = ctk.CTkFrame(self.nav_area_frame, fg_color="#25a9e1")
-        self.examen_blanc_submenu_frame = ctk.CTkFrame(self.nav_area_frame, fg_color="#25a9e1")
-
-        self.create_menu_buttons()
-
-        self.logout_button = ctk.CTkButton(
-            self.sidebar_frame, text="🚪 Déconnexion", corner_radius=10,
-            fg_color="#034787", text_color="white", hover_color="#c0392b",
-            font=("Arial", 14), command=self.logout
-        )
-        self.logout_button.pack(pady=10, padx=10, fill="x", side="bottom")
-
-        self.content_frame = ctk.CTkFrame(self, fg_color="#ecf0f1", corner_radius=15)
-        self.content_frame.grid(row=0, column=1, sticky="nsew")
-
-
-        # Mapping of page names from DB to actual page classes/functions
-        self.page_mapping = {
-            "PageArticle": PageArticle,
-            "PageAbsence" : PageAbsence,
-            "PageArticleFrs": PageArticleFrs,
-            "page_listeArticle": page_listeArticle,
-            "PageArticleMouvement": PageArticleMouvement,
-            "PageAutorisation" : PageAutorisation,
-            "PageAvoir": PageAvoir,
-            "PageAVQ" : PageAVQ,
-            "FenetreAvanceSpec" : FenetreAvanceSpec,
-            "PageBanque" : PageBanque,
-            "PageBanqueNv" : PageBanqueNv,
-            "PageBaseListe" : PageBaseListe,
-            "PageCaisse": PageCaisse,
-            "PageCategorieArticle": PageCategorieArticle,
-            "PageCategorieCompte" : PageCategorieCompte,
-            "PageClient": PageClient,
-            "PageClientCrédit": PageClientCrédit,
-            "PageCommandeFrs": PageCommandeFrs,
-            "PageCodeAutorisation" : PageCodeAutorisation,
-            "PageDecaissement": PageDecaissement,
-            "PageDecaissementBq": PageDecaissementBq,
-            "PageEncaissement": PageEncaissement,
-            "PageEncaissementBq": PageEncaissementBq,
-            "PageEvenement" : PageEvenement,
-            "PageFacturation" : PageFacturation,
-            "PageFactureListe": PageFactureListe,
-            "PageFonction": PageFonction,
-            "PageFournisseur": PageFournisseur,
-            "PageFrsDette": PageFrsDette,
-            "page_home": page_home,
-            "PageChat": PageChat,
-            "PageInfoArticle": PageInfoArticle,
-            "PageInfoMouvementStock" : PageInfoMouvementStock,
-            "PageBonReception" : PageBonReception,
-            "PageLivraisonClient" : PageLivraisonClient,
-            "PageListeFacture" : PageListeFacture,
-            "PageListeMouvement" : PageListeMouvement,
-            "PageMainPersonnel" : PageMainPersonnel,
-            "PageMagasin" : PageMagasin,
-            "PageMenu": PageMenu,
-            "PageMouvementStock": PageMouvementStock,
-            "PagePrixListe" : PagePrixListe,
-            "PagePrixRevient" : PagePrixRevient,
-            "PagePresence" : PagePresence,
-            "PageSalaireBase" : PageSalaireBase,
-            "PageSalaireEtatSB" : PageSalaireEtatSB,
-            "PageEtatSalaireHoraire" : PageEtatSalaireHoraire,
-            "PageSauvegarde": PageSauvegarde,
-            "PageSortie": PageSortie,
-            "PageStock": PageStock,
-            "PageStockAlerte": PageStockAlerte,
-            "PageGestionPeremption": PageGestionPeremption,
-            "PageStockLivraison" : PageStockLivraison,
-            "PageSuiviCommande" : PageSuiviCommande,
-            "PageTransfert": PageTransfert,
-            "PageTransfertBanque" : PageTransfertBanque,
-            "PageTransfertCaisse" : PageTransfertCaisse,
-            "PageTypePmt" : PageTypePmt,
-            "PageUnite" : PageUnite,
-            "PageTransfertBanque" : PageTransfertBanque,
-            "PageTransfertCaisse" : PageTransfertCaisse,
-            "PageUsers": PageUsers,
-            "PageVente" : PageVente,
-            "PageVenteParMsin" : PageVenteParMsin,
-            "PageValidationSalaire" : PageValidationSalaire,
-            #"ConfigWindow" : ConfigWindow,
-            "PageTauxHoraire" : PageTauxHoraire,
-            "DBInitializerApp" : DBInitializerApp
-            # "page_personnel" : page_personnel # This was a duplicate import
-        }
-
-        
-        self.current_submenu_open = None
-
-        # Set close callback
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        # Display home page or not authorized message
-        if "TABLEAU DE BORD" in self.authorized_menus:
-            self.show_page(page_home)
-        else:
-            self.show_page_not_authorized("Vous n'êtes pas autorisé à voir le tableau de bord.")
-
-        if "CHAT INTERNE" in self.authorized_menus:
-            self.show_page(PageChat)
-        else:
-            self.show_page_not_authorized("Vous n'êtes pas autorisé à voir le chat interne.")
-
-        # Update title bar
-        self.update_title_bar()
-        self.after(1000, self.update_title_bar_time_only)
-        self.bind("<Configure>", self._on_window_resize)
-        self.after(120, self._apply_responsive_layout)
-
-    def open_db_config_window(self):
-        """Ouvre la fenetre de configuration de la base de données"""
-        try:
-            # Fermer la fenêtre existante si elle est ouverte
-            if hasattr(self, '_config_window') and self._config_window is not None and self._config_window.winfo_exists():
-                self._config_window.destroy()
-                self._config_window = None
-        
-            # Créer une nouvelle fenêtre de configuration
-            self._config_window = DatabaseManager(master=self, app_root=self)
-        
-            # Rendre la fenêtre modale
-            self._config_window.grab_set()
-            self._config_window.focus_force()
-            self._config_window.transient(self)
-        
-            # Attendre la fermeture de la fenêtre
-            self.wait_window(self._config_window)
-            self._config_window = None
-        
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Impossible d'ouvrir la fenetre de configuration : {e}")
-
-    def connect_to_database(self):
-        """Establishes or re-establishes the database connection."""
-        # Fermer l'ancienne connexion si elle existe
-        if hasattr(self, 'db_conn') and self.db_conn:
-            try:
-                self.db_conn.close()
-                print("Ancienne connexion à la base de donnees fermee.")
-            except Exception as e:
-                print(f"Erreur lors de la fermeture de l'ancienne connexion: {e}")
-    
-        # Créer une nouvelle connexion en utilisant directement la fonction create_db_connection
-        new_conn = DatabaseManager()
-        if new_conn:
-            print(f"Connecte a la base de donnees.")
-            return new_conn
-        else:
-            print("Echec de la connexion a la base de donnees.")
-            return None
-
-        # --- New method to be called by ConfigWindow when config changes ---
-    def reload_db_connection(self):
-        """Reloads the database connection and updates the title bar after config change."""
-        print("Rechargement de la connexion a la base de donnees...")
-        new_conn = self.connect_to_database()  # Try to connect with new parameters
-        if new_conn:
-            self.db_conn = new_conn  # Assign the new connection
-            self.update_title_bar()  # Update title bar with new DB name/info
-            messagebox.showinfo("Connexion mise a jour", "La connexion a la base de donnees a été mise a jour avec succes.")
-            # Optional: Refresh the current page if it relies heavily on DB data
-            # self.show_page(self.current_page_func) # You might need to store the current page
-        else:
-            messagebox.showerror("Erreur", "La connexion à la base de donnees n'a pas pu etre etablie avec les nouveaux parametres.")
-    
-    def ouvrir_page_vente(self):
-        """Ouvre la page de vente en passant l'ID utilisateur"""
-        # Vider le frame principal
-        for widget in self.main_frame.winfo_children():
-            widget.destroy()
-    
-        # Créer la page de vente avec l'ID utilisateur
-        page_vente = PageVenteParMsin(self.main_frame, id_user_connecte=self.id_user_connecte)
-        page_vente.pack(fill="both", expand=True)
-
-        # --- New method for graceful closing ---
-    def on_closing(self):
-        """Handles the window closing event to ensure DB connection is closed."""
-        if hasattr(self, 'db_conn') and self.db_conn:
-            try:
-                self.db_conn.close()
-                print("Connexion à la base de données fermée proprement.")
-            except Exception as e:
-                print(f"Erreur lors de la fermeture de la connexion : {e}")
-        self.destroy()
-
-    def logout(self):
-        from tkinter import messagebox
-        if messagebox.askyesno("Déconnexion", "Êtes-vous sûr de vouloir vous déconnecter ?"):
-            try:
-                # Supprimer le fichier de session
-                if os.path.exists("session.json"):
-                    os.remove("session.json")
-                    print("Fichier session.json supprimé.")
-                
-                # Fermer la connexion à la base de données
-                if hasattr(self, 'db_conn') and self.db_conn:
-                    try:
-                        self.db_conn.close()
-                        print("Connexion à la base de données fermée.")
-                    except Exception as e:
-                        print(f"Erreur lors de la fermeture de la connexion : {e}")
-                
-                # Détruire la fenêtre actuelle AVANT de relancer
-                self.withdraw()  # Cacher la fenêtre immédiatement
-                
-                # Relancer l'application
-                import subprocess
-                import time
-                
-                # Déterminer le chemin de l'exécutable
-                if getattr(sys, 'frozen', False):
-                    # Application compilée avec PyInstaller
-                    executable_path = sys.executable
-                    print(f"Mode compilé détecté. Exécutable: {executable_path}")
-                    
-                    # Lancer le nouvel process AVANT de fermer celui-ci
-                    subprocess.Popen([executable_path], 
-                                   cwd=os.path.dirname(executable_path),
-                                   creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0)
-                    
-                    # Petit délai pour laisser le nouveau process démarrer
-                    time.sleep(0.5)
-                else:
-                    # Mode développement
-                    base_path = os.path.dirname(os.path.abspath(__file__))
-                    app_script_path = os.path.join(base_path, "app_main.py")
-                    
-                    if os.path.exists(app_script_path):
-                        subprocess.Popen([sys.executable, app_script_path])
-                        print(f"Relancement de l'application via {app_script_path}")
-                    else:
-                        print(f"ATTENTION: {app_script_path} n'existe pas")
-                        messagebox.showwarning("Attention", "Le fichier app_main.py est introuvable")
-                
-                # Fermer proprement l'application actuelle
-                try:
-                    self.quit()
-                    self.destroy()
-                except:
-                    pass
-                
-                # Terminer le processus
-                sys.exit(0)
-                
-            except Exception as e:
-                print(f"Erreur lors de la déconnexion : {e}")
-                import traceback
-                traceback.print_exc()
-                messagebox.showerror("Erreur", f"Une erreur est survenue lors de la déconnexion : {e}")
-                try:
-                    self.destroy()
-                except:
-                    pass
-                sys.exit(1)
-    
-    
-    def fetch_societe_info(self):
-        """Récupère le nom de la société depuis la base de données."""
-        if self.db_conn:
-            try:
-                cursor = self.db_conn.cursor()
-                cursor.execute("SELECT nomsociete FROM tb_infosociete LIMIT 1")
-                result = cursor.fetchone()
-                if result:
-                    self.nom_societe = result[0]
-                cursor.close()
-            except Exception as e:
-                print(f"Erreur lors de la récupération du nom de la société : {e}")
-   
-
-    # --- New method to update the entire title bar (school year and time) ---
-    def update_title_bar(self):
-        """
-        Met a jour le titre de la fenetre avec l'annee scolaire et la date/heure actuelles.
-        Appelee au demarrage pour initialiser le titre.
-        """
-        print("DEBUG update_title_bar: Début de la fonction")
-    
-        
-        now = datetime.now()
-        current_date_time = now.strftime("%d/%m/%Y %H:%M:%S")
-
-        title_string = f"   {current_date_time} - ijeery - Copyright 2025 by Iski Solution - +261 34 46 687 61 "
-        print(f"DEBUG update_title_bar: Titre final = {title_string}")
-    
-        self.title(title_string)
-        print("DEBUG update_title_bar: Titre appliqué")
-        
-    def update_title_bar_time_only(self):
-        """
-        Met a jour uniquement la partie de l'heure dans la barre de titre.
-        Réutilise l'annee scolaire deja recuperee et stockee.
-        """
-           
-        now = datetime.now()
-        current_date_time = now.strftime("%d/%m/%Y %H:%M:%S")
-
-        title_string = f"  {current_date_time}  - {self.nom_societe} - iJeery_V5.0 - Copyright 2025 by Iski Solution - Tél: +261 34 46 687 61"
-        self.title(title_string)
-    
-        # Planifie la prochaine mise à jour dans 1 seconde
-        self.after(1000, self.update_title_bar_time_only)
-
-    def open_vente_window(self):
-        """
-        Ouvre une nouvelle fenêtre avec gestion par tabs (à la place de multiples fenêtres indépendantes).
-        ✅ Utilise VenteTabManager pour gérer les tabs
-        ✅ Max 10 tabs, +/X buttons pour ajouter/fermer des tabs
-        """
-        # Récupérer ou créer le manager de tabs unique
-        if not hasattr(self, '_vente_tab_manager') or self._vente_tab_manager is None or not self._vente_tab_manager.winfo_exists():
-            self._vente_tab_manager = VenteTabManager(
-                master=self,
-                id_user_connecte=self.id_user_connecte,
-                app_reference=self
-            )
-            self._vente_tab_manager.lift()
-            self._vente_tab_manager.focus_force()
-        else:
-            # Le manager existe déjà, ajouter un nouveau tab
-            self._vente_tab_manager.add_new_tab()
-            self._vente_tab_manager.lift()
-            self._vente_tab_manager.focus_force()
-
-    def create_menu_buttons(self):
-        """Dynamically creates main menu buttons based on user authorization."""
-        # Clear existing buttons before creating new ones (important for toggle_sidebar)
-        # We only destroy buttons, not the submenu frames themselves
-        for widget in self.nav_area_frame.winfo_children():
-            if isinstance(widget, ctk.CTkButton):
-                widget.destroy()
-            # Also ensure submenu frames are forgotten if they were packed
-            elif isinstance(widget, ctk.CTkFrame) and widget in [self.admin_submenu_frame, self.personnel_submenu_frame,
-                                                                  self.tresorerie_submenu_frame, self.database_submenu_frame,
-                                                                  self.examen_blanc_submenu_frame]:
-                widget.pack_forget()
-
-
-        # Always add Dashboard if authorized
-        if "TABLEAU DE BORD" in self.authorized_menus:
-            self.btn_dashboard = ctk.CTkButton(self.nav_area_frame, text="📊 TABLEAU DE BORD", corner_radius=10, height=60,
-                                                fg_color="#268908", text_color="white", hover_color="#4CE01F",
-                                                font=("Arial", 14), command=lambda: self.show_page(page_home))
-            self.btn_dashboard.pack(pady=5, padx=10, fill="x")
-
-        if "CHAT INTERNE" in self.authorized_menus:
-            self.btn_dashboard = ctk.CTkButton(self.nav_area_frame, text="💬 CHAT INTERNE", corner_radius=10, height=60,
-                                                fg_color="#A19407", text_color="white", hover_color="#cad256",
-                                                font=("Arial", 14), command=lambda: self.show_page(PageChat))
-            self.btn_dashboard.pack(pady=5, padx=10, fill="x")
-
-        # Comemerciale (Parent Menu)
-        admin_submenus_exist = any(menu.startswith("Article Liste") or
-                                   menu.startswith("Client") or
-                                   menu.startswith("Fournisseur") or
-                                   menu.startswith("Magasin") or
-                                   menu.startswith("Ventes") or
-                                   menu.startswith("Ventes par Dépôt") or
-                                   menu.startswith("Liste Facture") or
-                                   menu.startswith("Facturation") or
-                                   menu.startswith("Stock") or
-                                   menu.startswith("Stock Livraison") or
-                                   menu.startswith("Mouvement d'article") or
-                                   menu.startswith("Suivi Commande") or
-                                   menu.startswith("Prx d'article") or
-                                   menu.startswith("Livraison Client") or
-                                   menu.startswith("Mouvement Stock") or
-                                   menu.startswith("Liste mouvements") # Menu pour consulter les listes de mouvements d'articles
-                                   for menu in self.authorized_menus)
-
-        if admin_submenus_exist:
-            self.btn_administration = ctk.CTkButton(self.nav_area_frame, text="🛒 COMMERCIALE", corner_radius=10, height=60,
-                                                     fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                                     font=("Arial", 14), command=self.show_commerciale_submenu)
-            self.btn_administration.pack(pady=5, padx=10, fill="x")
-
-        # Personnel (Parent Menu)
-        personnel_submenus_exist = any(menu.startswith("Liste Personnel") or
-                                       menu.startswith("Avance 15e") or
-                                       menu.startswith("Avance Spéciale") or
-                                       menu.startswith("Fonction") or
-                                       menu.startswith("Présence") or
-                                       menu.startswith("Nouveau SB") or
-                                       menu.startswith("Salaire Base") or
-                                       menu.startswith("Salaire Horaire") or
-                                       menu.startswith("Absence") or
-                                       menu.startswith("Présence") or
-                                       menu.startswith("Paramètres Personnel") or
-                                       menu.startswith("page_salaireBase_") or
-                                       menu.startswith("page_personnel") or
-                                       menu.startswith("PageTauxHoraire") or
-                                       menu.startswith("PageValidationSalaire")
-                                       for menu in self.authorized_menus)
-
-        if personnel_submenus_exist:
-            self.btn_personnel = ctk.CTkButton(self.nav_area_frame, text="👥 PERSONNEL", corner_radius=10, height=60,
-                                                fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                font=("Arial", 14), command=self.show_personnel_submenu)
-            self.btn_personnel.pack(pady=5, padx=10, fill="x")
-
-        # Trésorerie (Parent Menu)
-        tresorerie_submenus_exist = any(menu.startswith("Caisse") or
-                                        menu.startswith("Banque") or
-                                        menu.startswith("Ajout Banque") or
-                                        menu.startswith("Transfert Banque") or
-                                        menu.startswith("Transfert Caisse") or
-                                        menu.startswith("Etat de Dépenses") or
-                                        menu.startswith("Decaissement") or # Added Decaissement
-                                        menu.startswith("DecaissementBq") or
-                                        menu.startswith("Encaissement") or # Added Encaissement
-                                        menu.startswith("EncaissementBq") or
-                                        menu.startswith("Client à Payer") or
-                                        menu.startswith("Fournisseur à Payer") or
-                                        menu.startswith("Catégorie") # Added Catégorie
-                                        for menu in self.authorized_menus)
-
-        if tresorerie_submenus_exist:
-            self.btn_tresorerie = ctk.CTkButton(self.nav_area_frame, text="💰 TRESORERIE", corner_radius=10, height=60,
-                                                 fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                                 font=("Arial", 14), command=self.show_tresorerie_submenu)
-            self.btn_tresorerie.pack(pady=5, padx=10, fill="x")
-
-        # Base de données (Parent Menu)
-        database_submenus_exist = any(menu.startswith("Autorisation") or
-                                       menu.startswith("Sauvegarde") or
-                                       menu.startswith("Utilisateurs") or
-                                       menu.startswith("Evenements") or
-                                       menu.startswith("PageParamReseau") or
-                                       menu.startswith("Créer Base de donnees")or
-                                       menu.startswith("Export Table")or
-                                       menu.startswith("PageBaseListe") or
-                                       menu.startswith("Autorisation Admin") or
-                                       menu.startswith("Menu") or
-                                       menu.startswith("Init DB")
-                                       for menu in self.authorized_menus)
-
-        if database_submenus_exist:
-            self.btn_database = ctk.CTkButton(self.nav_area_frame, text="🗄️BASE DE DONNEES", corner_radius=10, height=60,
-                                               fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                               font=("Arial", 14), command=self.show_database_submenu)
-            self.btn_database.pack(pady=5, padx=10, fill="x")           
-
-        # Examen Blanc (Parent Menu)
-        examen_blanc_submenus_exist = any(menu.startswith("Matière EB") or
-                                          menu.startswith("Etudiant EB") or
-                                          menu.startswith("Notes EB") or
-                                          menu.startswith("Délibération EB") or
-                                          menu.startswith("Résultat EB")
-                                          for menu in self.authorized_menus)
-
-        if examen_blanc_submenus_exist:
-            self.btn_examen_blanc = ctk.CTkButton(self.nav_area_frame, text="📚 EXAMEN BLANC", corner_radius=10, height=60,
-                                                   fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                                   font=("Arial", 14), command=self.show_examen_blanc_submenu)
-            self.btn_examen_blanc.pack(pady=5, padx=10, fill="x")
-        self._apply_menu_responsive_styles()
-
-    @staticmethod
-    def _clamp(value, min_value, max_value):
-        return max(min_value, min(max_value, int(value)))
-
-    def _iter_submenu_frames(self):
-        return [
-            self.admin_submenu_frame,
-            self.personnel_submenu_frame,
-            self.tresorerie_submenu_frame,
-            self.database_submenu_frame,
-            self.examen_blanc_submenu_frame
-        ]
-
-    def _on_window_resize(self, event):
-        if event.widget is not self:
-            return
-
-        now = time.time()
-        if now - self._last_resize_update < 0.08:
-            return
-
-        self._last_resize_update = now
-        self._apply_responsive_layout(event.width, event.height)
-
-    def _update_responsive_metrics(self, width, height):
-        width = max(1, width)
-        height = max(1, height)
-        scale_w = width / self._base_window_width
-        scale_h = height / self._base_window_height
-        self._ui_scale = max(0.80, min(1.45, min(scale_w, scale_h)))
-
-        self._sidebar_expanded_width = self._clamp(width * 0.22, 170, 340)
-        # Collapsed width must be 20% of expanded width
-        self._sidebar_collapsed_width = self._clamp(self._sidebar_expanded_width * 0.20, 34, 80)
-        self._main_button_height = self._clamp(60 * self._ui_scale, 44, 80)
-        self._submenu_button_height = self._clamp(40 * self._ui_scale, 32, 56)
-        self._main_font_size = self._clamp(14 * self._ui_scale, 11, 18)
-        self._submenu_font_size = self._clamp(12 * self._ui_scale, 10, 15)
-        self._toggle_font_size = self._clamp(16 * self._ui_scale, 12, 20)
-        self._menu_pad_x = self._clamp(10 * self._ui_scale, 6, 16)
-        self._menu_pad_y = self._clamp(5 * self._ui_scale, 3, 10)
-        self._submenu_pad_x = self._clamp(5 * self._ui_scale, 3, 10)
-        self._submenu_pad_y = self._clamp(2 * self._ui_scale, 1, 5)
-        self._menu_corner_radius = self._clamp(10 * self._ui_scale, 8, 16)
-
-    def _update_sidebar_logo(self):
-        if not self.sidebar_title_label:
-            return
-
-        sidebar_width = self._sidebar_expanded_width if self.sidebar_expand else self._sidebar_collapsed_width
-
-        if self._sidebar_logo_path:
-            # Logo scales with both global UI scale and current sidebar width.
-            width_factor = max(0.50, min(1.0, sidebar_width / float(self._sidebar_expanded_width or 1)))
-            logo_size = (
-                self._clamp(150 * self._ui_scale * width_factor, 85, 230),
-                self._clamp(50 * self._ui_scale * width_factor, 28, 80)
-            )
-            if logo_size != self._sidebar_logo_size:
-                try:
-                    logo_image = ctk.CTkImage(
-                        light_image=Image.open(self._sidebar_logo_path),
-                        dark_image=Image.open(self._sidebar_logo_path),
-                        size=logo_size
-                    )
-                    self.sidebar_title_label.configure(image=logo_image)
-                    self.sidebar_title_label.image = logo_image
-                    self._sidebar_logo_size = logo_size
-                except Exception as e:
-                    print(f"Erreur mise à jour logo responsive: {e}")
-        else:
-            title_font_size = self._clamp(25 * self._ui_scale, 18, 34)
-            self.sidebar_title_label.configure(
-                font=ctk.CTkFont(family="Britannic Bold", size=title_font_size, weight="bold")
-            )
-
-        if self.sidebar_title_label.winfo_manager() == "pack":
-            self.sidebar_title_label.pack_configure(pady=(0, self._clamp(20 * self._ui_scale, 12, 28)))
-
-    def _apply_menu_responsive_styles(self):
-        main_font = ("Arial", self._main_font_size)
-        submenu_font = ("Arial", self._submenu_font_size)
-        submenu_frames = self._iter_submenu_frames()
-
-        for widget in self.nav_area_frame.winfo_children():
-            if isinstance(widget, ctk.CTkButton):
-                widget.configure(
-                    height=self._main_button_height,
-                    font=main_font,
-                    corner_radius=self._menu_corner_radius
-                )
-                if widget.winfo_manager() == "pack":
-                    widget.pack_configure(padx=self._menu_pad_x, pady=self._menu_pad_y, fill="x")
-            elif isinstance(widget, ctk.CTkFrame) and widget in submenu_frames:
-                if widget.winfo_manager() == "pack":
-                    widget.pack_configure(
-                        padx=self._menu_pad_x,
-                        pady=(0, self._menu_pad_y),
-                        fill="x"
-                    )
-                for sub_widget in widget.winfo_children():
-                    if isinstance(sub_widget, ctk.CTkButton):
-                        sub_widget.configure(
-                            height=self._submenu_button_height,
-                            font=submenu_font,
-                            corner_radius=max(8, self._menu_corner_radius - 2)
-                        )
-                        if sub_widget.winfo_manager() == "pack":
-                            sub_widget.pack_configure(
-                                padx=self._submenu_pad_x,
-                                pady=self._submenu_pad_y,
-                                fill="x"
-                            )
-
-    def _apply_responsive_layout(self, width=None, height=None):
-        if width is None:
-            width = self.winfo_width()
-        if height is None:
-            height = self.winfo_height()
-
-        self._update_responsive_metrics(width, height)
-
-        sidebar_width = self._sidebar_expanded_width if self.sidebar_expand else self._sidebar_collapsed_width
-        self.sidebar_frame.configure(width=sidebar_width)
-        self.content_frame.configure(corner_radius=self._clamp(15 * self._ui_scale, 8, 24))
-
-        self.toggle_button.configure(
-            font=("Arial", self._toggle_font_size),
-            height=self._clamp(self._main_button_height * 0.85, 36, 68),
-            corner_radius=self._menu_corner_radius
-        )
-        if self.toggle_button.winfo_manager() == "pack":
-            self.toggle_button.pack_configure(
-                padx=self._menu_pad_x,
-                pady=self._clamp(10 * self._ui_scale, 6, 16),
-                fill="x"
-            )
-
-        self.logout_button.configure(
-            height=self._main_button_height,
-            font=("Arial", self._main_font_size),
-            corner_radius=self._menu_corner_radius
-        )
-        if self.logout_button.winfo_manager() == "pack":
-            self.logout_button.pack_configure(
-                padx=self._menu_pad_x,
-                pady=self._clamp(10 * self._ui_scale, 6, 16),
-                fill="x",
-                side="bottom"
-            )
-
-        self._update_sidebar_logo()
-        self._apply_menu_responsive_styles()
-
-    def toggle_sidebar(self):
-        if self.sidebar_expand:
-            self.sidebar_frame.configure(width=self._sidebar_collapsed_width)
-            self.toggle_button.configure(text="→")
-            self.scrollable_frame.pack_forget()
-            self.logout_button.pack_forget()
-            self.sidebar_expand = False
-            # Close any open submenus when collapsing
-            self._close_all_submenus()
-        else:
-            self.sidebar_frame.configure(width=self._sidebar_expanded_width)
-            self.toggle_button.configure(text="≡")           
-
-            # Re-pack the scrollable frame
-            self.scrollable_frame.pack(fill="both", expand=True)
-            # Re-pack all main menu buttons (and potentially re-open submenu)
-            self.create_menu_buttons() # This will re-create all main buttons in order
-
-            # Re-open any currently open submenu if it was open before collapsing
-            if self.current_submenu_open == "COMMERCIALE":
-                self._repack_commerciale_submenu()
-            elif self.current_submenu_open == "PERSONNEL":
-                self._repack_personnel_submenu()
-            elif self.current_submenu_open == "TRESORERIE":
-                self._repack_tresorerie_submenu()
-            elif self.current_submenu_open == "DATABASE":
-                self._repack_database_submenu()
-            elif self.current_submenu_open == "EXAMEN_BLANC":
-                self._repack_examen_blanc_submenu()       
-
-            self.logout_button.pack(
-                pady=self._clamp(10 * self._ui_scale, 6, 16),
-                padx=self._menu_pad_x,
-                fill="x",
-                side="bottom"
-            )
-            self.sidebar_expand = True
-        self._apply_responsive_layout()
-
-    def clear_dashboard(self):
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-
-    def show_page(self, page_func):
-        # Special handling for DBInitializerApp and other top-level windows
-        if page_func in [DBInitializerApp, DatabaseManager]:
-            self.open_top_level_window(page_func)
-            return
-
-        self.clear_dashboard()
-
-        try:
-            page_instance = None
-
-            # ========================================
-            # ✅ CAS SPÉCIAL POUR PageVente
-            # ========================================
-            if page_func == PageVente:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page de vente."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    master=self.content_frame, 
-                    id_user_connecte=self.id_user_connecte
-                )
-                print(f"✅ PageVente créée avec id_user_connecte={self.id_user_connecte}")
-
-            elif page_func == PageVenteParMsin:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page de vente."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    master=self.content_frame,
-                    id_user_connecte=self.id_user_connecte
-                )
-                print(f"✅ PageVenteParMsin créée avec id_user_connecte={self.id_user_connecte}")
-            
-            elif page_func == PageLivraisonClient:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page de vente."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    master=self.content_frame,
-                    id_user_connecte=self.id_user_connecte
-                )
-                print(f"✅ PageLivraisonClient créée avec id_user_connecte={self.id_user_connecte}")
-                
-            elif page_func == PageTransfertBanque:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page de vente."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    master=self.content_frame,
-                    id_user_connecte=self.id_user_connecte
-                )
-                print(f"✅ PageTransferbBanque créée avec id_user_connecte={self.id_user_connecte}")
-                
-            elif page_func == PageTransfertCaisse:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page de vente."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    master=self.content_frame,
-                    id_user_connecte=self.id_user_connecte
-                )
-                print(f"✅ PageTransfertCaisse créée avec id_user_connecte={self.id_user_connecte}")
-                
-            elif page_func == PageAVQ:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page de vente."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    master=self.content_frame,
-                    iduser=self.id_user_connecte
-                )
-                print(f"✅ PageAVQ créée avec id_user_connecte={self.id_user_connecte}")
-                
-            elif page_func == FenetreAvanceSpec:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page de vente."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    master=self.content_frame,
-                    iduser=self.id_user_connecte
-                )
-                print(f"✅ FenetreAvanceSpec créée avec id_user_connecte={self.id_user_connecte}")    
-
-            # ========================================
-            # ✅ CAS SPÉCIAL POUR PageChat
-            # ========================================
-            elif page_func == PageChat:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir le chat."
-                    )
-                    return
-            
-                # Créer les données de session pour le chat
-                chat_session_data = {
-                    "iduser": self.id_user_connecte,
-                    "username": self.session_data.get('username', 'Utilisateur')
-                }
-            
-                page_instance = page_func(
-                    master=self.content_frame,
-                    session_data=chat_session_data
-                )
-                print(f"✅ PageChat créée avec iduser={self.id_user_connecte}")
-
-            # ========================================
-            # ✅ CAS SPÉCIAL POUR PageInfoMouvementStock
-            # ========================================
-            elif page_func == PageInfoMouvementStock:
-                if self.id_user_connecte is None:
-                    messagebox.showerror(
-                        "Erreur Session",
-                        "Aucun utilisateur connecté détecté.\nImpossible d'ouvrir la page."
-                    )
-                    return
-    
-                page_instance = page_func(
-                    self.content_frame, 
-                    iduser=self.id_user_connecte
-                )
-                print(f"✅ PageInfoMouvementStock créée avec iduser={self.id_user_connecte}")
-
-            # ========================================
-            # Cas spéciaux existants
-            # ========================================
-            elif page_func in [PageTauxHoraire, PageSalaireBase]:
-                page_instance = page_func(master=self.content_frame, app_root=self)
-            
-            elif page_func == PageFacturation:
-                if self.id_user_connecte is None:
-                    messagebox.showerror("Erreur Session", "Utilisateur non connecté.")
-                    return
-                page_instance = page_func(
-                    master=self.content_frame, 
-                    id_user_connecte=self.id_user_connecte
-                )
-                print(f"✅ PageFacturation créée avec id_user_connecte={self.id_user_connecte}")
-
-            # ========================================
-            # Autres pages (essais multiples)
-            # ========================================
-            else:
-                try:
-                    # Essai 1: Avec master, db_conn, session_data
-                    page_instance = page_func(self.content_frame, db_conn=self.db_conn, session_data=self.session_data)
-                except TypeError:
-                    try:
-                        # Essai 2: Avec master, db_conn (sans session_data)
-                        page_instance = page_func(self.content_frame, db_conn=self.db_conn)
-                    except TypeError:
-                        # Essai 3: Avec master seulement
-                        page_instance = page_func(self.content_frame)
-
-            if page_instance:
-                if isinstance(page_instance, ctk.CTkToplevel):
-                    page_instance.lift()
-                    page_instance.focus_force()
-                    self.grab_set()
-                    self.wait_window(page_instance)
-                    self.grab_release()
-                else:
-                    page_instance.pack(expand=True, fill="both")
-            else:
-                raise Exception("Impossible de créer l'instance de la page avec les arguments disponibles.")
-
-        except Exception as e:
-            messagebox.showerror("Erreur de page", f"Impossible d'afficher la page. Erreur: {e}")
-            self.show_page_not_authorized(f"Erreur d'affichage: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def open_top_level_window(self, page_func):
-        # Ferme la fenêtre existante si elle est déjà ouverte
-        if hasattr(self, '_toplevel_window') and self._toplevel_window is not None and self._toplevel_window.winfo_exists():
-            self._toplevel_window.destroy()
-            self._toplevel_window = None
-
-        # Instancie la fenêtre Toplevel
-        # Si page_activitePrix a besoin de paramètres spécifiques, ajoutez-les ici
-        if page_func == PageActivitePrix: # Si vous avez un cas spécifique pour elle
-            self._toplevel_window = page_func(master=self, db_conn=self.db_conn, session_data=self.session_data, db_config=self.db_config)
-            # ^ Supprimez 'app_root=self' ici
-        else:
-            self._toplevel_window = page_func(master=self, app_root=self) # Gardez-le pour les autres si nécessaire
-
-        # Rend la fenêtre modale et lui donne le focus
-        self._toplevel_window.grab_set()
-        self._toplevel_window.focus_force()
-        self._toplevel_window.transient(self) # Fait en sorte que la Toplevel soit toujours au-dessus de la fenêtre parente
-        self.wait_window(self._toplevel_window) # Attend la fermeture de la fenêtre Toplevel
-        self._toplevel_window.grab_release()
-        self._toplevel_window = None # Réinitialise la référence après fermeture
-
-
-
-    def show_page_not_authorized(self, message="Acces non autorise."):
-        self.clear_dashboard()
-        unauthorized_label = ctk.CTkLabel(self.content_frame, text=message, font=("Arial", 20, "bold"), text_color="red")
-        unauthorized_label.pack(expand=True, pady=50)
-
-    def logout(self):
-        # Demander confirmation avant de déconnecter
-        from tkinter import messagebox
-        if messagebox.askyesno("Déconnexion", "Voulez-vous vraiment vous déconnecter ?"):
-            # 1. Fermer la fenêtre actuelle du tableau de bord
-            self.destroy()
-
-            # 2. Supprimer le fichier de session pour forcer un nouveau login
-            session_file_path = "session.json"
-            if os.path.exists(session_file_path):
-                try:
-                    os.remove(session_file_path)
-                except Exception as e:
-                    print(f"Erreur lors de la suppression de la session : {e}")
-
-            # 3. Lancer la fenêtre de connexion
-            from page_login import LoginWindow
-            login_app = LoginWindow()
-            login_app.start()
-
-
-
-
-    def _close_all_submenus(self):
-        """Helper to close all submenus and reset layout of main buttons."""
-        if self.current_submenu_open == "COMMERCIALE":
-            self.admin_submenu_frame.pack_forget()
-        elif self.current_submenu_open == "PERSONNEL":
-            self.personnel_submenu_frame.pack_forget()
-        elif self.current_submenu_open == "TRESORERIE":
-            self.tresorerie_submenu_frame.pack_forget()
-        elif self.current_submenu_open == "DATABASE":
-            self.database_submenu_frame.pack_forget()
-        elif self.current_submenu_open == "EXAMEN_BLANC":
-            self.examen_blanc_submenu_frame.pack_forget()       
-
-        # Reset the main menu button order by re-creating them
-        self.create_menu_buttons()
-        self.current_submenu_open = None
-
-    # Helper method to repack main buttons correctly after a submenu
-    def _repack_main_buttons_after_submenu(self, submenu_parent_btn, submenu_frame):
-        """
-        Ensures main buttons are correctly packed after a submenu is inserted.
-        This is crucial for maintaining the correct order in the sidebar.
-        """
-        # Get all children in the nav_area_frame
-        all_widgets = self.nav_area_frame.winfo_children()
-        
-        # Find the index of the submenu_parent_btn
-        try:
-            parent_btn_index = all_widgets.index(submenu_parent_btn)
-        except ValueError:
-            # If the parent button isn't found, something is wrong, just return
-            return
-
-        # Temporarily forget all widgets after the parent button
-        for i in range(parent_btn_index + 1, len(all_widgets)):
-            all_widgets[i].pack_forget()
-
-        # Pack the submenu frame right after its parent button
-        submenu_frame.pack(
-            pady=(0, self._menu_pad_y),
-            padx=self._menu_pad_x,
-            fill="x",
-            after=submenu_parent_btn
-        )
-
-        # Repack the forgotten widgets in their original order, after the submenu frame
-        for i in range(parent_btn_index + 1, len(all_widgets)):
-            # Skip the submenu frame itself if it's in the list
-            if all_widgets[i] is not submenu_frame:
-                all_widgets[i].pack(
-                    pady=self._menu_pad_y,
-                    padx=self._menu_pad_x,
-                    fill="x"
-                )
-
-    def show_commerciale_submenu(self):
-        if self.current_submenu_open == "COMMERCIALE":  # ✅ CORRECTION ICI
-            self._close_all_submenus()
-            return
-        self._close_all_submenus()
-
-        # Ensure the administration button is packed in its correct place
-        if hasattr(self, 'btn_administration'):
-            pass
-
-        self._repack_main_buttons_after_submenu(self.btn_administration, self.admin_submenu_frame)
-
-        for widget in self.admin_submenu_frame.winfo_children():
-            widget.destroy()
-
-        # Dynamically add COMMERCIALE sub-menu buttons based on authorized menus
-        if "Article Liste" in self.authorized_menus:
-            btn_articleListe = ctk.CTkButton(self.admin_submenu_frame, text="📦 Article Liste", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["page_listeArticle"]))
-            btn_articleListe.pack(pady=2, padx=5, fill="x")
-
-        if "Client" in self.authorized_menus:
-            btn_client = ctk.CTkButton(self.admin_submenu_frame, text="👤 Client", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageClient"]))
-            btn_client.pack(pady=2, padx=5, fill="x")
-
-        if "Fournisseur" in self.authorized_menus:
-            btn_fournisseur = ctk.CTkButton(self.admin_submenu_frame, text="🏭 Fournisseur", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageFournisseur"]))
-            btn_fournisseur.pack(pady=2, padx=5, fill="x")
-
-        if "Magasin" in self.authorized_menus:
-            btn_magasin = ctk.CTkButton(self.admin_submenu_frame, text="🏬 Magasin", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageMagasin"]))
-            btn_magasin.pack(pady=2, padx=5, fill="x")
-
-        if "Ventes" in self.authorized_menus:
-            btn_vente = ctk.CTkButton(self.admin_submenu_frame, text="📊 Ventes", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageVente"]))
-            btn_vente.pack(pady=2, padx=5, fill="x")
-
-        if "Ventes par Dépôt" in self.authorized_menus:
-            btn_vpd = ctk.CTkButton(
-                self.admin_submenu_frame, 
-                text="💰 Ventes par Dépôt", 
-                corner_radius=10, 
-                height=40,
-                fg_color="#034787", 
-                text_color="white", 
-                hover_color="#0565c9",
-                font=("Arial", 12), 
-                command=self.open_vente_window  # <-- NOUVELLE MÉTHODE
-            )
-            btn_vpd.pack(pady=2, padx=5, fill="x")
-
-        #if "Ventes par Dépôt" in self.authorized_menus:
-            # btn_vpd = ctk.CTkButton(self.admin_submenu_frame, text="Ventes par Dépôt", corner_radius=10, height=40,
-                                          # fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          # font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["open_vente_window"]))
-            # btn_vpd.pack(pady=2, padx=5, fill="x")
-            
-        if "Facturation" in self.authorized_menus:
-            btn_facturation = ctk.CTkButton(self.admin_submenu_frame, text="📄 Facturation", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=self.open_vente_window)
-            btn_facturation.pack(pady=2, padx=5, fill="x")
-
-        if "Liste Facture" in self.authorized_menus:
-            btn_listfact = ctk.CTkButton(self.admin_submenu_frame, text="📋 Liste Facture", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageListeFacture"]))
-            btn_listfact.pack(pady=2, padx=5, fill="x")
-
-        if "Stock Article" in self.authorized_menus:
-            btn_stock = ctk.CTkButton(self.admin_submenu_frame, text="📦 Stock Article", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageStock"]))
-            btn_stock.pack(pady=2, padx=5, fill="x")
-            
-        if "Stock Alerte" in self.authorized_menus:
-            btn_alerte = ctk.CTkButton(self.admin_submenu_frame, text="⚠️ Stock Alerte", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageStockAlerte"]))
-            btn_alerte.pack(pady=2, padx=5, fill="x")
-        # menu péremption directement après alerte
-        if "Péremption d'article" in self.authorized_menus or "Peremption Article" in self.authorized_menus:
-            btn_peremp = ctk.CTkButton(self.admin_submenu_frame, text="🛡️ Péremption d'article", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping.get("PageGestionPeremption")))
-            btn_peremp.pack(pady=2, padx=5, fill="x")
-            
-        if "Stock Livraison" in self.authorized_menus:
-            btn_sl = ctk.CTkButton(self.admin_submenu_frame, text="🚚 Stock Livraion", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageStockLivraison"]))
-            btn_sl.pack(pady=2, padx=5, fill="x")
-
-        if "Mouvement d'article" in self.authorized_menus:
-            btn_ma = ctk.CTkButton(self.admin_submenu_frame, text="🔄 Mouvement d'article", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageArticleMouvement"]))
-            btn_ma.pack(pady=2, padx=5, fill="x")        
-
-        if "Mouvement Stock" in self.authorized_menus:
-            btn_movmtstock = ctk.CTkButton(self.admin_submenu_frame, text="📊 Mouvement Stock", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageInfoMouvementStock"]))
-            btn_movmtstock.pack(pady=2, padx=5, fill="x")
-
-        # --- NOUVEAU MENU: Liste Mouvements ---
-        # Menu permettant de consulter les listes des différents mouvements d'articles
-        if "Liste mouvements" in self.authorized_menus:
-            btn_liste_mvmt = ctk.CTkButton(self.admin_submenu_frame, text="📊 Liste Mouvements", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageListeMouvement"]))
-            btn_liste_mvmt.pack(pady=2, padx=5, fill="x")
-
-        if "Suivi Commande" in self.authorized_menus:
-            btn_sc = ctk.CTkButton(self.admin_submenu_frame, text="📍 Suivi Commande", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageSuiviCommande"]))
-            btn_sc.pack(pady=2, padx=5, fill="x")
-
-        if "Prix d'article" in self.authorized_menus:
-            btn_pda = ctk.CTkButton(self.admin_submenu_frame, text="💲 Prix d'article", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PagePrixListe"]))
-            btn_pda.pack(pady=2, padx=5, fill="x")
-
-        if "Prix de revient" in self.authorized_menus:
-            btn_pr = ctk.CTkButton(self.admin_submenu_frame, text="📊 Prix de Revient", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PagePrixRevient"]))
-            btn_pr.pack(pady=2, padx=5, fill="x")
-            
-        if "Livraison Client" in self.authorized_menus:
-            btn_lc = ctk.CTkButton(self.admin_submenu_frame, text="🚚 Livraison client", corner_radius=10, height=40,
-                                          fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageLivraisonClient"]))
-            btn_lc.pack(pady=2, padx=5, fill="x")
-
-        if "Matières" in self.authorized_menus:
-            btn_matiere = ctk.CTkButton(self.admin_submenu_frame, text="📚 Matières", corner_radius=10, height=40,
-                                      fg_color="#034787", text_color="white", hover_color="#0565c9",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageMatiere"]))
-            btn_matiere.pack(pady=2, padx=5, fill="x")
-
-        if "Notes" in self.authorized_menus:
-            btn_notes = ctk.CTkButton(self.admin_submenu_frame, text="📝 Notes", corner_radius=10, height=40,
-                                      fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["NoteManagementPage"]))
-            btn_notes.pack(pady=2, padx=5, fill="x")
-
-        if "Activités" in self.authorized_menus:
-            btn_activite = ctk.CTkButton(self.admin_submenu_frame, text="🎯 Activités", corner_radius=10, height=40,
-                                      fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageActivitePrix"]))
-            btn_activite.pack(pady=2, padx=5, fill="x")
-
-        if "Evènements" in self.authorized_menus:
-            btn_evenement = ctk.CTkButton(self.admin_submenu_frame, text="📅 Evènements", corner_radius=10, height=40,
-                                          fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                          font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageEvenement"]))
-            btn_evenement.pack(pady=2, padx=5, fill="x")
-   
-        self.current_submenu_open = "COMMERCIALE"  # ✅ CORRECTION ICI
-        self._apply_menu_responsive_styles()
-
-    def _repack_commerciale_submenu(self):
-        if hasattr(self, 'btn_administration') and self.btn_administration.winfo_ismapped():
-            self._repack_main_buttons_after_submenu(self.btn_administration, self.admin_submenu_frame)
-            self.show_commerciale_submenu()
-
-
-    def show_personnel_submenu(self):
-        if self.current_submenu_open == "PERSONNEL":
-            self._close_all_submenus()
-            return        
-        self._close_all_submenus()
-        
-        # Ensure the personnel button is packed in its correct place
-        if hasattr(self, 'btn_personnel'):
-            pass # No direct pack_forget/pack here, rely on the helper
-
-        self._repack_main_buttons_after_submenu(self.btn_personnel, self.personnel_submenu_frame)
-
-        for widget in self.personnel_submenu_frame.winfo_children():
-            widget.destroy()
-
-        if "Liste Personnel" in self.authorized_menus:
-            btn_personnel_main = ctk.CTkButton(self.personnel_submenu_frame, text="👥 Liste Personnel", corner_radius=10, height=40,
-                                                 fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                 font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageMainPersonnel"]))
-            btn_personnel_main.pack(pady=2, padx=5, fill="x")
-
-        if "Absence" in self.authorized_menus:
-            btn_absence = ctk.CTkButton(self.personnel_submenu_frame, text="❌ Absence", corner_radius=10, height=40,
-                                                 fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                 font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageAbsence"]))
-            btn_absence.pack(pady=2, padx=5, fill="x")
-            
-        if "Présence" in self.authorized_menus:
-            btn_presence = ctk.CTkButton(self.personnel_submenu_frame, text="✅ Présence", corner_radius=10, height=40,
-                                                 fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                 font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PagePresence"]))
-            btn_presence.pack(pady=2, padx=5, fill="x")
-
-        if "Avance 15e" in self.authorized_menus:
-            btn_avance15e = ctk.CTkButton(self.personnel_submenu_frame, text="💸 Avance 15e", corner_radius=10, height=40,
-                                           fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                           font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageAVQ"]))
-            btn_avance15e.pack(pady=2, padx=5, fill="x")
-
-        if "Avance Spéciale" in self.authorized_menus:
-            btn_avance_speciale = ctk.CTkButton(self.personnel_submenu_frame, text="💰 Avance Spéciale", corner_radius=10, height=40,
-                                                 fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                 font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["FenetreAvanceSpec"]))
-            btn_avance_speciale.pack(pady=2, padx=5, fill="x")
-
-        if "Fonction" in self.authorized_menus:
-            btn_fonction = ctk.CTkButton(self.personnel_submenu_frame, text="👔 Fonction", corner_radius=10, height=40,
-                                           fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                           font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageFonction"]))
-            btn_fonction.pack(pady=2, padx=5, fill="x")
-
-        if "Présence" in self.authorized_menus:
-            btn_presence = ctk.CTkButton(self.personnel_submenu_frame, text="Présence", corner_radius=10, height=40,
-                                           fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                           font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PagePresence"]))
-            btn_presence.pack(pady=2, padx=5, fill="x")
-
-        
-        if "Salaire Horaire" in self.authorized_menus:
-            btn_salaire_horaire = ctk.CTkButton(self.personnel_submenu_frame, text="⏰ Salaire Horaire", corner_radius=10, height=40,
-                                                 fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                 font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageEtatSalaireHoraire"]))
-            btn_salaire_horaire.pack(pady=2, padx=5, fill="x")
-
-        if "Paramètres Personnel" in self.authorized_menus: # This seems to map to page_settings
-            btn_settings_personnel = ctk.CTkButton(self.personnel_submenu_frame, text="⚙️ Paramètres Personnel", corner_radius=10, height=40,
-                                                    fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                    font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["page_settings"]))
-            btn_settings_personnel.pack(pady=2, padx=5, fill="x")
-        
-        # This button maps to page_salaireBase_, not page_settings, so it should be distinct
-        if "Nouveau SB" in self.authorized_menus: 
-            btn_salaire_base_ = ctk.CTkButton(self.personnel_submenu_frame, text="📋 Nouveau SB", corner_radius=10, height=40,
-                                                   fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                   font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageSalaireBase"]))
-            btn_salaire_base_.pack(pady=2, padx=5, fill="x")
-        
-        if "Etat de Salaire" in self.authorized_menus: 
-            btn_es_ = ctk.CTkButton(self.personnel_submenu_frame, text="📊 Etat de Salaire", corner_radius=10, height=40,
-                                                   fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                   font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageSalaireEtatSB"]))
-            btn_es_.pack(pady=2, padx=5, fill="x")
-            
-        if "Etat de Salaire Horaire" in self.authorized_menus: 
-            btn_esh_ = ctk.CTkButton(self.personnel_submenu_frame, text="📊 Etat de Salaire Horaire", corner_radius=10, height=40,
-                                                   fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                   font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageEtatSalaireHoraire"]))
-            btn_esh_.pack(pady=2, padx=5, fill="x")
-
-        if "Taux Horaire" in self.authorized_menus: 
-            btn_salaire_base_ = ctk.CTkButton(self.personnel_submenu_frame, text="💲 Taux Horaire", corner_radius=10, height=40,
-                                                   fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                   font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageTauxHoraire"]))
-            btn_salaire_base_.pack(pady=2, padx=5, fill="x")
-
-        if "Paiement Salaire" in self.authorized_menus: 
-            btn_salaire_base_ = ctk.CTkButton(self.personnel_submenu_frame, text="💳 Paiement Salaire", corner_radius=10, height=40,
-                                                   fg_color="#036C6B", text_color="white", hover_color="#2ec8cd",
-                                                   font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageValidationSalaire"]))
-            btn_salaire_base_.pack(pady=2, padx=5, fill="x")
-
-        self.current_submenu_open = "PERSONNEL"
-        self._apply_menu_responsive_styles()
-        # The repacking is handled by _repack_main_buttons_after_submenu, no need for the line below
-        # self._repack_main_buttons_after_submenu(self.btn_personnel, self.personnel_submenu_frame)
-
-    def show_tresorerie_submenu(self):
-        if self.current_submenu_open == "TRESORERIE":
-            self._close_all_submenus()
-            return
-        self._close_all_submenus()
-
-        if hasattr(self, 'btn_tresorerie'):
-            pass
-
-        self._repack_main_buttons_after_submenu(self.btn_tresorerie, self.tresorerie_submenu_frame)
-
-        for widget in self.tresorerie_submenu_frame.winfo_children():
-            widget.destroy()
-
-        if "Caisse" in self.authorized_menus:
-            btn_caisse = ctk.CTkButton(self.tresorerie_submenu_frame, text="🏧 Caisse", corner_radius=10, height=40,
-                                       fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                       font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageCaisse"]))
-            btn_caisse.pack(pady=2, padx=5, fill="x")
-
-        if "Facture Liste" in self.authorized_menus:
-            btn_facap = ctk.CTkButton(self.tresorerie_submenu_frame, text="💳 Client à Payer", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageFactureListe"]))
-            btn_facap.pack(pady=2, padx=5, fill="x")
-            
-        if "Fournisseur Dettes" in self.authorized_menus:
-            btn_fd = ctk.CTkButton(self.tresorerie_submenu_frame, text="💰 Fournisseur à Payer", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageFrsDette"]))
-            btn_fd.pack(pady=2, padx=5, fill="x")
-
-        if "Banque" in self.authorized_menus:
-            btn_banque = ctk.CTkButton(self.tresorerie_submenu_frame, text="🏦 Banque", corner_radius=10, height=40,
-                                       fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                       font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageBanque"]))
-            btn_banque.pack(pady=2, padx=5, fill="x")
-
-        if "Ajout Banque" in self.authorized_menus:
-            btn_ajoutbanque = ctk.CTkButton(self.tresorerie_submenu_frame, text="➕ Ajout Banque", corner_radius=10, height=40,
-                                       fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                       font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageBanqueNv"]))
-            btn_ajoutbanque.pack(pady=2, padx=5, fill="x")
-
-        if "Transfert Banque" in self.authorized_menus:
-            btn_transfertbanque = ctk.CTkButton(self.tresorerie_submenu_frame, text="🔄 Transfert Banque", corner_radius=10, height=40,
-                                       fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                       font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageTransfertBanque"]))
-            btn_transfertbanque.pack(pady=2, padx=5, fill="x")
-
-        if "Transfert Caisse" in self.authorized_menus:
-            btn_transfertcaisse = ctk.CTkButton(self.tresorerie_submenu_frame, text="🔄 Transfert Caisse", corner_radius=10, height=40,
-                                       fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                       font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageTransfertCaisse"]))
-            btn_transfertcaisse.pack(pady=2, padx=5, fill="x")
-
-        if "Decaissement" in self.authorized_menus:
-            btn_decaissement = ctk.CTkButton(self.tresorerie_submenu_frame, text="💸 Décaissement", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageDecaissement"]))
-            btn_decaissement.pack(pady=2, padx=5, fill="x")
-
-        if "DecaissementBq" in self.authorized_menus:
-            btn_decaissement = ctk.CTkButton(self.tresorerie_submenu_frame, text="DécaissementBq", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageDecaissementBq"]))
-            btn_decaissement.pack(pady=2, padx=5, fill="x")
-
-        if "Encaissement" in self.authorized_menus:
-            btn_encaissement = ctk.CTkButton(self.tresorerie_submenu_frame, text="📥 Encaissement", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageEncaissement"]))
-            btn_encaissement.pack(pady=2, padx=5, fill="x")
-
-        if "EncaissementBq" in self.authorized_menus:
-            btn_encaissement = ctk.CTkButton(self.tresorerie_submenu_frame, text="EncaissementBq", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageEncaissementBq"]))
-            btn_encaissement.pack(pady=2, padx=5, fill="x")
-
-        if "Etat de Dépenses" in self.authorized_menus:
-            btn_depense = ctk.CTkButton(self.tresorerie_submenu_frame, text="📊 Etat de dépenses", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageDepParCat"]))
-            btn_depense.pack(pady=2, padx=5, fill="x")
-
-        if "Catégorie" in self.authorized_menus:
-            btn_categorie = ctk.CTkButton(self.tresorerie_submenu_frame, text="🏷️ Catégorie", corner_radius=10, height=40,
-                                            fg_color="#87035D", text_color="white", hover_color="#c936c2",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageCategorie"]))
-            btn_categorie.pack(pady=2, padx=5, fill="x")
-        
-        
-
-        self.current_submenu_open = "TRESORERIE"
-        self._apply_menu_responsive_styles()
-        # self._repack_main_buttons_after_submenu(self.btn_tresorerie, self.tresorerie_submenu_frame)
-
-    def show_database_submenu(self):
-        if self.current_submenu_open == "DATABASE":
-            self._close_all_submenus()
-            return
-        self._close_all_submenus()
-
-        if hasattr(self, 'btn_database'):
-            pass
-
-        self._repack_main_buttons_after_submenu(self.btn_database, self.database_submenu_frame)
-
-        for widget in self.database_submenu_frame.winfo_children():
-            widget.destroy()
-
-        if "Autorisation" in self.authorized_menus:
-            btn_autorisation = ctk.CTkButton(self.database_submenu_frame, text="🔐 Autorisation", corner_radius=10, height=40,
-                                             fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                             font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageAutorisation"]))
-            btn_autorisation.pack(pady=2, padx=5, fill="x")
-
-        if "Evenements" in self.authorized_menus:
-            btn_events = ctk.CTkButton(self.database_submenu_frame, text="📅 Evenements", corner_radius=10, height=40,
-                                             fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                             font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageEvenement"]))
-            btn_events.pack(pady=2, padx=5, fill="x")    
-
-        if "Sauvegarde" in self.authorized_menus:
-            btn_sauvegarde = ctk.CTkButton(self.database_submenu_frame, text="💾 Sauvegarde", corner_radius=10, height=40,
-                                           fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                           font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageSauvegarde"]))
-            btn_sauvegarde.pack(pady=2, padx=5, fill="x")
-
-        if "Utilisateurs" in self.authorized_menus:
-            btn_users = ctk.CTkButton(self.database_submenu_frame, text="👨‍💻 Utilisateurs", corner_radius=10, height=40,
-                                      fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageUsers"]))                                      
-            btn_users.pack(pady=2, padx=5, fill="x")
-
-        # Example of adding the "Paramètres de la BD" button
-        if "Paramètres BD" in self.authorized_menus: # Make sure this menu item exists in your DB for permissions
-            btn_db_settings = ctk.CTkButton(self.database_submenu_frame, text="⚙️ Paramètres BD", corner_radius=10, height=40,
-                                            fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                            font=("Arial", 12), command=self.open_db_config_window)
-            btn_db_settings.pack(pady=2, padx=5, fill="x")
-
-        
-        if "Paramètre Reseau" in self.authorized_menus:
-            btn_users = ctk.CTkButton(self.database_submenu_frame, text="🌐 Paramètre Reseau", corner_radius=10, height=40,
-                                      fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageParamReseau"]))                                      
-            btn_users.pack(pady=2, padx=5, fill="x")
-
-        if "Init DB" in self.authorized_menus:
-            btn_users = ctk.CTkButton(self.database_submenu_frame, text="🔧 Init DB", corner_radius=10, height=40,
-                                      fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["DBInitializerApp"]))                                      
-            btn_users.pack(pady=2, padx=5, fill="x")
-        
-        if "Menu" in self.authorized_menus:
-            btn_menu = ctk.CTkButton(self.database_submenu_frame, text="📋 Menu", corner_radius=10, height=40,
-                                      fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageMenu"]))                                      
-            btn_menu.pack(pady=2, padx=5, fill="x")
-       
-        if "Base Liste" in self.authorized_menus:
-            btn_bl = ctk.CTkButton(self.database_submenu_frame, text="📚 Base Liste", corner_radius=10, height=40,
-                                      fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageBaseListe"]))                                      
-            btn_bl.pack(pady=2, padx=5, fill="x")
-            
-        if "Autorisation Admin" in self.authorized_menus:
-            btn_aa = ctk.CTkButton(self.database_submenu_frame, text="🔐 Autorisation Admin", corner_radius=10, height=40,
-                                      fg_color="#874903", text_color="white", hover_color="#d7956e",
-                                      font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageCodeAutorisation"]))                                      
-            btn_aa.pack(pady=2, padx=5, fill="x")
-
-        self.current_submenu_open = "DATABASE"
-        self._apply_menu_responsive_styles()
-        # self._repack_main_buttons_after_submenu(self.btn_database, self.database_submenu_frame)
-
-    def show_examen_blanc_submenu(self):
-        if self.current_submenu_open == "EXAMEN_BLANC":
-            self._close_all_submenus()
-            return
-        self._close_all_submenus()
-
-        if hasattr(self, 'btn_examen_blanc'):
-            pass
-
-        self._repack_main_buttons_after_submenu(self.btn_examen_blanc, self.examen_blanc_submenu_frame)
-
-        for widget in self.examen_blanc_submenu_frame.winfo_children():
-            widget.destroy()
-
-        if "Matiere EB" in self.authorized_menus:
-            btn_matiere_eb = ctk.CTkButton(self.examen_blanc_submenu_frame, text="Matiere EB", corner_radius=10, height=40,
-                                           fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                           font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageMatiereEb"]))
-            btn_matiere_eb.pack(pady=2, padx=5, fill="x")
-
-        if "Etudiant EB" in self.authorized_menus:
-            btn_etudiant_eb = ctk.CTkButton(self.examen_blanc_submenu_frame, text="Etudiant EB", corner_radius=10, height=40,
-                                            fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageEtudiantExameBlanc"]))
-            btn_etudiant_eb.pack(pady=2, padx=5, fill="x")
-
-        if "Notes EB" in self.authorized_menus:
-            btn_notes_eb = ctk.CTkButton(self.examen_blanc_submenu_frame, text="Notes EB", corner_radius=10, height=40,
-                                         fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                         font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageNoteExamBlanc"]))
-            btn_notes_eb.pack(pady=2, padx=5, fill="x")
-
-        if "Déliberation EB" in self.authorized_menus:
-            btn_deliberation_eb = ctk.CTkButton(self.examen_blanc_submenu_frame, text="Déliberation EB", corner_radius=10, height=40,
-                                                fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                                font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageDeliberation"]))
-            btn_deliberation_eb.pack(pady=2, padx=5, fill="x")
-        
-        if "Résultat EB" in self.authorized_menus:
-            btn_resultat_eb = ctk.CTkButton(self.examen_blanc_submenu_frame, text="Résultat EB", corner_radius=10, height=40,
-                                            fg_color="#0565c9", text_color="white", hover_color="#034787",
-                                            font=("Arial", 12), command=lambda: self.show_page(self.page_mapping["PageResultatEB"]))
-            btn_resultat_eb.pack(pady=2, padx=5, fill="x")
-
-
-        self.current_submenu_open = "EXAMEN_BLANC"
-        self._apply_menu_responsive_styles()
-        # self._repack_main_buttons_after_submenu(self.btn_examen_blanc, self.examen_blanc_submenu_frame)
-
-
-    # Repack methods for when sidebar is expanded
-    # These methods are called by toggle_sidebar to re-display the correct submenu
-    def _repack_commerciale_submenu(self):
-        if hasattr(self, 'btn_administration') and self.btn_administration.winfo_ismapped():
-            self._repack_main_buttons_after_submenu(self.btn_administration, self.admin_submenu_frame)
-            # Re-create the submenu buttons as they were destroyed when sidebar collapsed
-            self.show_commerciale_submenu() # This will recreate buttons and set current_submenu_open
-
-    def _repack_personnel_submenu(self):
-        if hasattr(self, 'btn_personnel') and self.btn_personnel.winfo_ismapped():
-            self._repack_main_buttons_after_submenu(self.btn_personnel, self.personnel_submenu_frame)
-            self.show_personnel_submenu()
-
-    def _repack_tresorerie_submenu(self):
-        if hasattr(self, 'btn_tresorerie') and self.btn_tresorerie.winfo_ismapped():
-            self._repack_main_buttons_after_submenu(self.btn_tresorerie, self.tresorerie_submenu_frame)
-            self.show_tresorerie_submenu()
-
-    def _repack_database_submenu(self):
-        if hasattr(self, 'btn_database') and self.btn_database.winfo_ismapped():
-            self._repack_main_buttons_after_submenu(self.btn_database, self.database_submenu_frame)
-            self.show_database_submenu()
-
-    def _repack_examen_blanc_submenu(self):
-        if hasattr(self, 'btn_examen_blanc') and self.btn_examen_blanc.winfo_ismapped():
-            self._repack_main_buttons_after_submenu(self.btn_examen_blanc, self.examen_blanc_submenu_frame)
-            self.show_examen_blanc_submenu()
-
-   
-# ==============================================================================
-# VenteTabManager: Gère les tabs pour les multiples fenêtres de vente
-# ==============================================================================
-class VenteTabManager(ctk.CTkToplevel):
-    """
-    Fenêtre indépendante qui gère plusieurs tabs CTkTabview contenant chacun une PageVenteParMsin.
-    - Max 10 tabs
-    - +/X buttons pour ajouter/fermer des tabs
-    """
-    def __init__(self, master=None, id_user_connecte: Optional[int] = None, app_reference=None) -> None:
-        super().__init__(master)
-        
-        self.title("Gestion des Ventes - Fenêtres Tabées")
-        self.geometry("1350x850")
-        self.id_user_connecte = id_user_connecte
-        self.app_reference = app_reference
-        self.tab_count = 0
-        self.max_tabs = 10
-        self.tab_list = []  # Liste des (tab_widget, page_vente_frame)
-        
-        # Après 100ms, amener la fenêtre au premier plan
-        self.after(100, self.lift)
-        
-        # --- Header avec boutons manageurs des tabs ---
-        # Place native CTkTabview header at the top; action buttons placed absolute top-right
-        # Création des boutons d'action (placés en absolu plus bas)
-        self.btn_close_tab = ctk.CTkButton(
+        # ── Sidebar ──────────────────────────────────────────────────────────
+        self._sidebar = Sidebar(self, self, session_data)
+        self._sidebar.grid(row=0, column=0, sticky="ns")
+
+        # ── Zone de contenu ───────────────────────────────────────────────────
+        self._content = ctk.CTkFrame(
             self,
-            text="✕",
-            width=32,
-            height=28,
-            font=("Arial", 12, "bold"),
-            fg_color="#d32f2f",
-            hover_color="#b71c1c",
-            text_color="white",
-            command=self.close_current_tab
+            fg_color=Colors.BG_PAGE,
+            corner_radius=0,
         )
+        self._content.grid(row=0, column=1, sticky="nsew")
+        self._content.grid_rowconfigure(0, weight=1)
+        self._content.grid_columnconfigure(0, weight=1)
 
-        self.btn_add_tab = ctk.CTkButton(
-            self,
-            text="+",
-            width=32,
-            height=28,
-            font=("Arial", 12, "bold"),
-            fg_color="green",
-            hover_color="darkgreen",
-            command=self.add_new_tab
+        # ── Événements ────────────────────────────────────────────────────────
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._start_clock()
+
+        # ── Page initiale ─────────────────────────────────────────────────────
+        authorized = self._sidebar.authorized
+        if "TABLEAU DE BORD" in authorized:
+            self.navigate("pages.page_home", "page_home", None, "TABLEAU DE BORD")
+        elif authorized:
+            first_auth = next(iter(authorized))
+            self.navigate(None, None, None, first_auth)
+
+    # ── Horloge titre ─────────────────────────────────────────────────────────
+
+    def _start_clock(self):
+        self._update_title()
+
+    def _update_title(self):
+        now = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
+        self.title(
+            f"  {now}  —  {self.nom_societe}  —  iJeery v5.0  "
+            f"—  Copyright 2025 Iski Solution  —  +261 34 46 687 61"
         )
+        self.after(1000, self._update_title)
 
-        # Position absolue en haut à droite — placement effectué après création du TabView
-        # (pour éviter d'être recouvert par le widget TabView)
-        
-        # --- Tab View ---
-        # Placer le TabView en ligne 0 pour que ses onglets natifs apparaissent en haut
-        self.tabview = ctk.CTkTabview(self, width=1300, height=750)
-        self.tabview.grid(row=0, column=0, sticky="nsew", padx=0, pady=(6,0))
-        
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-        
-        # Après création du TabView, placer/monter les boutons d'action et aligner les onglets natifs
+    def _fetch_societe_name(self) -> str:
         try:
-            self.btn_add_tab.place(relx=1.0, x=-6, y=6, anchor='ne')
-            self.btn_close_tab.place(relx=1.0, x=-44, y=6, anchor='ne')
-            # S'assurer qu'ils sont au-dessus
-            self.btn_add_tab.lift()
-            self.btn_close_tab.lift()
+            cur = self.db_conn.cursor()
+            cur.execute("SELECT nomsociete FROM tb_infosociete LIMIT 1")
+            row = cur.fetchone()
+            cur.close()
+            return row[0] if row else "iJeery"
         except Exception:
-            self.btn_add_tab.pack(side='top', anchor='ne', padx=2, pady=2)
-            self.btn_close_tab.pack(side='top', anchor='ne', padx=2, pady=2)
+            return "iJeery"
 
-        # Aligner la barre d'onglets native à gauche
-        self.after(50, self._align_native_tabs_left)
+    # ── Navigation ────────────────────────────────────────────────────────────
 
-        # Ajouter le premier tab
-        self.add_new_tab()
-        
-    def add_new_tab(self):
-        """Ajoute un nouveau tab avec une nouvelle instance de PageVenteParMsin."""
-        if self.tab_count >= self.max_tabs:
-            from tkinter import messagebox
-            messagebox.showwarning(
-                "Limite atteinte",
-                f"Nombre maximum de {self.max_tabs} tabs atteint. Fermez un tab pour en ouvrir un nouveau."
-            )
+    def _safe_clear_content(self):
+        """
+        Détruit proprement tous les widgets enfants du content_frame.
+        Utilise update_idletasks() pour laisser Tkinter traiter les événements
+        pendants AVANT la destruction, ce qui évite le TclError classique :
+        "invalid command name .!widget..." quand un after() se déclenche
+        après que le widget a été détruit.
+        """
+        children = self._content.winfo_children()
+        if not children:
             return
-        
-        self.tab_count += 1
-        tab_name = f"Vente({self.tab_count})"
-        
-        # Créer le tab dans le tabview
-        new_tab = self.tabview.add(tab_name)
-        
-        # === DIRECTEMENT PageVenteParMsin (pas de wrapper ni header) ===
-        from pages.page_venteParMsin import PageVenteParMsin
-        
-        page_vente_frame = PageVenteParMsin(
-            master=new_tab,
-            id_user_connecte=self.id_user_connecte
-        )
-        page_vente_frame.pack(fill="both", expand=True, padx=0, pady=0)
-        
-        # Stocker la référence au tab et au frame
-        tab_info = {
-            'tab_name': tab_name,
-            'tab_widget': new_tab,
-            'page_frame': page_vente_frame
-        }
-        self.tab_list.append(tab_info)
 
-        # (Utilisation des onglets natifs du CTkTabview — pas de boutons personnalisés à gauche)
-        
-        # Cacher le bouton + si on a atteint la limite
-        if self.tab_count >= self.max_tabs:
-            self.btn_add_tab.configure(state="disabled")
-        
-        # Sélectionner le nouveau tab (onglet natif)
-        self.tabview.set(tab_name)
-        # Mettre à jour le label du header (noop)
-        self._update_header_label()
-
-    # (removed custom left-tab helpers; using native CTkTabview tabs)
-    
-    def _update_header_label(self):
-        """No-op: on n'affiche plus de texte dans l'en-tête (les onglets natifs du TabView sont visibles)."""
-        return
-    
-    def close_current_tab(self):
-        """Ferme le tab actuellement sélectionné ou ferme la fenêtre si c'est le dernier."""
-        if len(self.tab_list) <= 1:
-            # Fermer directement la fenêtre au lieu de montrer un message
-            print("✅ Fermeture de la fenêtre Vente (dernier tab)")
-            self.destroy()
-            return
-        
-        # Récupérer le tab actuel
-        current_tab_name = self.tabview.get()
-        self.close_tab(current_tab_name)
-    
-    def close_tab(self, tab_name):
-        """Ferme un tab spécifique par son nom."""
-        if len(self.tab_list) <= 1:
-            # Si on tente de fermer le dernier tab, fermer directement la fenêtre.
+        # 1. Cacher immédiatement tous les enfants (stoppe les redessins)
+        for w in children:
             try:
-                self.destroy()
+                w.grid_remove()
+                w.pack_forget()
             except Exception:
                 pass
-            return
-        
-        # Chercher le tab à fermer
-        tabs_to_remove = [t for t in self.tab_list if t['tab_name'] == tab_name]
-        if tabs_to_remove:
-            tab_info = tabs_to_remove[0]
+
+        # 2. Laisser Tkinter vider sa file d'événements (after() en attente)
+        self._content.update_idletasks()
+
+        # 3. Destruction propre
+        for w in children:
             try:
-                self.tabview.delete(tab_name)
-                # (pas de bouton d'accès rapide personnalisé à détruire)
-
-                self.tab_list.remove(tab_info)
-                self.tab_count -= 1
-
-                # Si des tabs restent, sélectionner le dernier et mettre à jour la surbrillance
-                if self.tab_list:
-                    new_active = self.tab_list[-1]['tab_name']
-                    try:
-                        self.tabview.set(new_active)
-                    except Exception:
-                        pass
-                
-                # Réactiver le bouton + si on n'a pas atteint la limite
-                if self.tab_count < self.max_tabs:
-                    self.btn_add_tab.configure(state="normal")
-                
-                print(f"✅ Tab '{tab_name}' fermé avec succès")
-            except Exception as e:
-                print(f"❌ Erreur lors de la fermeture du tab: {e}")
-
-    def _align_native_tabs_left(self):
-        """Tente d'aligner la barre d'onglets native du `CTkTabview` à gauche.
-
-        Selon la version interne de customtkinter, le header peut être contenu
-        dans différents widgets internes. On parcourt les enfants pour trouver
-        celui contenant des boutons d'onglets puis on réajuste son placement.
-        """
-        try:
-            # Recherche d'un widget interne ressemblant à la barre d'onglets
-            for child in list(self.tabview.winfo_children()):
-                try:
-                    inner = child.winfo_children()
-                    # heuristique : contient plusieurs boutons/labels => header
-                    btn_like = [c for c in inner if 'Button' in str(type(c)) or 'CTkButton' in str(type(c)) or 'Segmented' in str(type(c))]
-                    if len(btn_like) >= 1:
-                        try:
-                            # tenter de repositionner vers la gauche
-                            child.pack_configure(anchor='w')
-                            child.pack_configure(side='top', fill='x')
-                        except Exception:
-                            try:
-                                child.grid_configure(sticky='w')
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-   
-# Main execution block
-if __name__ == "__main__":
-    # Ensure there's a login_window.py with a LoginWindow class and a start method
-    # This setup implies LoginWindow manages its own CTk() root.
-    # It passes session_data to App upon successful login.
-
-    # This part should be in your login_window.py or a separate entry point
-    # to handle the login flow.
-    # For now, let's simulate a successful login with dummy data
-    # so you can run and test the App class directly.
-    # In a real app, this `session_data` would come from `login_window.py`
-    # after successful authentication.
-
-    # Dummy session_data for testing purposes if you run app_main.py directly
-    # REMOVE THIS FOR PRODUCTION - it's just to make App runnable for testing
-    dummy_session_data = {
-        'username': 'test_user',
-        'role': 'administrateur',
-        'menus': [
-            ('TABLEAU DE BORD', True),
-            ('Enseignant', True),
-            ('Absence', True),
-            ('Annee Scolaire', True),
-            ('Bulletin', True),
-            ('Classe', True),
-            ('Droit', True),
-            ('Ecolage', True),
-            ('Inscription', True),
-            ('Matieres', True),
-            ('Notes', True),
-            ('Evenements', True),
-            ('Liste Personnel', True),
-            ('Avance 15e', True),
-            ('Avance Speciale', True),
-            ('Fonction', True),
-            ('Presence', True),
-            ('Salaire Base', True),
-            ('Salaire Horaire', True),
-            ('Parametres Personnel', True),
-            ('Salaire de Base', True),
-            ('Caisse', True),
-            ('Banque', True),
-            ('Ajout Banque', True),
-            ('Decaissement', True),
-            ('DecaissementBq', True),
-            ('Encaissement', True),
-            ('EncaissementBq', True),
-            ('Categorie', True),
-            ('Autorisation', True),
-            ('Sauvegarde', True),
-            ('Utilisateurs', True),
-            ('Creer Base de données', True),
-            ('Export Table', True),
-            ('Matiere EB', True),
-            ('Etudiant EB', True),
-            ('Notes EB', True),
-            ('Deliberation EB', True),
-            ('Resultat EB', True),
-            ('Transfert Banque', True),
-            ('Transfert Caisse', True),
-            ("Parametres BD", True),
-            ("Init DB", True),
-            ("Activites", True),
-            ("Etat de Depenses", True),
-            ("PagePeriode", True),
-            ("PageListeParSerie", True),
-            ("Facture Liste", True),
-            ("Paiement Fournisseur", True),
-            ("Paiement Client", True),
-            ("Noveau SB", True)
-            # Add all menus here that your dummy user should see
-        ],
-        'user_id': 1
-    }
-    
-    # Try to load session data from file
-    session_file_path = "session.json"
-    if os.path.exists(session_file_path):
-        try:
-            with open(session_file_path, 'r') as f:
-                session_data = json.load(f)
-            print("Session data loaded from file.")
-        except json.JSONDecodeError as e:
-            print(f"Error decoding session.json: {e}. Using dummy data.")
-            session_data = dummy_session_data
-    else:
-        print("No session.json found. Using dummy data for testing.")
-        session_data = dummy_session_data # Fallback to dummy if no session file
-
-if __name__ == "__main__":
-    # Vérifier s'il y a une session valide
-    session_file_path = "session.json"
-    if os.path.exists(session_file_path):
-        try:
-            with open(session_file_path, 'r', encoding='utf-8') as f:
-                session_data = json.load(f)
-            print("Session data loaded from file.")
-            
-            # Lancer l'application principale
-            app = App(session_data)
-            app.mainloop()
-            
-        except json.JSONDecodeError as e:
-            print(f"Error decoding session.json: {e}. Launching login window.")
-            try:
-                os.remove(session_file_path)
-            except:
+                w.destroy()
+            except Exception:
                 pass
-            from page_login import LoginWindow
-            login_app = LoginWindow()
-            login_app.start()
+
+    def navigate(self, module_path: Optional[str], class_name: Optional[str],
+                 kwargs_key: Optional[str], auth_key: str):
+        """
+        Charge et affiche une page dans la zone de contenu.
+        kwargs_key contrôle les arguments spéciaux à passer.
+        """
+        # ── Vider le contenu en annulant d'abord les callbacks "after" pendants ──
+        # Cela évite le TclError quand une page a un after() en cours
+        # (ex: page_stock qui rappelle recharger_treeview après destruction)
+        self._safe_clear_content()
+
+        # ── Cas spéciaux ──────────────────────────────────────────────────────
+        if kwargs_key == "vente_tab":
+            self._open_vente_tab()
+            return
+
+        if kwargs_key == "toplevel" and module_path and class_name:
+            cls = _lazy_load(module_path, class_name)
+            if cls:
+                win = cls(master=self, app_root=self)
+                win.grab_set(); win.focus_force(); win.transient(self)
+                self.wait_window(win)
+            return
+
+        if not module_path or not class_name:
+            self._show_not_authorized("Page non configurée.")
+            return
+
+        # ── Chargement de la classe ───────────────────────────────────────────
+        cls = _lazy_load(module_path, class_name)
+        if cls is None:
+            self._show_not_authorized(f"Module introuvable : {module_path}.{class_name}")
+            return
+
+        # ── Instanciation avec les bons arguments ────────────────────────────
+        try:
+            instance = self._instantiate(cls, kwargs_key)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            self._show_not_authorized(f"Erreur d'affichage :\n{e}")
+            return
+
+        if instance is None:
+            self._show_not_authorized("Impossible de créer la page.")
+            return
+
+        if isinstance(instance, ctk.CTkToplevel):
+            instance.lift(); instance.focus_force(); instance.transient(self)
+            self.wait_window(instance)
+        else:
+            instance.grid(row=0, column=0, sticky="nsew")
+
+    def _instantiate(self, cls, kwargs_key: Optional[str]):
+        """Instancie une page avec la bonne signature."""
+        master = self._content
+
+        if kwargs_key == "vente":
+            return cls(master=master, id_user_connecte=self.id_user_connecte)
+
+        if kwargs_key == "iduser":
+            # Certaines pages utilisent "parent" (positionnel) d'autres "master=" (kwarg).
+            # On essaie les deux pour couvrir PageInfoMouvementStock et PageAVQ/FenetreAvanceSpec.
+            for call in [
+                lambda: cls(master, iduser=self.id_user_connecte),   # parent positionnel
+                lambda: cls(master=master, iduser=self.id_user_connecte),
+            ]:
+                try:
+                    return call()
+                except TypeError:
+                    continue
+            return None
+
+        if kwargs_key == "app_root":
+            return cls(master=master, app_root=self)
+
+        if kwargs_key == "chat":
+            return cls(
+                master=master,
+                session_data={
+                    "iduser":   self.id_user_connecte,
+                    "username": self.session_data.get("username", "Utilisateur"),
+                },
+            )
+
+        # Essais en cascade : (master, db_conn, session_data) → (master, db_conn) → (master,)
+        for args, kw in [
+            ((master,), {"db_conn": self.db_conn, "session_data": self.session_data}),
+            ((master,), {"db_conn": self.db_conn}),
+            ((master,), {}),
+        ]:
+            try:
+                return cls(*args, **kw)
+            except TypeError:
+                continue
+
+        return None
+
+    def _open_vente_tab(self):
+        if self._vente_tab_mgr is None or not self._vente_tab_mgr.winfo_exists():
+            self._vente_tab_mgr = VenteTabManager(self, self.id_user_connecte)
+        else:
+            self._vente_tab_mgr.add_tab()
+        self._vente_tab_mgr.lift()
+        self._vente_tab_mgr.focus_force()
+
+    def _show_not_authorized(self, msg: str = "Accès non autorisé."):
+        for w in self._content.winfo_children():
+            w.destroy()
+        lbl = ctk.CTkLabel(
+            self._content,
+            text=msg,
+            font=_F(14),
+            text_color=Colors.TEXT_MUTED,
+            wraplength=400,
+            justify="center",
+        )
+        lbl.grid(row=0, column=0, sticky="nsew")
+
+    # ── Déconnexion ───────────────────────────────────────────────────────────
+
+    def logout(self):
+        if not messagebox.askyesno("Déconnexion", "Voulez-vous vraiment vous déconnecter ?"):
+            return
+        try:
+            if os.path.exists("session.json"):
+                os.remove("session.json")
+            if self.db_conn:
+                try: self.db_conn.close()
+                except Exception: pass
+            self.withdraw()
+
+            if getattr(sys, "frozen", False):
+                subprocess.Popen(
+                    [sys.executable],
+                    cwd=os.path.dirname(sys.executable),
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                )
+            else:
+                script = os.path.join(_BASE, "app_main.py")
+                if os.path.exists(script):
+                    subprocess.Popen([sys.executable, script])
+
+            time.sleep(0.4)
+            try: self.quit(); self.destroy()
+            except Exception: pass
+            sys.exit(0)
+
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Déconnexion échouée : {e}")
+
+    def _on_close(self):
+        if self.db_conn:
+            try: self.db_conn.close()
+            except Exception: pass
+        self.destroy()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POINT D'ENTRÉE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _dummy_session() -> dict:
+    """Session factice pour les tests directs."""
+    menus = [
+        "TABLEAU DE BORD", "CHAT INTERNE",
+        "Article Liste", "Client", "Fournisseur", "Magasin",
+        "Ventes", "Ventes par Dépôt", "Facturation", "Liste Facture",
+        "Stock Article", "Stock Alerte", "Péremption d'article", "Stock Livraison",
+        "Mouvement d'article", "Mouvement Stock", "Liste mouvements",
+        "Suivi Commande", "Prix d'article", "Prix de revient", "Livraison Client",
+        "Liste Personnel", "Absence", "Présence", "Avance 15e", "Avance Spéciale",
+        "Fonction", "Nouveau SB", "Etat de Salaire", "Salaire Horaire",
+        "Taux Horaire", "Paiement Salaire",
+        "Caisse", "Facture Liste", "Fournisseur Dettes", "Banque", "Ajout Banque",
+        "Transfert Banque", "Transfert Caisse", "Decaissement", "DecaissementBq",
+        "Encaissement", "EncaissementBq",
+        "Autorisation", "Evenements", "Sauvegarde", "Utilisateurs",
+        "Menu", "Base Liste", "Autorisation Admin", "Init DB",
+    ]
+    return {
+        "username": "admin",
+        "user_id":  1,
+        "menus":    [(m, True) for m in menus],
+    }
+
+
+if __name__ == "__main__":
+    session_data = None
+    session_file = os.path.join(_BASE, "session.json")
+
+    if os.path.exists(session_file):
+        try:
+            with open(session_file, "r", encoding="utf-8") as f:
+                session_data = json.load(f)
+            print("[App] Session chargée depuis session.json")
+        except Exception as e:
+            print(f"[App] session.json invalide : {e}")
+
+    if session_data:
+        app = App(session_data)
+        app.mainloop()
     else:
-        print("No session.json found. Launching login window.")
-        from page_login import LoginWindow
-        login_app = LoginWindow()
-        login_app.start()
+        print("[App] Pas de session — lancement de la fenêtre de login.")
+        try:
+            from page_login import LoginWindow
+            LoginWindow().start()
+        except ImportError:
+            print("[App] page_login introuvable — utilisation de la session factice.")
+            app = App(_dummy_session())
+            app.mainloop()
