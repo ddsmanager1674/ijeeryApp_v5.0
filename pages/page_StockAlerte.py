@@ -442,8 +442,8 @@ class PageStockAlerte(ctk.CTkFrame):
                                 foreground=C.WARNING_TEXT,
                                 background=C.WARNING_LIGHT)
         self.tree.tag_configure('normal',
-                                foreground=C.SUCCESS_TEXT,
-                                background=C.SUCCESS_LIGHT)
+                                foreground=C.MIDNIGHT_DARK,
+                                background="#FFFFFF")
 
         widths = {"Code": 100, "Désignation": 260, "Unité": 100,
                   "Magasin": 140, "Seuil Mag.": 85, "Stock Mag.": 85,
