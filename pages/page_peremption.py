@@ -1,9 +1,77 @@
+# -*- coding: utf-8 -*-
+"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              iJeery — page_gestionPeremption.py  (refonte v2)              ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  • Thème iJeery (app_theme) — même patron que page_ArticleMouvement         ║
+║  • Fenêtres modales thémées (ajout lot + gestion lot existant)              ║
+║  • Logique métier SQL inchangée                                             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+"""
+
 import customtkinter as ctk
 from tkinter import ttk, messagebox, StringVar, BooleanVar
 import psycopg2, psycopg2.extras, json
 from datetime import datetime, timedelta
 from resource_utils import get_config_path
 
+# ── Thème iJeery ──────────────────────────────────────────────────────────────
+try:
+    from app_theme import Colors, Fonts, styled, Theme
+    _T = True
+except ImportError:
+    _T = False
+
+
+class _C:
+    MIDNIGHT        = "#2C3E50"
+    BG_PAGE         = "#ECF0F1"
+    BG_CARD         = "#FFFFFF"
+    BG_HEADER       = "#2C3E50"
+    BG_INPUT        = "#F4F6F8"
+    PRIMARY         = "#3498DB"
+    PRIMARY_HOVER   = "#2980B9"
+    SUCCESS         = "#2ECC71"
+    SUCCESS_DARK    = "#27AE60"
+    SUCCESS_LIGHT   = "#D5F5E3"
+    SUCCESS_TEXT    = "#1E8449"
+    DANGER          = "#E74C3C"
+    DANGER_DARK     = "#C0392B"
+    DANGER_LIGHT    = "#FADBD8"
+    DANGER_TEXT     = "#922B21"
+    WARNING         = "#F39C12"
+    WARNING_LIGHT   = "#FEF9E7"
+    WARNING_TEXT    = "#9A6A00"
+    INFO            = "#1ABC9C"
+    INFO_DARK       = "#16A085"
+    INFO_LIGHT      = "#D1F2EB"
+    INFO_TEXT       = "#0E6655"
+    PREMIUM         = "#9B59B6"
+    PREMIUM_DARK    = "#8E44AD"
+    TEXT_PRIMARY    = "#2C3E50"
+    TEXT_SECONDARY  = "#5D6D7E"
+    TEXT_MUTED      = "#95A5A6"
+    TEXT_ON_DARK    = "#FFFFFF"
+    TEXT_ON_DARK_DIM= "#BDC3C7"
+    BORDER          = "#D5D8DC"
+    BORDER_FOCUS    = "#3498DB"
+    DIVIDER         = "#E8EAED"
+    SILVER          = "#BDC3C7"
+    CLOUDS          = "#ECF0F1"
+
+
+C = Colors if _T else _C
+
+
+def _f(size=11, weight="normal"):
+    return ctk.CTkFont(
+        family="Roboto" if _T else "Segoe UI",
+        size=size, weight=weight)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Requêtes SQL (inchangées)
+# ─────────────────────────────────────────────────────────────────────────────
 SQL_TOUS = """
 WITH RECURSIVE
     facteur_conversion AS (
@@ -70,7 +138,6 @@ WITH RECURSIVE
           JOIN tb_transfert t ON t.idtransfert = td.idtransfert
          WHERE td.deleted = 0 AND t.deleted = 0
     ),
-    -- Stock PAR article ET PAR magasin
     stock_par_mag AS (
         SELECT fc.idarticle, tm.idmag,
                COALESCE(SUM(tm.quantite * fc.facteur_vers_base * tm.signe), 0.0)
@@ -90,8 +157,6 @@ WITH RECURSIVE
                ) AS cumul_depuis_recents
         FROM tb_lot_peremption lp WHERE lp.deleted = 0
     )
-
--- Articles AVEC lots
 SELECT
     um.codearticle,
     a.designation                                                                    AS designationarticle,
@@ -107,7 +172,7 @@ SELECT
     lr.date_entree,
     lr.priorite,
     lr.note,
-    ROUND((lr.quantite)::numeric, 4)                          AS qt_lot_unite,
+    ROUND((lr.quantite)::numeric, 4)                                                 AS qt_lot_unite,
     ROUND(
         (GREATEST(0.0, LEAST(
             lr.quantite,
@@ -124,7 +189,6 @@ LEFT JOIN stock_par_mag sm ON sm.idarticle = lr.id_article AND sm.idmag = lr.idm
 
 UNION ALL
 
--- Articles SANS lot, une ligne par magasin où le stock > 0
 SELECT
     um.codearticle,
     a.designation                                                                    AS designationarticle,
@@ -155,71 +219,319 @@ WHERE a.deleted = 0
         AND lp.idmag = sm.idmag
         AND lp.deleted = 0
   )
-
-ORDER BY codearticle, designationmag, priorite ASC NULLS LAST, date_entree ASC NULLS LAST;
+ORDER BY codearticle, designationmag,
+         priorite ASC NULLS LAST, date_entree ASC NULLS LAST;
 """
 
-SQL_MAGASINS = "SELECT idmag, designationmag FROM tb_magasin WHERE deleted=0 ORDER BY designationmag;"
+SQL_MAGASINS = ("SELECT idmag, designationmag FROM tb_magasin "
+                "WHERE deleted=0 ORDER BY designationmag;")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Page principale
+# ─────────────────────────────────────────────────────────────────────────────
 class PageGestionPeremption(ctk.CTkFrame):
 
+    # Couleurs sémantiques des tags (visibles dans le treeview)
+    _TAG_COLORS = {
+        "perime":   C.DANGER,
+        "urgent":   C.WARNING,
+        "proche":   C.SUCCESS_DARK,
+        "normal":   C.TEXT_PRIMARY,
+        "epuise":   C.TEXT_MUTED,
+        "sans_lot": C.TEXT_SECONDARY,
+    }
+
     def __init__(self, parent, iduser=1):
-        super().__init__(parent)
+        super().__init__(parent, fg_color=C.BG_PAGE)
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+
         self.iduser       = iduser
         self.all_rows     = []
         self.item_meta    = {}
-        self.magasins     = []   # [(idmag, nom), ...]
+        self.magasins     = []
         self.search_timer = None
         self._sort_state  = {}
-        self.setup_ui()
+
+        self._apply_tree_style()
+        self._build_ui()
         self._load_magasins()
         self.charger_donnees()
 
-    # ── DB ────────────────────────────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────────────────────
     def connect_db(self):
         try:
             with open(get_config_path('config.json')) as f:
                 cfg = json.load(f)['database']
-            return psycopg2.connect(host=cfg['host'], user=cfg['user'],
-                password=cfg['password'], database=cfg['database'], port=cfg['port'])
+            return psycopg2.connect(
+                host=cfg['host'], user=cfg['user'],
+                password=cfg['password'],
+                database=cfg['database'], port=cfg['port'])
         except Exception as e:
-            messagebox.showerror("Connexion", f"Erreur : {e}"); return None
+            messagebox.showerror("Connexion", f"Erreur : {e}")
+            return None
 
     def _exec(self, sql, params=()):
         conn = self.connect_db()
-        if not conn: return []
+        if not conn:
+            return []
         try:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with conn.cursor(
+                    cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(sql, params)
                 return [dict(r) for r in cur.fetchall()]
         except Exception as e:
-            messagebox.showerror("SQL", str(e)); return []
-        finally: conn.close()
+            messagebox.showerror("SQL", str(e))
+            return []
+        finally:
+            conn.close()
 
     def _exec_write(self, sql, params=()):
         conn = self.connect_db()
-        if not conn: return False
+        if not conn:
+            return False
         try:
-            with conn.cursor() as cur: cur.execute(sql, params)
-            conn.commit(); return True
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+            conn.commit()
+            return True
         except Exception as e:
-            conn.rollback(); messagebox.showerror("SQL", str(e)); return False
-        finally: conn.close()
+            conn.rollback()
+            messagebox.showerror("SQL", str(e))
+            return False
+        finally:
+            conn.close()
 
     def _load_magasins(self):
         rows = self._exec(SQL_MAGASINS)
         self.magasins = [(r['idmag'], r['designationmag']) for r in rows]
-        # Mettre à jour le combobox magasin
         noms = ["Tous les magasins"] + [m[1] for m in self.magasins]
         try:
             self.combo_mag['values'] = noms
         except Exception:
             pass
 
-    # ── Chargement ────────────────────────────────────────────────────────
+    # ── Style treeview ────────────────────────────────────────────────────────
+    def _apply_tree_style(self):
+        s = ttk.Style()
+        try:
+            s.theme_use("clam")
+        except Exception:
+            pass
+        s.configure("Per.Treeview",
+                    background=C.BG_CARD, foreground=C.TEXT_PRIMARY,
+                    fieldbackground=C.BG_CARD, rowheight=24,
+                    font=("Roboto" if _T else "Segoe UI", 9),
+                    borderwidth=0)
+        s.configure("Per.Treeview.Heading",
+                    background=C.BG_HEADER, foreground="#FFFFFF",
+                    font=("Roboto" if _T else "Segoe UI", 9, "bold"),
+                    relief="flat", padding=(4, 4))
+        s.map("Per.Treeview",
+              background=[("selected", C.PRIMARY)],
+              foreground=[("selected", "#FFFFFF")])
+
+    # ── Construction UI ───────────────────────────────────────────────────────
+    def _build_ui(self):
+        # ── En-tête ──────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
+        hdr.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(hdr, text="Suivi des Péremptions",
+                     font=_f(18, "bold"),
+                     text_color="#FFFFFF"
+                     ).pack(side="left", padx=16, pady=8)
+        self._lbl_statut = ctk.CTkLabel(hdr, text="",
+                                        font=_f(9), text_color=C.TEXT_ON_DARK_DIM)
+        self._lbl_statut.pack(side="right", padx=16)
+
+        # ── Barre de filtres ─────────────────────────────────────────────────
+        panel = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        panel.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
+        inner = ctk.CTkFrame(panel, fg_color="transparent")
+        inner.pack(fill="x", padx=10, pady=8)
+
+        # Recherche
+        ctk.CTkLabel(inner, text="🔍", font=_f(13),
+                     width=22).pack(side="left", padx=(0, 3))
+        self.entry_recherche = ctk.CTkEntry(
+            inner,
+            placeholder_text="Code ou désignation…",
+            width=220, height=28,
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            border_width=1, text_color=C.TEXT_PRIMARY,
+            font=_f(10), corner_radius=6)
+        self.entry_recherche.pack(side="left", padx=(0, 8))
+        self.entry_recherche.bind("<KeyRelease>", self.on_search_change)
+
+        # Séparateur
+        ctk.CTkFrame(inner, width=1, height=20,
+                     fg_color=C.BORDER).pack(side="left", padx=(0, 8))
+
+        # Filtre état
+        ctk.CTkLabel(inner, text="État :",
+                     font=_f(10), text_color=C.TEXT_MUTED
+                     ).pack(side="left", padx=(0, 4))
+        self.var_filter = StringVar(value="Tous")
+        self.combo_etat = ttk.Combobox(
+            inner,
+            values=["Tous", "Perime", "< 1 mois", "< 2 mois",
+                    "> 2 mois", "Epuise", "Sans peremption"],
+            textvariable=self.var_filter,
+            state="readonly", width=14,
+            font=("Segoe UI", 9))
+        self.combo_etat.pack(side="left", padx=(0, 8), ipady=2)
+        self.combo_etat.bind("<<ComboboxSelected>>", self.on_filter_change)
+
+        # Filtre magasin
+        ctk.CTkLabel(inner, text="Magasin :",
+                     font=_f(10), text_color=C.TEXT_MUTED
+                     ).pack(side="left", padx=(0, 4))
+        self.var_magasin = StringVar(value="Tous les magasins")
+        self.combo_mag = ttk.Combobox(
+            inner,
+            values=["Tous les magasins"],
+            textvariable=self.var_magasin,
+            state="readonly", width=18,
+            font=("Segoe UI", 9))
+        self.combo_mag.pack(side="left", padx=(0, 8), ipady=2)
+        self.combo_mag.bind("<<ComboboxSelected>>", self.on_filter_change)
+
+        # Séparateur
+        ctk.CTkFrame(inner, width=1, height=20,
+                     fg_color=C.BORDER).pack(side="left", padx=(0, 8))
+
+        # Checkbox
+        self.var_with_per = BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            inner,
+            text="Avec péremption uniquement",
+            variable=self.var_with_per,
+            command=self.on_filter_change,
+            font=_f(10), text_color=C.TEXT_PRIMARY,
+            checkbox_width=16, checkbox_height=16,
+            corner_radius=3,
+            fg_color=C.PRIMARY, hover_color=C.PRIMARY_HOVER
+        ).pack(side="left", padx=(0, 8))
+
+        # Séparateur
+        ctk.CTkFrame(inner, width=1, height=20,
+                     fg_color=C.BORDER).pack(side="left", padx=(0, 8))
+
+        # Bouton Actualiser
+        ctk.CTkButton(
+            inner, text="↺  Actualiser",
+            command=self.charger_donnees,
+            height=28, width=110,
+            fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
+            text_color="#FFFFFF", font=_f(10, "bold"),
+            corner_radius=6
+        ).pack(side="left")
+
+        # ── Tableau ──────────────────────────────────────────────────────────
+        tbl = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        tbl.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 4))
+        tbl.grid_rowconfigure(0, weight=1)
+        tbl.grid_columnconfigure(0, weight=1)
+
+        cols = ("Code", "Designation", "Unite", "Magasin",
+                "Stock global", "Priorite", "Date entree",
+                "Date peremption", "Jours rest.",
+                "Qt lot", "Qt restante", "Note")
+
+        self.tree = ttk.Treeview(tbl, columns=cols, show="headings",
+                                 style="Per.Treeview", height=18)
+
+        # Tags couleurs
+        self.tree.tag_configure(
+            "perime",   foreground=C.DANGER,
+            font=("Roboto" if _T else "Segoe UI", 9, "bold"))
+        self.tree.tag_configure(
+            "urgent",   foreground=C.WARNING,
+            font=("Roboto" if _T else "Segoe UI", 9, "bold"))
+        self.tree.tag_configure(
+            "proche",   foreground=C.SUCCESS_DARK,
+            font=("Roboto" if _T else "Segoe UI", 9))
+        self.tree.tag_configure(
+            "normal",   foreground=C.TEXT_PRIMARY,
+            font=("Roboto" if _T else "Segoe UI", 9))
+        self.tree.tag_configure(
+            "epuise",   foreground=C.TEXT_MUTED,
+            font=("Roboto" if _T else "Segoe UI", 9, "italic"))
+        self.tree.tag_configure(
+            "sans_lot", foreground=C.TEXT_SECONDARY,
+            font=("Roboto" if _T else "Segoe UI", 9, "italic"))
+
+        col_cfg = {
+            "Code":          (100, "center"),
+            "Designation":   (210, "w"),
+            "Unite":         (80,  "center"),
+            "Magasin":       (120, "w"),
+            "Stock global":  (95,  "center"),
+            "Priorite":      (60,  "center"),
+            "Date entree":   (95,  "center"),
+            "Date peremption": (155, "w"),
+            "Jours rest.":   (85,  "center"),
+            "Qt lot":        (85,  "center"),
+            "Qt restante":   (100, "center"),
+            "Note":          (150, "w"),
+        }
+        for col in cols:
+            w, anchor = col_cfg[col]
+            self.tree.heading(col, text=col,
+                              command=lambda c=col: self._sort_by(c))
+            self.tree.column(col, width=w, anchor=anchor)
+
+        sy = ctk.CTkScrollbar(tbl, orientation="vertical",
+                              command=self.tree.yview)
+        sx = ctk.CTkScrollbar(tbl, orientation="horizontal",
+                              command=self.tree.xview)
+        self.tree.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+        self.tree.grid(row=0, column=0, sticky="nsew",
+                       padx=(6, 0), pady=(6, 0))
+        sy.grid(row=0, column=1, sticky="ns", pady=(6, 0))
+        sx.grid(row=1, column=0, sticky="ew", padx=(6, 0))
+
+        self.tree.bind("<Double-Button-1>", self.on_double_click)
+
+        # ── Footer ───────────────────────────────────────────────────────────
+        foot = ctk.CTkFrame(self, fg_color="transparent")
+        foot.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 8))
+
+        self.lbl_total = ctk.CTkLabel(
+            foot, text="",
+            font=_f(10, "bold"), text_color=C.PRIMARY)
+        self.lbl_total.pack(side="left", padx=(0, 16))
+
+        # Légende
+        legend = ctk.CTkFrame(foot, fg_color="transparent")
+        legend.pack(side="left")
+        for txt, col in [
+            ("Sans pér.",  C.TEXT_SECONDARY),
+            ("Épuisé",     C.TEXT_MUTED),
+            ("> 2 mois",   C.TEXT_PRIMARY),
+            ("< 2 mois",   C.SUCCESS_DARK),
+            ("< 1 mois",   C.WARNING),
+            ("Périmé",     C.DANGER),
+        ]:
+            ctk.CTkLabel(
+                legend, text=f"● {txt}",
+                text_color=col,
+                font=_f(9, "bold")
+            ).pack(side="right", padx=6)
+
+        self.lbl_statut_foot = ctk.CTkLabel(
+            foot, text="",
+            font=_f(9), text_color=C.TEXT_MUTED)
+        self.lbl_statut_foot.pack(side="right")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Chargement & Populate — logique métier inchangée
+    # ─────────────────────────────────────────────────────────────────────────
     def charger_donnees(self):
-        self.lbl_titre.configure(text="Suivi Peremptions  —  chargement...")
+        self._lbl_statut.configure(text="Chargement…")
+        self.lbl_total.configure(text="…")
         self.update()
         rows  = self._exec(SQL_TOUS)
         terme = self.entry_recherche.get().strip().lower()
@@ -229,12 +541,9 @@ class PageGestionPeremption(ctk.CTkFrame):
                     or terme in str(r['designationarticle']).lower()]
         self.all_rows = rows
         self._populate(rows)
-        self.lbl_titre.configure(
-            text=f"Suivi Peremptions  —  {len(self.item_meta)} lignes")
-        self.lbl_statut.configure(
-            text=f"MAJ : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self._lbl_statut.configure(
+            text=f"MAJ : {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-    # ── Tag couleur ───────────────────────────────────────────────────────
     @staticmethod
     def _tag(row):
         if not row.get('has_lot'):
@@ -242,38 +551,43 @@ class PageGestionPeremption(ctk.CTkFrame):
         today    = datetime.today().date()
         date_per = row['date_peremption']
         qt_rest  = float(row['qt_restante_unite'] or 0)
-        if qt_rest <= 0: return 'epuise'
-        if isinstance(date_per, datetime): date_per = date_per.date()
-        if not date_per:  return 'normal'
-        if date_per <= today:                         return 'perime'
-        if date_per <= today + timedelta(days=30):    return 'urgent'
-        if date_per <= today + timedelta(days=60):    return 'proche'
+        if qt_rest <= 0:
+            return 'epuise'
+        if isinstance(date_per, datetime):
+            date_per = date_per.date()
+        if not date_per:
+            return 'normal'
+        if date_per <= today:
+            return 'perime'
+        if date_per <= today + timedelta(days=30):
+            return 'urgent'
+        if date_per <= today + timedelta(days=60):
+            return 'proche'
         return 'normal'
 
-    # ── Populate ──────────────────────────────────────────────────────────
     def _populate(self, rows):
         self.tree.delete(*self.tree.get_children())
         self.item_meta = {}
         today    = datetime.today().date()
 
-        # Filtre état
         filt     = self.var_filter.get()
-        filt_map = {'Perime':'perime','< 1 mois':'urgent','< 2 mois':'proche',
-                    '> 2 mois':'normal','Epuise':'epuise','Sans peremption':'sans_lot'}
-        required = filt_map.get(filt)
-
-        # Filtre magasin
-        mag_sel  = self.var_magasin.get()
-
-        # Checkbox
-        with_per_only = self.var_with_per.get()
+        filt_map = {
+            'Perime':          'perime',
+            '< 1 mois':        'urgent',
+            '< 2 mois':        'proche',
+            '> 2 mois':        'normal',
+            'Epuise':          'epuise',
+            'Sans peremption': 'sans_lot',
+        }
+        required       = filt_map.get(filt)
+        mag_sel        = self.var_magasin.get()
+        with_per_only  = self.var_with_per.get()
 
         for r in rows:
             tag = self._tag(r)
 
-            # Filtre magasin
             if mag_sel and mag_sel != "Tous les magasins":
-                if str(r.get('designationmag','')) != mag_sel:
+                if str(r.get('designationmag', '')) != mag_sel:
                     continue
 
             if with_per_only and tag == 'sans_lot':
@@ -282,19 +596,22 @@ class PageGestionPeremption(ctk.CTkFrame):
             if required and tag != required:
                 continue
 
-            has_lot  = bool(r.get('has_lot'))
-            date_per = r['date_peremption']
-            if isinstance(date_per, datetime): date_per = date_per.date()
-            de = r['date_entree']
-            date_entree_s = de.strftime('%d/%m/%Y') if hasattr(de,'strftime') else (str(de) if de else '')
+            has_lot     = bool(r.get('has_lot'))
+            date_per    = r['date_peremption']
+            if isinstance(date_per, datetime):
+                date_per = date_per.date()
+            de          = r['date_entree']
+            date_entree_s = (de.strftime('%d/%m/%Y')
+                             if hasattr(de, 'strftime') else
+                             str(de) if de else '')
 
             if date_per:
-                j = (date_per - today).days
+                j       = (date_per - today).days
                 jours_s    = f"PERIME {j}j" if j < 0 else f"{j} j"
                 date_per_s = date_per.strftime('%d/%m/%Y')
             else:
                 jours_s    = ''
-                date_per_s = '— Aucune peremption —' if not has_lot else ''
+                date_per_s = '— Aucune péremption —' if not has_lot else ''
 
             qt_rest  = float(r['qt_restante_unite'] or 0) if has_lot else None
             qt_lot   = float(r['qt_lot_unite']      or 0) if has_lot else None
@@ -306,14 +623,14 @@ class PageGestionPeremption(ctk.CTkFrame):
                 r['codearticle'],
                 r['designationarticle'],
                 r['unite'],
-                mag_s,                                                    # ← MAGASIN
-                f"{stock_gl:,.2f}".replace(',',' '),
+                mag_s,
+                f"{stock_gl:,.2f}".replace(',', ' '),
                 prio_s,
                 date_entree_s,
                 date_per_s,
                 jours_s,
-                f"{qt_lot:,.2f}".replace(',',' ')  if qt_lot  is not None else '',
-                f"{qt_rest:,.2f}".replace(',',' ') if qt_rest is not None else '',
+                f"{qt_lot:,.2f}".replace(',', ' ')  if qt_lot  is not None else '',
+                f"{qt_rest:,.2f}".replace(',', ' ') if qt_rest is not None else '',
                 r['note'] or '',
             )
             iid = self.tree.insert('', 'end', values=values, tags=(tag,))
@@ -322,11 +639,14 @@ class PageGestionPeremption(ctk.CTkFrame):
         nb_lots = sum(1 for r in self.item_meta.values() if r.get('has_lot'))
         nb_sans = sum(1 for r in self.item_meta.values() if not r.get('has_lot'))
         self.lbl_total.configure(
-            text=f"Affiches : {len(self.item_meta)}   |   Avec lots : {nb_lots}   |   Sans peremption : {nb_sans}")
+            text=(f"{len(self.item_meta)} ligne(s)   |   "
+                  f"Avec lots : {nb_lots}   |   "
+                  f"Sans péremption : {nb_sans}"))
 
-    # ── Filtres ───────────────────────────────────────────────────────────
+    # ── Filtres ───────────────────────────────────────────────────────────────
     def on_search_change(self, *_):
-        if self.search_timer: self.after_cancel(self.search_timer)
+        if self.search_timer:
+            self.after_cancel(self.search_timer)
         self.search_timer = self.after(400, self.charger_donnees)
 
     def on_filter_change(self, *_):
@@ -336,472 +656,513 @@ class PageGestionPeremption(ctk.CTkFrame):
         reverse = self._sort_state.get(col, False)
         self._sort_state[col] = not reverse
         key_map = {
-            "Code":"codearticle","Designation":"designationarticle",
-            "Unite":"unite","Magasin":"designationmag",
-            "Stock global":"stock_global","Priorite":"priorite",
-            "Date entree":"date_entree","Date peremption":"date_peremption",
-            "Qt lot":"qt_lot_unite","Qt restante":"qt_restante_unite",
+            "Code":             "codearticle",
+            "Designation":      "designationarticle",
+            "Unite":            "unite",
+            "Magasin":          "designationmag",
+            "Stock global":     "stock_global",
+            "Priorite":         "priorite",
+            "Date entree":      "date_entree",
+            "Date peremption":  "date_peremption",
+            "Qt lot":           "qt_lot_unite",
+            "Qt restante":      "qt_restante_unite",
         }
         k = key_map.get(col)
         if k:
-            try: self._populate(sorted(self.all_rows,
-                    key=lambda r:(r[k] is None, r[k]), reverse=reverse))
-            except Exception: pass
+            try:
+                self._populate(sorted(
+                    self.all_rows,
+                    key=lambda r: (r[k] is None, r[k]),
+                    reverse=reverse))
+            except Exception:
+                pass
 
-    # ── Double-clic ───────────────────────────────────────────────────────
+    # ── Double-clic ───────────────────────────────────────────────────────────
     def on_double_click(self, event):
         iid = self.tree.identify_row(event.y)
-        if not iid or iid not in self.item_meta: return
+        if not iid or iid not in self.item_meta:
+            return
         row = self.item_meta[iid]
         if row.get('has_lot'):
             self.ouvrir_gestion_lot(row)
         else:
             self.ouvrir_ajout_peremption(row)
 
-    # ── Fenetre : ajout peremption (article sans lot) ─────────────────────
-    def ouvrir_ajout_peremption(self, row):
-        WIN_W, WIN_H = 520, 480
-        try: win = ctk.CTkToplevel(self)
-        except Exception:
-            from tkinter import Toplevel; win = Toplevel(self)
-        win.title(f"Ajouter une peremption — {row['codearticle']}")
-        win.resizable(False, False); win.grab_set()
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Helpers fenêtres modales
+    # ─────────────────────────────────────────────────────────────────────────
+    def _make_toplevel(self, title, w, h):
+        win = ctk.CTkToplevel(self)
+        win.title(title)
+        win.resizable(False, False)
+        win.grab_set()
+        if _T:
+            Theme.apply_toplevel(win)
         win.update_idletasks()
-        x = (win.winfo_screenwidth()//2)-(WIN_W//2)
-        y = (win.winfo_screenheight()//2)-(WIN_H//2)
-        win.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        return win
+
+    @staticmethod
+    def _sep(parent):
+        ctk.CTkFrame(parent, height=1, fg_color=C.DIVIDER).pack(
+            fill="x", padx=0, pady=(0, 12))
+
+    # ── Carte info (petite) ───────────────────────────────────────────────────
+    @staticmethod
+    def _info_card(parent, col, label, value, color=None):
+        f = ctk.CTkFrame(parent, fg_color=C.BG_PAGE,
+                         corner_radius=8,
+                         border_width=1, border_color=C.BORDER)
+        f.grid(row=0, column=col, sticky="nsew",
+               padx=(0 if col == 0 else 5, 0), pady=0)
+        ctk.CTkLabel(f, text=label,
+                     font=_f(9), text_color=C.TEXT_MUTED,
+                     anchor="w").pack(anchor="w", padx=10, pady=(8, 1))
+        kw = {"font": _f(12, "bold"), "anchor": "w"}
+        if color:
+            kw["text_color"] = color
+        ctk.CTkLabel(f, text=str(value), **kw).pack(
+            anchor="w", padx=10, pady=(0, 8))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Fenêtre : ajout péremption (article sans lot)
+    # ─────────────────────────────────────────────────────────────────────────
+    def ouvrir_ajout_peremption(self, row):
+        win  = self._make_toplevel(
+            f"Ajouter une péremption — {row['codearticle']}", 520, 490)
+
+        # ── En-tête ──────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(win, fg_color=C.BG_HEADER, corner_radius=0)
+        hdr.pack(fill="x")
+        ctk.CTkLabel(hdr, text="📦  Nouveau lot de péremption",
+                     font=_f(14, "bold"), text_color="#FFFFFF"
+                     ).pack(side="left", padx=16, pady=10)
 
         root = ctk.CTkFrame(win, fg_color="transparent")
         root.pack(fill="both", expand=True, padx=20, pady=14)
 
-        # En-tete
-        hdr = ctk.CTkFrame(root, fg_color="transparent")
-        hdr.pack(fill="x", pady=(0,8))
-        ctk.CTkLabel(hdr, text="📦", font=ctk.CTkFont(size=26)).pack(side="left", padx=(0,10))
-        box = ctk.CTkFrame(hdr, fg_color="transparent")
-        box.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(box, text=str(row['designationarticle']),
-                     font=ctk.CTkFont(size=14, weight="bold"), anchor="w").pack(fill="x")
-        ctk.CTkLabel(box,
-                     text=f"Code : {row['codearticle']}   •   Unité : {row['unite']}",
-                     font=ctk.CTkFont(size=11), text_color="gray60", anchor="w").pack(fill="x")
+        # Article info
+        ctk.CTkLabel(root, text=str(row['designationarticle']),
+                     font=_f(13, "bold"), text_color=C.TEXT_PRIMARY,
+                     anchor="w").pack(fill="x")
+        ctk.CTkLabel(root,
+                     text=(f"Code : {row['codearticle']}   •   "
+                           f"Unité : {row['unite']}"),
+                     font=_f(10), text_color=C.TEXT_MUTED,
+                     anchor="w").pack(fill="x", pady=(1, 10))
+        self._sep(root)
 
-        ctk.CTkFrame(root, height=1, fg_color="gray30").pack(fill="x", pady=(0,12))
-
-        # Info stock + magasin (lecture seule)
+        # Cards info
         stock_gl = float(row['stock_global'] or 0)
         mag_nom  = row.get('designationmag') or '—'
+        cards    = ctk.CTkFrame(root, fg_color="transparent")
+        cards.pack(fill="x", pady=(0, 12))
+        cards.columnconfigure((0, 1, 2), weight=1)
+        self._info_card(cards, 0, "Magasin",             mag_nom)
+        self._info_card(cards, 1, "Stock (ce magasin)",
+                        f"{stock_gl:,.2f} {row['unite']}")
+        self._info_card(cards, 2, "Lots existants",      "Aucun",
+                        color=C.TEXT_MUTED)
 
-        info = ctk.CTkFrame(root, corner_radius=8)
-        info.pack(fill="x", pady=(0,14))
-        info.columnconfigure((0,1,2), weight=1)
+        self._sep(root)
 
-        def info_card(parent, col, lbl, val, col_val=None):
-            ctk.CTkLabel(parent, text=lbl, font=ctk.CTkFont(size=10),
-                         text_color="gray60").grid(
-                row=0, column=col, padx=12, pady=(10,2), sticky="w")
-            kw = {"font": ctk.CTkFont(size=13, weight="bold"), "anchor":"w"}
-            if col_val: kw["text_color"] = col_val
-            ctk.CTkLabel(parent, text=str(val), **kw).grid(
-                row=1, column=col, padx=12, pady=(0,10), sticky="w")
-
-        info_card(info, 0, "Magasin",          mag_nom)
-        info_card(info, 1, "Stock (ce magasin)", f"{stock_gl:,.2f} {row['unite']}")
-        info_card(info, 2, "Lots existants",   "Aucun", col_val="#9e9e9e")
-
-        ctk.CTkFrame(root, height=1, fg_color="gray30").pack(fill="x", pady=(0,12))
-
-        ctk.CTkLabel(root, text="Nouveau lot de peremption",
-                     font=ctk.CTkFont(size=12, weight="bold"), anchor="w").pack(fill="x")
         ctk.CTkLabel(root,
-                     text="Vous pouvez enregistrer tout le stock ou une partie seulement.",
-                     font=ctk.CTkFont(size=10), text_color="gray60", anchor="w").pack(
-            fill="x", pady=(2,10))
+                     text="Vous pouvez enregistrer tout le stock ou une partie.",
+                     font=_f(10), text_color=C.TEXT_MUTED,
+                     anchor="w").pack(fill="x", pady=(0, 10))
 
-        form = ctk.CTkFrame(root, corner_radius=8)
-        form.pack(fill="x", pady=(0,12))
-        form.columnconfigure((0,1), weight=1)
+        # Formulaire
+        form = ctk.CTkFrame(root, fg_color=C.BG_CARD,
+                            corner_radius=8,
+                            border_width=1, border_color=C.BORDER)
+        form.pack(fill="x", pady=(0, 12))
+        form.columnconfigure((0, 1), weight=1)
 
-        ctk.CTkLabel(form, text=f"Quantite du lot  (max {stock_gl:,.2f})",
-                     font=ctk.CTkFont(size=11, weight="bold"), anchor="w").grid(
-            row=0, column=0, padx=12, pady=(12,2), sticky="w")
-        ctk.CTkLabel(form, text="Date de peremption  (JJ/MM/AAAA)",
-                     font=ctk.CTkFont(size=11, weight="bold"), anchor="w").grid(
-            row=0, column=1, padx=12, pady=(12,2), sticky="w")
+        for ci, lbl in enumerate([
+            f"Quantité du lot  (max {stock_gl:,.2f})",
+            "Date de péremption  (JJ/MM/AAAA)"
+        ]):
+            ctk.CTkLabel(form, text=lbl,
+                         font=_f(10, "bold"), text_color=C.TEXT_PRIMARY,
+                         anchor="w").grid(
+                row=0, column=ci, padx=12,
+                pady=(12, 2), sticky="w")
 
         var_qt   = StringVar(value=f"{stock_gl:.4f}" if stock_gl > 0 else '')
         var_date = StringVar()
         var_note = StringVar()
 
-        ctk.CTkEntry(form, textvariable=var_qt,   height=34, justify="center").grid(
-            row=1, column=0, padx=12, pady=(0,10), sticky="ew")
-        ctk.CTkEntry(form, textvariable=var_date, height=34,
-                     placeholder_text="ex: 31/12/2025", justify="center").grid(
-            row=1, column=1, padx=12, pady=(0,10), sticky="ew")
+        entry_qt = ctk.CTkEntry(
+            form, textvariable=var_qt, height=32,
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            border_width=1, font=_f(11), corner_radius=6,
+            justify="center")
+        entry_qt.grid(row=1, column=0, padx=12, pady=(0, 10), sticky="ew")
+
+        entry_date = ctk.CTkEntry(
+            form, textvariable=var_date, height=32,
+            placeholder_text="ex: 31/12/2025",
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            border_width=1, font=_f(11), corner_radius=6,
+            justify="center")
+        entry_date.grid(row=1, column=1, padx=12, pady=(0, 10), sticky="ew")
 
         ctk.CTkLabel(form, text="Note (optionnel)",
-                     font=ctk.CTkFont(size=11, weight="bold"), anchor="w").grid(
-            row=2, column=0, columnspan=2, padx=12, pady=(0,2), sticky="w")
-        ctk.CTkEntry(form, textvariable=var_note, height=32).grid(
-            row=3, column=0, columnspan=2, padx=12, pady=(0,12), sticky="ew")
+                     font=_f(10, "bold"), text_color=C.TEXT_PRIMARY,
+                     anchor="w").grid(
+            row=2, column=0, columnspan=2,
+            padx=12, pady=(0, 2), sticky="w")
+        ctk.CTkEntry(
+            form, textvariable=var_note, height=30,
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            border_width=1, font=_f(10), corner_radius=6
+        ).grid(row=3, column=0, columnspan=2,
+               padx=12, pady=(0, 12), sticky="ew")
 
-        btn_frm = ctk.CTkFrame(root, fg_color="transparent")
-        btn_frm.pack(fill="x", side="bottom", pady=(4,0))
+        # Boutons
+        btn_bar = ctk.CTkFrame(root, fg_color="transparent")
+        btn_bar.pack(fill="x", side="bottom", pady=(4, 0))
 
         def do_ajouter():
             try:
-                qt = float(var_qt.get().replace(',','.'))
+                qt = float(var_qt.get().replace(',', '.'))
             except ValueError:
-                messagebox.showerror("Erreur","La quantite doit etre un nombre."); return
+                messagebox.showerror("Erreur", "La quantité doit être un nombre.")
+                return
             if qt <= 0:
-                messagebox.showerror("Erreur","La quantite doit etre > 0."); return
+                messagebox.showerror("Erreur", "La quantité doit être > 0.")
+                return
             try:
-                dp = datetime.strptime(var_date.get().strip(), '%d/%m/%Y').date()
+                dp = datetime.strptime(
+                    var_date.get().strip(), '%d/%m/%Y').date()
             except ValueError:
-                messagebox.showerror("Erreur","Date invalide — format JJ/MM/AAAA."); return
+                messagebox.showerror("Erreur",
+                                     "Date invalide — format JJ/MM/AAAA.")
+                return
             if dp < datetime.today().date():
-                if not messagebox.askyesno("Attention",
-                    "La date saisie est dans le passe. Continuer ?"): return
-
+                if not messagebox.askyesno(
+                        "Attention",
+                        "La date saisie est dans le passé. Continuer ?"):
+                    return
             conn = self.connect_db()
-            if not conn: return
+            if not conn:
+                return
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT COALESCE(MAX(priorite),0) FROM tb_lot_peremption "
-                    "WHERE id_article=%s AND id_unite=%s AND idmag=%s AND deleted=0",
+                    "SELECT COALESCE(MAX(priorite),0) "
+                    "FROM tb_lot_peremption "
+                    "WHERE id_article=%s AND id_unite=%s "
+                    "AND idmag=%s AND deleted=0",
                     (row['id_article'], row['id_unite'], row['idmag']))
                 max_prio = cur.fetchone()[0]
                 facteur  = float(row.get('facteur_vers_base') or 1)
                 cur.execute(
                     """INSERT INTO tb_lot_peremption
-                       (id_article, id_unite, idmag, quantite, date_peremption,
-                        priorite, date_entree, type_source, note)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, 'MANUEL', %s)""",
+                       (id_article, id_unite, idmag, quantite,
+                        date_peremption, priorite, date_entree,
+                        type_source, note)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,'MANUEL',%s)""",
                     (row['id_article'], row['id_unite'], row['idmag'],
                      qt * facteur, dp, max_prio + 1,
-                     datetime.today().date(), var_note.get() or None))
+                     datetime.today().date(),
+                     var_note.get() or None))
                 conn.commit()
-                messagebox.showinfo("Succes",
-                    f"Lot cree avec succes.\n"
+                messagebox.showinfo(
+                    "Succès",
+                    f"Lot créé avec succès.\n"
                     f"Magasin : {mag_nom}\n"
-                    f"Quantite : {qt:,.2f} {row['unite']}\n"
+                    f"Quantité : {qt:,.2f} {row['unite']}\n"
                     f"Date : {dp.strftime('%d/%m/%Y')}")
-                win.destroy(); self.charger_donnees()
+                win.destroy()
+                self.charger_donnees()
             except Exception as e:
-                conn.rollback(); messagebox.showerror("Erreur SQL", str(e))
-            finally: conn.close()
+                conn.rollback()
+                messagebox.showerror("Erreur SQL", str(e))
+            finally:
+                conn.close()
 
-        ctk.CTkButton(btn_frm, text="Fermer", command=win.destroy,
-            fg_color="transparent", border_width=1, border_color="gray50",
-            text_color=("gray10","gray90"), width=110, height=36).pack(side="left")
-        ctk.CTkButton(btn_frm, text="Creer le lot",
-            command=do_ajouter, fg_color="#2e7d32", hover_color="#1b5e20",
-            width=160, height=36,
-            font=ctk.CTkFont(size=13, weight="bold")).pack(side="right")
+        ctk.CTkButton(
+            btn_bar, text="Fermer", command=win.destroy,
+            height=34, width=100,
+            fg_color=C.CLOUDS, hover_color=C.SILVER,
+            text_color=C.TEXT_PRIMARY,
+            border_width=1, border_color=C.BORDER,
+            font=_f(10), corner_radius=6
+        ).pack(side="left")
+        ctk.CTkButton(
+            btn_bar, text="✔  Créer le lot",
+            command=do_ajouter,
+            height=34, width=160,
+            fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
+            text_color="#FFFFFF", font=_f(11, "bold"),
+            corner_radius=6
+        ).pack(side="right")
 
-    # ── Fenetre : gestion lot existant ────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    #  Fenêtre : gestion lot existant
+    # ─────────────────────────────────────────────────────────────────────────
     def ouvrir_gestion_lot(self, row):
-        WIN_W, WIN_H = 600, 580
-        try: win = ctk.CTkToplevel(self)
-        except Exception:
-            from tkinter import Toplevel; win = Toplevel(self)
-        win.title(f"Lot #{row['id_lot']}  —  {row['designationarticle']}")
-        win.resizable(False, False); win.grab_set()
-        win.update_idletasks()
-        x = (win.winfo_screenwidth()//2)-(WIN_W//2)
-        y = (win.winfo_screenheight()//2)-(WIN_H//2)
-        win.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
-
-        root = ctk.CTkFrame(win, fg_color="transparent")
-        root.pack(fill="both", expand=True, padx=20, pady=14)
-
-        # En-tete
-        hdr = ctk.CTkFrame(root, fg_color="transparent")
-        hdr.pack(fill="x", pady=(0,8))
-        ctk.CTkLabel(hdr, text=f"Lot #{row['id_lot']}",
-                     font=ctk.CTkFont(size=17, weight="bold")).pack(side="left")
-        ctk.CTkLabel(hdr,
-                     text=f"   {row['designationarticle']}  ({row['codearticle']})",
-                     font=ctk.CTkFont(size=12), text_color="gray60").pack(side="left")
-        ctk.CTkFrame(root, height=1, fg_color="gray30").pack(fill="x", pady=(0,10))
+        win = self._make_toplevel(
+            f"Lot #{row['id_lot']}  —  {row['designationarticle']}", 620, 600)
 
         today    = datetime.today().date()
         date_per = row['date_peremption']
-        if isinstance(date_per, datetime): date_per = date_per.date()
+        if isinstance(date_per, datetime):
+            date_per = date_per.date()
         jours    = (date_per - today).days if date_per else None
-        j_txt    = (f"PERIME depuis {abs(jours)}j" if jours is not None and jours < 0
-                    else f"{jours} jours restants"   if jours is not None else '?')
-        j_col    = ("#e53935" if jours is not None and jours <= 0
-                    else "#fb8c00" if jours is not None and jours <= 30 else None)
+        j_txt    = (f"PÉRIMÉ depuis {abs(jours)}j"
+                    if jours is not None and jours < 0
+                    else f"{jours} j restants"
+                    if jours is not None else '?')
+        j_col    = (C.DANGER   if jours is not None and jours <= 0
+                    else C.WARNING if jours is not None and jours <= 30
+                    else C.SUCCESS_DARK)
         qt_rest  = float(row['qt_restante_unite'] or 0)
         qt_lot   = float(row['qt_lot_unite']      or 0)
         stock_gl = float(row['stock_global']       or 0)
         mag_nom  = row.get('designationmag') or '—'
 
-        def card(parent, col, lbl, val, col_val=None, ncols=4):
-            f = ctk.CTkFrame(parent, corner_radius=8)
-            f.grid(row=0, column=col, sticky="nsew",
-                   padx=(0 if col==0 else 5, 5 if col < ncols-1 else 0))
-            ctk.CTkLabel(f, text=lbl, font=ctk.CTkFont(size=10),
-                         text_color="gray60").pack(anchor="w", padx=10, pady=(8,1))
-            kw = {"font": ctk.CTkFont(size=12, weight="bold"), "anchor":"w"}
-            if col_val: kw["text_color"] = col_val
-            ctk.CTkLabel(f, text=str(val), **kw).pack(anchor="w", padx=10, pady=(0,8))
+        # ── En-tête ──────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(win, fg_color=C.BG_HEADER, corner_radius=0)
+        hdr.pack(fill="x")
+        ctk.CTkLabel(hdr, text=f"Lot #{row['id_lot']}",
+                     font=_f(14, "bold"), text_color="#FFFFFF"
+                     ).pack(side="left", padx=16, pady=10)
+        ctk.CTkLabel(hdr,
+                     text=f"{row['designationarticle']}  "
+                          f"({row['codearticle']})",
+                     font=_f(11), text_color=C.TEXT_ON_DARK_DIM
+                     ).pack(side="left")
 
-        # Ligne 1 : magasin + priorité + date + jours
+        root = ctk.CTkFrame(win, fg_color="transparent")
+        root.pack(fill="both", expand=True, padx=20, pady=14)
+
+        # ── Ligne 1 : 4 cards ────────────────────────────────────────────────
         c1 = ctk.CTkFrame(root, fg_color="transparent")
-        c1.pack(fill="x", pady=(0,6)); c1.columnconfigure((0,1,2,3), weight=1)
-        card(c1, 0, "Magasin",        mag_nom)
-        card(c1, 1, "Priorite FIFO",  f"#{row['priorite']}")
-        card(c1, 2, "Date peremption",
-             date_per.strftime('%d/%m/%Y') if date_per else '?', col_val=j_col)
-        card(c1, 3, "Jours restants", j_txt, col_val=j_col)
+        c1.pack(fill="x", pady=(0, 6))
+        c1.columnconfigure((0, 1, 2, 3), weight=1)
+        self._info_card(c1, 0, "Magasin",        mag_nom)
+        self._info_card(c1, 1, "Priorité FIFO",  f"#{row['priorite']}")
+        self._info_card(c1, 2, "Date péremption",
+                        date_per.strftime('%d/%m/%Y') if date_per else '?',
+                        color=j_col)
+        self._info_card(c1, 3, "Jours restants", j_txt, color=j_col)
 
-        # Ligne 2 : stock + qt lot + qt restante
+        # ── Ligne 2 : 3 cards ────────────────────────────────────────────────
         c2 = ctk.CTkFrame(root, fg_color="transparent")
-        c2.pack(fill="x", pady=(0,10)); c2.columnconfigure((0,1,2), weight=1)
+        c2.pack(fill="x", pady=(0, 10))
+        c2.columnconfigure((0, 1, 2), weight=1)
+        self._info_card(c2, 0, "Stock magasin",
+                        f"{stock_gl:,.2f} {row['unite']}")
+        self._info_card(c2, 1, "Qté initiale du lot",
+                        f"{qt_lot:,.2f} {row['unite']}")
+        self._info_card(c2, 2, "Qté restante (FIFO)",
+                        f"{qt_rest:,.2f} {row['unite']}",
+                        color=C.DANGER if qt_rest <= 0 else C.SUCCESS_DARK)
 
-        def card3(parent, col, lbl, val, col_val=None):
-            f = ctk.CTkFrame(parent, corner_radius=8)
-            f.grid(row=0, column=col, sticky="nsew",
-                   padx=(0 if col==0 else 5, 5 if col<2 else 0))
-            ctk.CTkLabel(f, text=lbl, font=ctk.CTkFont(size=10),
-                         text_color="gray60").pack(anchor="w", padx=10, pady=(8,1))
-            kw = {"font": ctk.CTkFont(size=12, weight="bold"), "anchor":"w"}
-            if col_val: kw["text_color"] = col_val
-            ctk.CTkLabel(f, text=str(val), **kw).pack(anchor="w", padx=10, pady=(0,8))
+        self._sep(root)
 
-        card3(c2, 0, "Stock magasin",      f"{stock_gl:,.2f} {row['unite']}")
-        card3(c2, 1, "Qt initiale du lot", f"{qt_lot:,.2f} {row['unite']}")
-        card3(c2, 2, "Qt restante (FIFO)", f"{qt_rest:,.2f} {row['unite']}",
-              col_val="#e53935" if qt_rest<=0 else "#2e7d32")
-
-        ctk.CTkFrame(root, height=1, fg_color="gray30").pack(fill="x", pady=(0,8))
-
-        # Note
+        # ── Note ─────────────────────────────────────────────────────────────
         ctk.CTkLabel(root, text="Note / Observation",
-                     font=ctk.CTkFont(size=11, weight="bold"), anchor="w").pack(fill="x")
+                     font=_f(11, "bold"), text_color=C.TEXT_PRIMARY,
+                     anchor="w").pack(fill="x")
         var_note = StringVar(value=row.get('note') or '')
-        ctk.CTkEntry(root, textvariable=var_note, height=32).pack(fill="x", pady=(4,10))
+        ctk.CTkEntry(
+            root, textvariable=var_note, height=32,
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            border_width=1, font=_f(10), corner_radius=6
+        ).pack(fill="x", pady=(4, 10))
 
-        ctk.CTkFrame(root, height=1, fg_color="gray30").pack(fill="x", pady=(0,8))
+        self._sep(root)
 
-        # Split
-        sp = ctk.CTkFrame(root, corner_radius=8)
-        sp.pack(fill="x", pady=(0,10)); sp.columnconfigure((0,1,2,3), weight=1)
-        ctk.CTkLabel(sp, text="Diviser ce lot en deux",
-                     font=ctk.CTkFont(size=11, weight="bold")).grid(
-            row=0, column=0, columnspan=4, padx=12, pady=(10,4), sticky="w")
-        for i, lbl in enumerate(["Qt lot A","Date A (jj/mm/aaaa)",
-                                  "Qt lot B","Date B (jj/mm/aaaa)"]):
-            ctk.CTkLabel(sp, text=lbl, font=ctk.CTkFont(size=10),
-                         text_color="gray60").grid(
-                row=1, column=i, padx=(12 if i==0 else 6), sticky="w")
+        # ── Section split ─────────────────────────────────────────────────────
+        sp_card = ctk.CTkFrame(root, fg_color=C.BG_CARD,
+                               corner_radius=8,
+                               border_width=1, border_color=C.BORDER)
+        sp_card.pack(fill="x", pady=(0, 12))
+        sp_card.columnconfigure((0, 1, 2, 3), weight=1)
+
+        ctk.CTkLabel(sp_card, text="✂  Diviser ce lot en deux",
+                     font=_f(11, "bold"), text_color=C.PREMIUM
+                     ).grid(row=0, column=0, columnspan=4,
+                            padx=12, pady=(10, 4), sticky="w")
+
+        for i, lbl in enumerate([
+            "Qté lot A",
+            "Date A  (JJ/MM/AAAA)",
+            "Qté lot B",
+            "Date B  (JJ/MM/AAAA)",
+        ]):
+            ctk.CTkLabel(sp_card, text=lbl,
+                         font=_f(9), text_color=C.TEXT_MUTED
+                         ).grid(row=1, column=i,
+                                padx=(12 if i == 0 else 6, 0),
+                                pady=(0, 2), sticky="w")
+
         var_qa = StringVar()
-        var_da = StringVar(value=date_per.strftime('%d/%m/%Y') if date_per else '')
-        var_qb = StringVar(); var_db = StringVar()
-        for i, var in enumerate([var_qa, var_da, var_qb, var_db]):
-            ctk.CTkEntry(sp, textvariable=var, height=30).grid(
-                row=2, column=i,
-                padx=(12 if i==0 else 6, 12 if i==3 else 0),
-                pady=(2,10), sticky="ew")
+        var_da = StringVar(
+            value=date_per.strftime('%d/%m/%Y') if date_per else '')
+        var_qb = StringVar()
+        var_db = StringVar()
 
-        # Boutons
-        btn_frm = ctk.CTkFrame(root, fg_color="transparent")
-        btn_frm.pack(fill="x", side="bottom", pady=(4,0))
+        for i, var in enumerate([var_qa, var_da, var_qb, var_db]):
+            ctk.CTkEntry(
+                sp_card, textvariable=var, height=30,
+                fg_color=C.BG_INPUT, border_color=C.BORDER,
+                border_width=1, font=_f(10), corner_radius=6,
+                justify="center"
+            ).grid(row=2, column=i,
+                   padx=(12 if i == 0 else 6,
+                          12 if i == 3 else 0),
+                   pady=(0, 10), sticky="ew")
+
+        # ── Boutons ───────────────────────────────────────────────────────────
+        btn_bar = ctk.CTkFrame(root, fg_color="transparent")
+        btn_bar.pack(fill="x", side="bottom", pady=(4, 0))
 
         def do_note():
             if self._exec_write(
                 "UPDATE tb_lot_peremption SET note=%s WHERE id=%s",
-                (var_note.get(), row['id_lot'])):
-                messagebox.showinfo("Succes","Note enregistree.")
+                    (var_note.get(), row['id_lot'])):
+                messagebox.showinfo("Succès", "Note enregistrée.")
 
         def do_supprimer():
-            if not messagebox.askyesno("Confirmer",
-                f"Supprimer le lot #{row['id_lot']} du magasin '{mag_nom}' ?"): return
+            if not messagebox.askyesno(
+                    "Confirmer",
+                    f"Supprimer le lot #{row['id_lot']} "
+                    f"du magasin '{mag_nom}' ?"):
+                return
             if self._exec_write(
                 "UPDATE tb_lot_peremption SET deleted=1 WHERE id=%s",
-                (row['id_lot'],)):
-                messagebox.showinfo("Succes","Lot supprime.")
-                win.destroy(); self.charger_donnees()
+                    (row['id_lot'],)):
+                messagebox.showinfo("Succès", "Lot supprimé.")
+                win.destroy()
+                self.charger_donnees()
 
         def do_split():
             try:
-                qa = float(var_qa.get().replace(',','.')); qb = float(var_qb.get().replace(',','.'))
+                qa = float(var_qa.get().replace(',', '.'))
+                qb = float(var_qb.get().replace(',', '.'))
             except ValueError:
-                messagebox.showerror("Erreur","Quantites invalides."); return
+                messagebox.showerror("Erreur", "Quantités invalides.")
+                return
             try:
-                da  = datetime.strptime(var_da.get().strip(),'%d/%m/%Y').date()
-                db_ = datetime.strptime(var_db.get().strip(),'%d/%m/%Y').date()
+                da  = datetime.strptime(
+                    var_da.get().strip(), '%d/%m/%Y').date()
+                db_ = datetime.strptime(
+                    var_db.get().strip(), '%d/%m/%Y').date()
             except ValueError:
-                messagebox.showerror("Erreur","Dates invalides (JJ/MM/AAAA)."); return
-            if round(qa+qb,6) != round(qt_lot,6):
-                if not messagebox.askyesno("Attention",
-                    f"Somme ({qa+qb:.4f}) != Qt initiale ({qt_lot:.4f}).\nContinuer ?"): return
+                messagebox.showerror("Erreur",
+                                     "Dates invalides (JJ/MM/AAAA).")
+                return
+            if round(qa + qb, 6) != round(qt_lot, 6):
+                if not messagebox.askyesno(
+                        "Attention",
+                        f"Somme ({qa + qb:.4f}) ≠ "
+                        f"Qté initiale ({qt_lot:.4f}).\nContinuer ?"):
+                    return
             conn = self.connect_db()
-            if not conn: return
+            if not conn:
+                return
             try:
                 cur = conn.cursor()
-                cur.execute("UPDATE tb_lot_peremption SET deleted=1 WHERE id=%s",(row['id_lot'],))
                 cur.execute(
-                    "SELECT COALESCE(MAX(priorite),0) FROM tb_lot_peremption "
-                    "WHERE id_article=%s AND id_unite=%s AND idmag=%s AND deleted=0",
+                    "UPDATE tb_lot_peremption "
+                    "SET deleted=1 WHERE id=%s",
+                    (row['id_lot'],))
+                cur.execute(
+                    "SELECT COALESCE(MAX(priorite),0) "
+                    "FROM tb_lot_peremption "
+                    "WHERE id_article=%s AND id_unite=%s "
+                    "AND idmag=%s AND deleted=0",
                     (row['id_article'], row['id_unite'], row['idmag']))
                 max_prio = cur.fetchone()[0]
                 facteur  = float(row.get('facteur_vers_base') or 1)
-                for qt_u, dp, prio, label in [(qa,da,row['priorite'],'A'),(qb,db_,max_prio+1,'B')]:
+                for qt_u, dp, prio, label in [
+                    (qa,  da,  row['priorite'], 'A'),
+                    (qb,  db_, max_prio + 1,    'B'),
+                ]:
                     cur.execute(
                         """INSERT INTO tb_lot_peremption
-                           (id_article,id_unite,idmag,quantite,date_peremption,
-                            priorite,date_entree,type_source,id_split,note)
-                           VALUES(%s,%s,%s,%s,%s,%s,%s,'SPLIT',%s,%s)""",
-                        (row['id_article'],row['id_unite'],row['idmag'],
-                         qt_u*facteur,dp,prio,
-                         datetime.today().date(),row['id_lot'],
+                           (id_article, id_unite, idmag, quantite,
+                            date_peremption, priorite, date_entree,
+                            type_source, id_split, note)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,
+                                   'SPLIT',%s,%s)""",
+                        (row['id_article'], row['id_unite'], row['idmag'],
+                         qt_u * facteur, dp, prio,
+                         datetime.today().date(),
+                         row['id_lot'],
                          f"Split lot #{row['id_lot']} part {label}"))
                 conn.commit()
-                messagebox.showinfo("Succes","Lot divise avec succes.")
-                win.destroy(); self.charger_donnees()
+                messagebox.showinfo("Succès", "Lot divisé avec succès.")
+                win.destroy()
+                self.charger_donnees()
             except Exception as e:
-                conn.rollback(); messagebox.showerror("Erreur SQL",str(e))
-            finally: conn.close()
+                conn.rollback()
+                messagebox.showerror("Erreur SQL", str(e))
+            finally:
+                conn.close()
 
-        ctk.CTkButton(btn_frm, text="Supprimer", command=do_supprimer,
-            fg_color="#c62828", hover_color="#b71c1c", width=120, height=34).pack(side="left")
-        ctk.CTkButton(btn_frm, text="Sauver note", command=do_note,
-            fg_color="#1565c0", hover_color="#0d47a1", width=110, height=34).pack(side="left",padx=8)
-        ctk.CTkButton(btn_frm, text="Diviser", command=do_split,
-            fg_color="#6a1b9a", hover_color="#4a148c", width=110, height=34).pack(side="left")
-        ctk.CTkButton(btn_frm, text="Fermer", command=win.destroy,
-            fg_color="transparent", border_width=1, border_color="gray50",
-            text_color=("gray10","gray90"), width=100, height=34).pack(side="right")
+        ctk.CTkButton(
+            btn_bar, text="🗑  Supprimer",
+            command=do_supprimer,
+            height=34, width=130,
+            fg_color=C.DANGER, hover_color=C.DANGER_DARK,
+            text_color="#FFFFFF", font=_f(10, "bold"),
+            corner_radius=6
+        ).pack(side="left")
 
-    # ── Setup UI ──────────────────────────────────────────────────────────
-    def setup_ui(self):
-        self.lbl_titre = ctk.CTkLabel(self, text="Suivi Peremptions",
-            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"))
-        self.lbl_titre.pack(pady=(14,6))
+        ctk.CTkButton(
+            btn_bar, text="💾  Sauver note",
+            command=do_note,
+            height=34, width=120,
+            fg_color=C.PRIMARY, hover_color=C.PRIMARY_HOVER,
+            text_color="#FFFFFF", font=_f(10, "bold"),
+            corner_radius=6
+        ).pack(side="left", padx=(6, 0))
 
-        # Barre outils
-        bar = ctk.CTkFrame(self)
-        bar.pack(fill="x", padx=20, pady=(0,4))
+        ctk.CTkButton(
+            btn_bar, text="✂  Diviser",
+            command=do_split,
+            height=34, width=110,
+            fg_color=C.PREMIUM, hover_color=C.PREMIUM_DARK,
+            text_color="#FFFFFF", font=_f(10, "bold"),
+            corner_radius=6
+        ).pack(side="left", padx=(6, 0))
 
-        ctk.CTkLabel(bar, text="Recherche:", font=ctk.CTkFont(size=12)).pack(
-            side="left", padx=(10,4), pady=8)
-        self.entry_recherche = ctk.CTkEntry(bar,
-            placeholder_text="Code ou designation...", width=220)
-        self.entry_recherche.pack(side="left", padx=(0,8), pady=8)
-        self.entry_recherche.bind("<KeyRelease>", self.on_search_change)
-
-        # Filtre état
-        self.var_filter = StringVar(value="Tous")
-        try:
-            cb = ttk.Combobox(bar,
-                values=["Tous","Perime","< 1 mois","< 2 mois",
-                        "> 2 mois","Epuise","Sans peremption"],
-                textvariable=self.var_filter, state="readonly", width=16)
-            cb.pack(side="left", padx=(0,8))
-            cb.bind("<<ComboboxSelected>>", self.on_filter_change)
-        except Exception:
-            ctk.CTkOptionMenu(bar,
-                values=["Tous","Perime","< 1 mois","< 2 mois",
-                        "> 2 mois","Epuise","Sans peremption"],
-                command=lambda _: self.on_filter_change()).pack(side="left", padx=(0,8))
-
-        # Filtre magasin
-        ctk.CTkLabel(bar, text="Magasin:", font=ctk.CTkFont(size=12)).pack(
-            side="left", padx=(0,4))
-        self.var_magasin = StringVar(value="Tous les magasins")
-        try:
-            self.combo_mag = ttk.Combobox(bar,
-                values=["Tous les magasins"],
-                textvariable=self.var_magasin, state="readonly", width=18)
-            self.combo_mag.pack(side="left", padx=(0,8))
-            self.combo_mag.bind("<<ComboboxSelected>>", self.on_filter_change)
-        except Exception:
-            self.combo_mag = ctk.CTkOptionMenu(bar,
-                values=["Tous les magasins"],
-                command=lambda _: self.on_filter_change())
-            self.combo_mag.pack(side="left", padx=(0,8))
-
-        ctk.CTkButton(bar, text="Actualiser", command=self.charger_donnees,
-            fg_color="#2e7d32", hover_color="#1b5e20", width=110, height=30).pack(side="left")
-
-        # Checkbox (cochée par défaut pour afficher directement les articles avec péremption)
-        self.var_with_per = BooleanVar(value=True)
-        ctk.CTkCheckBox(bar,
-            text="Avec peremption uniquement",
-            variable=self.var_with_per,
-            command=self.on_filter_change,
-            font=ctk.CTkFont(size=11)
-        ).pack(side="left", padx=12)
-
-        
-        # Tableau
-        tbl = ctk.CTkFrame(self)
-        tbl.pack(fill="both", expand=True, padx=20, pady=(0,8))
-
-        cols = ("Code","Designation","Unite","Magasin","Stock global",
-                "Priorite","Date entree","Date peremption","Jours rest.",
-                "Qt lot","Qt restante","Note")
-        self.tree = ttk.Treeview(tbl, columns=cols, show="headings", height=18)
-
-        self.tree.tag_configure('perime',   foreground="#e53935", font=("Segoe UI",9,"bold"))
-        self.tree.tag_configure('urgent',   foreground="#fb8c00", font=("Segoe UI",9,"bold"))
-        self.tree.tag_configure('proche',   foreground="#2e7d32", font=("Segoe UI",9))
-        self.tree.tag_configure('normal',   foreground="#212121", font=("Segoe UI",9))
-        self.tree.tag_configure('epuise',   foreground="#9e9e9e", font=("Segoe UI",9,"italic"))
-        self.tree.tag_configure('sans_lot', foreground="#546e7a", font=("Segoe UI",9,"italic"))
-
-        largeurs = {
-            "Code":100,"Designation":200,"Unite":80,"Magasin":120,
-            "Stock global":95,"Priorite":60,"Date entree":95,
-            "Date peremption":155,"Jours rest.":85,
-            "Qt lot":85,"Qt restante":100,"Note":150,
-        }
-        for col in cols:
-            self.tree.heading(col, text=col, command=lambda c=col: self._sort_by(c))
-            self.tree.column(col, width=largeurs.get(col,100), anchor="center")
-        self.tree.column("Designation",      anchor="w")
-        self.tree.column("Magasin",          anchor="w")
-        self.tree.column("Date peremption",  anchor="w")
-        self.tree.column("Note",             anchor="w")
-
-        sy = ctk.CTkScrollbar(tbl, orientation="vertical",   command=self.tree.yview)
-        sx = ctk.CTkScrollbar(tbl, orientation="horizontal",  command=self.tree.xview)
-        self.tree.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        sy.grid(row=0, column=1, sticky="ns"); sx.grid(row=1, column=0, sticky="ew")
-        tbl.grid_rowconfigure(0, weight=1); tbl.grid_columnconfigure(0, weight=1)
-        self.tree.bind("<Double-Button-1>", self.on_double_click)
-
-        # Pied
-        foot = ctk.CTkFrame(self)
-        foot.pack(fill="x", padx=20, pady=(0,10))
-        self.lbl_total = ctk.CTkLabel(foot, text="",
-            font=ctk.CTkFont(size=11, weight="bold"))
-        self.lbl_total.pack(side="left", padx=12)
-        # Légende visuelle dans le pied de page
-        legend = ctk.CTkFrame(foot, fg_color="transparent")
-        legend.pack(side="left", padx=8)
-        for txt, col in [
-            ("Sans peremp.", "#546e7a"),
-            ("Epuise",       "#9e9e9e"),
-            ("> 2 mois",     "#424242"),
-            ("< 2 mois",     "#43a047"),
-            ("< 1 mois",     "#fb8c00"),
-            ("Perime",       "#e53935"),
-        ]:
-            ctk.CTkLabel(legend, text=txt, text_color=col,
-                font=ctk.CTkFont(size=10, weight="bold")).pack(side="right", padx=5)
-        self.lbl_statut = ctk.CTkLabel(foot, text="", font=ctk.CTkFont(size=11))
-        self.lbl_statut.pack(side="right", padx=12)
+        ctk.CTkButton(
+            btn_bar, text="Fermer",
+            command=win.destroy,
+            height=34, width=100,
+            fg_color=C.CLOUDS, hover_color=C.SILVER,
+            text_color=C.TEXT_PRIMARY,
+            border_width=1, border_color=C.BORDER,
+            font=_f(10), corner_radius=6
+        ).pack(side="right")
 
 
+# ── Test standalone ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    try:
+        from app_theme import init_theme, Theme
+        init_theme()
+    except ImportError:
+        ctk.set_appearance_mode("light")
+        ctk.set_default_color_theme("blue")
+
     app = ctk.CTk()
     app.geometry("1420x800")
-    app.title("Gestion des Peremptions")
-    PageGestionPeremption(app).pack(fill="both", expand=True)
+    app.title("Gestion des Péremptions — iJeery")
+    app.grid_rowconfigure(0, weight=1)
+    app.grid_columnconfigure(0, weight=1)
+
+    try:
+        Theme.apply(app)
+    except Exception:
+        pass
+
+    PageGestionPeremption(app).grid(row=0, column=0, sticky="nsew")
     app.mainloop()
