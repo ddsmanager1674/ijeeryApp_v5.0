@@ -2,7 +2,7 @@ import customtkinter as ctk
 from tkinter import messagebox, simpledialog
 import psycopg2
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import traceback
 import tempfile
 import os
@@ -95,6 +95,9 @@ class PagePmtFacture(ctk.CTkToplevel):
             date_pattern='dd/mm/yyyy'
         )
         self.cal_echeance.grid(row=1, column=3, padx=10, pady=10, sticky="w")
+
+        # Définir directement la date à aujourd'hui + 30 jours
+        self.cal_echeance.set_date(date.today() + timedelta(days=30))
 
         # Ligne 3 : Description (optionnelle, tous modes)
         ctk.CTkLabel(saisie_frame, text="Description :").grid(row=2, column=0, padx=10, pady=10, sticky="w")
@@ -534,7 +537,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             description = (self.entry_description_credit.get() or "").strip()
 
         if nom_mode_pmt.lower() == "crédit":
-            date_echeance = self.cal_echeance.get_date() # Objet datetime.date
+            date_echeance = self.cal_echeance.get_date()
             description_credit = f"Acceptation du crédit pour la facture {self.refvente} [CL: {self.client}] - Échéance: {date_echeance.strftime('%d/%m/%Y')}"
 
         if nom_mode_pmt.lower() == "crédit":
