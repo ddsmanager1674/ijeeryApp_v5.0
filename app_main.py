@@ -576,11 +576,54 @@ class Sidebar(ctk.CTkFrame):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FENÊTRE DE VENTE EN TABS
+# FENÊTRE DE VENTE EN ONGLETS — STYLE CHROME
+# Remplace le VenteTabManager existant dans app_main.py
+#
+# CHANGEMENTS vs version précédente :
+#   • Suppression du CTkTabview (badge "Vente(1)" laid au centre)
+#   • Suppression des boutons flottants ✕ / + disgracieux
+#   • Barre d'onglets ttk.Notebook stylisée : fond MIDNIGHT, onglets arrondis
+#     en haut, onglet actif blanc, inactifs gris sombre — exactement comme Chrome
+#   • Bouton "＋" intégré dans la barre (discret, à droite des onglets)
+#   • Fermeture d'onglet par bouton "×" DANS chaque onglet (label cliquable)
+#   • Fenêtre se ferme automatiquement quand le dernier onglet est fermé
 # ─────────────────────────────────────────────────────────────────────────────
 
+import tkinter as tk
+from tkinter import ttk, messagebox
+from typing import Optional
+import customtkinter as ctk
+
+
+# ─── Couleurs iJeery (synchronisées avec app_theme.Colors) ───────────────────
+_MIDNIGHT       = "#2C3E50"   # fond barre onglets
+_MIDNIGHT_LIGHT = "#34495E"   # onglet inactif hover
+_MIDNIGHT_DARK  = "#1A252F"   # onglet inactif normal
+_BG_PAGE        = "#ECF0F1"   # fond onglet actif (même que la page)
+_TEXT_ON_DARK   = "#FFFFFF"   # texte onglet inactif
+_TEXT_PRIMARY   = "#2C3E50"   # texte onglet actif
+_SUCCESS_DARK   = "#27AE60"   # bouton +
+_DANGER         = "#E74C3C"   # bouton × de fermeture
+_BORDER         = "#D5D8DC"
+
+
 class VenteTabManager(ctk.CTkToplevel):
-    """Fenêtre multi-tabs pour PageVenteParMsin (max 10 tabs)."""
+    """
+    Fenêtre multi-onglets pour PageVenteParMsin.
+
+    Architecture :
+    ┌─────────────────────────────────────────────────────────┐
+    │  [🧾 Vente 1  ×] [🧾 Vente 2  ×] [＋]   ← barre Midnight  │
+    ├─────────────────────────────────────────────────────────┤
+    │                                                         │
+    │              Contenu PageVenteParMsin                   │
+    │                                                         │
+    └─────────────────────────────────────────────────────────┘
+
+    Chaque onglet est un frame CTk affiché/caché via grid/grid_remove.
+    La "barre" est une Frame Midnight avec des boutons CTk simulant des onglets.
+    Pas de CTkTabview → pas de badge central, pas de boutons flottants natifs.
+    """
 
     MAX_TABS = 10
 
@@ -588,62 +631,218 @@ class VenteTabManager(ctk.CTkToplevel):
         super().__init__(master)
         self.title("Gestion des Ventes")
         self.geometry("1350x850")
-        self._id_user = id_user_connecte
-        self._tab_count = 0
-        self._tabs: list[dict] = []
+        self.minsize(900, 600)
+        self.configure(fg_color=_BG_PAGE)
 
-        self.grid_rowconfigure(0, weight=1)
+        self._id_user    = id_user_connecte
+        self._tab_count  = 0          # compteur cumulatif (pour le numéro)
+        self._tabs: list[dict] = []   # [{id, btn, frame, label_btn}]
+        self._active_id: Optional[int] = None
+
+        # ── Grille principale : barre (fixe) + contenu (expansible) ──────────
+        self.grid_rowconfigure(0, weight=0)   # barre onglets
+        self.grid_rowconfigure(1, weight=1)   # contenu
         self.grid_columnconfigure(0, weight=1)
 
-        self._tabview = ctk.CTkTabview(self)
-        self._tabview.grid(row=0, column=0, sticky="nsew", padx=4, pady=(32, 4))
+        # ── Barre d'onglets (fond Midnight) ───────────────────────────────────
+        self._tab_bar = tk.Frame(self, bg=_MIDNIGHT, height=38)
+        self._tab_bar.grid(row=0, column=0, sticky="ew")
+        self._tab_bar.grid_propagate(False)   # hauteur fixe
 
-        # Boutons flottants
-        self._btn_add = ctk.CTkButton(
-            self, text="+", width=30, height=26,
-            fg_color="#27AE60", hover_color="#1E8449",
-            font=_F(13, "bold"), command=self.add_tab,
-        )
-        self._btn_close = ctk.CTkButton(
-            self, text="✕", width=30, height=26,
-            fg_color="#E74C3C", hover_color="#C0392B",
-            font=_F(13, "bold"), command=self.close_current_tab,
-        )
-        self._btn_add.place(relx=1.0, x=-8,  y=4, anchor="ne")
-        self._btn_close.place(relx=1.0, x=-44, y=4, anchor="ne")
-        self._btn_add.lift(); self._btn_close.lift()
+        # Conteneur scrollable pour les boutons d'onglets (au cas où beaucoup d'onglets)
+        self._tabs_inner = tk.Frame(self._tab_bar, bg=_MIDNIGHT)
+        self._tabs_inner.pack(side="left", fill="y")
 
+        # Bouton "＋" discret à droite dans la barre
+        self._btn_add = tk.Button(
+            self._tab_bar,
+            text=" ＋ ",
+            bg=_MIDNIGHT,
+            fg=_TEXT_ON_DARK,
+            activebackground=_MIDNIGHT_LIGHT,
+            activeforeground=_TEXT_ON_DARK,
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 13, "bold"),
+            cursor="hand2",
+            command=self.add_tab,
+        )
+        self._btn_add.pack(side="left", padx=(2, 0), pady=6)
+
+        # Séparateur visuel fin en bas de la barre
+        tk.Frame(self, bg=_BORDER, height=1).grid(row=0, column=0, sticky="sew")
+
+        # ── Zone de contenu (frames des onglets empilés) ──────────────────────
+        self._content_area = ctk.CTkFrame(self, fg_color=_BG_PAGE, corner_radius=0)
+        self._content_area.grid(row=1, column=0, sticky="nsew")
+        self._content_area.grid_rowconfigure(0, weight=1)
+        self._content_area.grid_columnconfigure(0, weight=1)
+
+        # Ouverture du premier onglet au démarrage
         self.add_tab()
 
-    def add_tab(self):
-        if self._tab_count >= self.MAX_TABS:
-            messagebox.showwarning("Limite", f"Maximum {self.MAX_TABS} tabs atteints.")
-            return
-        self._tab_count += 1
-        name = f"Vente({self._tab_count})"
-        tab = self._tabview.add(name)
-        PageVenteParMsin = _lazy_load("pages.page_venteParMsin", "PageVenteParMsin")
-        if PageVenteParMsin:
-            frame = PageVenteParMsin(tab, id_user_connecte=self._id_user)
-            frame.pack(fill="both", expand=True)
-        self._tabs.append({"name": name})
-        self._tabview.set(name)
-        if self._tab_count >= self.MAX_TABS:
-            self._btn_add.configure(state="disabled")
+    # ──────────────────────────────────────────────────────────────────────────
+    # GESTION DES ONGLETS
+    # ──────────────────────────────────────────────────────────────────────────
 
-    def close_current_tab(self):
+    def add_tab(self):
+        """Crée un nouvel onglet avec sa PageVenteParMsin et l'active."""
+        if len(self._tabs) >= self.MAX_TABS:
+            messagebox.showwarning("Limite atteinte",
+                                   f"Maximum {self.MAX_TABS} onglets simultanés.")
+            return
+
+        self._tab_count += 1
+        tab_id    = self._tab_count
+        tab_label = f"  🧾 Vente {tab_id}  "
+
+        # ── Bouton-onglet dans la barre ───────────────────────────────────────
+        tab_btn_frame = tk.Frame(self._tabs_inner, bg=_MIDNIGHT_DARK)
+        tab_btn_frame.pack(side="left", padx=(4, 0), pady=4)
+
+        lbl_btn = tk.Label(
+            tab_btn_frame,
+            text=tab_label,
+            bg=_MIDNIGHT_DARK,
+            fg=_TEXT_ON_DARK,
+            font=("Segoe UI", 10),
+            cursor="hand2",
+            padx=4, pady=3,
+        )
+        lbl_btn.pack(side="left")
+
+        # Bouton × de fermeture intégré dans l'onglet
+        close_btn = tk.Label(
+            tab_btn_frame,
+            text=" ×",
+            bg=_MIDNIGHT_DARK,
+            fg="#95A5A6",          # gris discret par défaut
+            font=("Segoe UI", 11, "bold"),
+            cursor="hand2",
+            padx=2,
+        )
+        close_btn.pack(side="left")
+
+        # ── Frame de contenu (PageVenteParMsin) ───────────────────────────────
+        content_frame = ctk.CTkFrame(
+            self._content_area, fg_color=_BG_PAGE, corner_radius=0
+        )
+        content_frame.grid(row=0, column=0, sticky="nsew")
+        content_frame.grid_remove()   # caché par défaut jusqu'à activation
+
+        # Chargement différé de PageVenteParMsin (évite import circulaire)
+        try:
+            from pages.page_venteParMsin import PageVenteParMsin
+            page = PageVenteParMsin(content_frame, id_user_connecte=self._id_user)
+            page.pack(fill="both", expand=True)
+        except Exception as e:
+            # Afficher l'erreur dans le cadre sans crasher toute l'appli
+            ctk.CTkLabel(
+                content_frame,
+                text=f"❌ Erreur chargement page vente :\n{e}",
+                text_color=_DANGER,
+                font=("Segoe UI", 12),
+            ).pack(expand=True)
+
+        # ── Enregistrement de l'onglet ────────────────────────────────────────
+        tab_info = {
+            "id":            tab_id,
+            "btn_frame":     tab_btn_frame,
+            "lbl_btn":       lbl_btn,
+            "close_btn":     close_btn,
+            "content_frame": content_frame,
+        }
+        self._tabs.append(tab_info)
+
+        # ── Bindings ──────────────────────────────────────────────────────────
+        # Clic sur le label → activer l'onglet
+        lbl_btn.bind("<Button-1>",   lambda _e, tid=tab_id: self._activate_tab(tid))
+        # Clic sur × → fermer l'onglet
+        close_btn.bind("<Button-1>", lambda _e, tid=tab_id: self.close_tab(tid))
+        # Hover sur × : rouge vif pour signaler l'action
+        close_btn.bind("<Enter>",    lambda _e, b=close_btn: b.config(fg=_DANGER))
+        close_btn.bind("<Leave>",    lambda _e, b=close_btn: b.config(fg="#95A5A6"))
+        # Hover sur l'onglet inactif : éclaircissement
+        lbl_btn.bind("<Enter>",
+            lambda _e, t=tab_info: self._on_tab_hover(t, True))
+        lbl_btn.bind("<Leave>",
+            lambda _e, t=tab_info: self._on_tab_hover(t, False))
+
+        # Désactiver le bouton + si limite atteinte
+        if len(self._tabs) >= self.MAX_TABS:
+            self._btn_add.config(state="disabled", fg="#5D6D7E")
+
+        # Activer le nouvel onglet
+        self._activate_tab(tab_id)
+
+    def close_tab(self, tab_id: int):
+        """Ferme l'onglet correspondant à tab_id."""
         if len(self._tabs) <= 1:
+            # Dernier onglet → ferme toute la fenêtre
             self.destroy()
             return
-        name = self._tabview.get()
-        self._tabview.delete(name)
-        self._tabs = [t for t in self._tabs if t["name"] != name]
-        self._tab_count -= 1
-        self._btn_add.configure(state="normal")
-        if self._tabs:
-            self._tabview.set(self._tabs[-1]["name"])
 
+        tab = self._get_tab(tab_id)
+        if not tab:
+            return
 
+        # Destruction des widgets de la barre et du contenu
+        tab["btn_frame"].destroy()
+        tab["content_frame"].destroy()
+        self._tabs = [t for t in self._tabs if t["id"] != tab_id]
+
+        # Réactiver le bouton + si on était à la limite
+        self._btn_add.config(state="normal", fg=_TEXT_ON_DARK)
+
+        # Si l'onglet fermé était l'actif, basculer sur le dernier restant
+        if self._active_id == tab_id and self._tabs:
+            self._activate_tab(self._tabs[-1]["id"])
+
+    def _activate_tab(self, tab_id: int):
+        """Active visuellement l'onglet tab_id et affiche son contenu."""
+        self._active_id = tab_id
+        for tab in self._tabs:
+            is_active = (tab["id"] == tab_id)
+            self._apply_tab_style(tab, active=is_active)
+            if is_active:
+                tab["content_frame"].grid()    # afficher
+            else:
+                tab["content_frame"].grid_remove()  # cacher
+
+    def _apply_tab_style(self, tab: dict, active: bool):
+        """Applique le style visuel Chrome (actif = blanc, inactif = sombre)."""
+        if active:
+            bg  = _BG_PAGE
+            fg  = _TEXT_PRIMARY
+            font = ("Segoe UI", 10, "bold")
+            close_fg = "#5D6D7E"
+        else:
+            bg  = _MIDNIGHT_DARK
+            fg  = _TEXT_ON_DARK
+            font = ("Segoe UI", 10)
+            close_fg = "#5D6D7E"
+
+        tab["btn_frame"].config(bg=bg)
+        tab["lbl_btn"].config(bg=bg, fg=fg, font=font)
+        tab["close_btn"].config(bg=bg, fg=close_fg)
+
+    def _on_tab_hover(self, tab: dict, entering: bool):
+        """Effet hover sur les onglets inactifs uniquement."""
+        if tab["id"] == self._active_id:
+            return   # ne pas altérer le style de l'onglet actif
+        bg = _MIDNIGHT_LIGHT if entering else _MIDNIGHT_DARK
+        tab["btn_frame"].config(bg=bg)
+        tab["lbl_btn"].config(bg=bg)
+        tab["close_btn"].config(bg=bg)
+
+    def _get_tab(self, tab_id: int) -> Optional[dict]:
+        """Retourne le dict d'onglet pour un tab_id donné."""
+        return next((t for t in self._tabs if t["id"] == tab_id), None)
+
+    def close_current_tab(self):
+        """Ferme l'onglet actuellement actif (rétrocompatibilité app_main)."""
+        if self._active_id is not None:
+            self.close_tab(self._active_id)
 # ─────────────────────────────────────────────────────────────────────────────
 # FENÊTRE PRINCIPALE
 # ─────────────────────────────────────────────────────────────────────────────
