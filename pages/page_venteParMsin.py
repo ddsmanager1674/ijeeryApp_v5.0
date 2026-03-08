@@ -1238,6 +1238,9 @@ class PageVenteParMsin(ctk.CTkFrame):
         fen.geometry("550*550")
         fen.configure(fg_color=Colors.BG_PAGE)
         fen.grab_set()
+        fen.lift()
+        fen.focus_force()
+        fen.attributes('-topmost', True)
 
         frame = ctk.CTkFrame(fen, fg_color=Colors.BG_CARD, corner_radius=12)
         frame.pack(fill="both", expand=True, padx=12, pady=12)
@@ -1342,6 +1345,9 @@ class PageVenteParMsin(ctk.CTkFrame):
         fen.geometry("1020x620")
         fen.configure(fg_color=Colors.BG_PAGE)
         fen.grab_set()
+        fen.lift()
+        fen.focus_force()
+        fen.attributes('-topmost', True)
 
         mf = ctk.CTkFrame(fen, fg_color=Colors.BG_CARD, corner_radius=12)
         mf.pack(fill="both", expand=True, padx=12, pady=12)

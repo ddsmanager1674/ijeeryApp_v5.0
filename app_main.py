@@ -1068,6 +1068,7 @@ class App(ctk.CTk):
             self._vente_tab_mgr.add_tab()
         self._vente_tab_mgr.lift()
         self._vente_tab_mgr.focus_force()
+        self._vente_tab_mgr.attributes('-topmost', True)
 
     def _show_not_authorized(self, msg: str = "Accès non autorisé."):
         for w in self._content.winfo_children():
