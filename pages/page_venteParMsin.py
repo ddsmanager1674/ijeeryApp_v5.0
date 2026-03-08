@@ -569,7 +569,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         s.theme_use("clam")
         s.configure("Vente.Treeview",
                     rowheight=24,
-                    font=("Segoe UI", 9),
+                    font=("Roboto", 10),
                     background=Colors.BG_CARD,
                     foreground=Colors.TEXT_PRIMARY,
                     fieldbackground=Colors.BG_CARD,
@@ -578,7 +578,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         s.configure("Vente.Treeview.Heading",
                     background=Colors.BG_HEADER,
                     foreground=Colors.TEXT_ON_DARK,
-                    font=("Segoe UI", 9, "bold"),
+                    font=("Roboto", 10, "bold"),
                     relief="flat", padding=4)
         s.map("Vente.Treeview",
               background=[("selected", Colors.PRIMARY_LIGHT)],
@@ -1235,7 +1235,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         """Ouvre une fenêtre modale de sélection de client avec filtre et type."""
         fen = ctk.CTkToplevel(self)
         fen.title("Rechercher un client")
-        fen.geometry("520x520")
+        fen.geometry("550*550")
         fen.configure(fg_color=Colors.BG_PAGE)
         fen.grab_set()
 
