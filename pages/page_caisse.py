@@ -126,6 +126,7 @@ class PageCaisse(ctk.CTkFrame):
         self._build_badges()
         self._build_filters()
         self._build_treeview()
+        self._build_table_actions()
         self._build_footer()
 
         self.charger_modes_paiement()
@@ -143,23 +144,6 @@ class PageCaisse(ctk.CTkFrame):
             hdr, text="Gestion de la Caisse",
             font=_f(18, "bold"), text_color="#FFFFFF"
         ).pack(side="left", padx=16, pady=10)
-
-        actions = ctk.CTkFrame(hdr, fg_color="transparent")
-        actions.pack(side="right", padx=16, pady=8)
-
-        self.btn_encaissement = ctk.CTkButton(
-            actions, text="＋  Encaissement",
-            command=self.open_page_encaissement,
-            fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
-            text_color="#FFFFFF", height=34, width=160, font=_f(10, "bold"))
-        self.btn_encaissement.pack(side="left", padx=(0, 8))
-
-        self.btn_decaissement = ctk.CTkButton(
-            actions, text="－  Décaissement",
-            command=self.open_page_decaissement,
-            fg_color=C.DANGER, hover_color=C.DANGER_DARK,
-            text_color="#FFFFFF", height=34, width=160, font=_f(10, "bold"))
-        self.btn_decaissement.pack(side="left")
 
     def _build_badges(self):
         """Deux rangées de badges cliquables (documents + modes de paiement)."""
@@ -311,6 +295,27 @@ class PageCaisse(ctk.CTkFrame):
         self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=(6, 0))
         sy.grid(row=0, column=1, sticky="ns",  pady=(6, 0))
         sx.grid(row=1, column=0, sticky="ew",  padx=(6, 0))
+
+    def _build_table_actions(self):
+        panel = ctk.CTkFrame(self, fg_color="transparent")
+        panel.grid(row=4, column=0, sticky="ew", padx=12, pady=(2, 8))
+
+        actions = ctk.CTkFrame(panel, fg_color="transparent")
+        actions.pack(side="right")
+
+        self.btn_encaissement = ctk.CTkButton(
+            actions, text="＋  Encaissement",
+            command=self.open_page_encaissement,
+            fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
+            text_color="#FFFFFF", height=34, width=160, font=_f(10, "bold"))
+        self.btn_encaissement.pack(side="left", padx=(0, 8))
+
+        self.btn_decaissement = ctk.CTkButton(
+            actions, text="－  Décaissement",
+            command=self.open_page_decaissement,
+            fg_color=C.DANGER, hover_color=C.DANGER_DARK,
+            text_color="#FFFFFF", height=34, width=160, font=_f(10, "bold"))
+        self.btn_decaissement.pack(side="left")
 
     def _build_footer(self):
         pass

@@ -141,7 +141,7 @@ class MessageDialog(ctk.CTkToplevel):
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         window_width = 400
-        window_height = 180
+        window_height = 200
         x = (screen_width // 2) - (window_width // 2)
         y = (screen_height // 2) - (window_height // 2)
         self.geometry(f"{window_width}x{window_height}+{x}+{y}")
