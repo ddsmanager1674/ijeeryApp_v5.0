@@ -481,7 +481,7 @@ class PagePrixListe(ctk.CTkFrame):
 
     def _on_saisie_close(self, win):
         self._close_toplevel(win)
-        self.load_data_async()
+        self.load_data_async(self._var_search.get().strip())
 
 
 # ── Test standalone ───────────────────────────────────────────────────────────
