@@ -518,31 +518,31 @@ class PageHome(ctk.CTkFrame):
             fill="x", padx=14, pady=(10, 2))
 
         caisse_row = ctk.CTkFrame(outer, fg_color="transparent")
-        caisse_row.pack(fill="x", padx=14, pady=(0, 6))
+        caisse_row.pack(fill="x", padx=14, pady=(8, 14))
         caisse_row.grid_columnconfigure(0, weight=2)
         caisse_row.grid_columnconfigure(1, weight=3)
 
         # Grande carte Solde en Espèces
-        solde_card = ctk.CTkFrame(caisse_row, fg_color=C.BG_HEADER,
+        solde_card = ctk.CTkFrame(caisse_row, fg_color="#E2E8EC",
                                    corner_radius=10)
         solde_card.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
 
         ctk.CTkLabel(solde_card, text="💰  SOLDE EN ESPÈCES",
-                     font=_f(9, "bold"), text_color="#BDC3C7").pack(
+                     font=_f(13, "bold"), text_color="#34495E").pack(
             pady=(14, 2), padx=14, anchor="w")
         ctk.CTkLabel(solde_card, text=solde_especes,
-                     font=_f(22, "bold"), text_color="#2ECC71").pack(
+                     font=_f(25, "bold"), text_color="#34495E").pack(
             pady=(0, 6), padx=14, anchor="w")
 
         enc_dec = ctk.CTkFrame(solde_card, fg_color="transparent")
-        enc_dec.pack(fill="x", padx=14, pady=(0, 14))
+        enc_dec.pack(fill="x", padx=14, pady=(8, 22))
 
         def _mini_stat(parent, icon, label, val, color):
-            f = ctk.CTkFrame(parent, fg_color="#34495E", corner_radius=7)
+            f = ctk.CTkFrame(parent, fg_color="#D8DDE2", corner_radius=7)
             f.pack(side="left", fill="x", expand=True, padx=(0, 5))
-            ctk.CTkLabel(f, text=f"{icon} {label}", font=_f(8),
-                         text_color="#95A5A6").pack(pady=(5, 0))
-            ctk.CTkLabel(f, text=val, font=_f(10, "bold"),
+            ctk.CTkLabel(f, text=f"{icon} {label}", font=_f(11),
+                         text_color="#34495E").pack(pady=(5, 0))
+            ctk.CTkLabel(f, text=val, font=_f(21, "bold"),
                          text_color=color).pack(pady=(0, 5))
 
         _mini_stat(enc_dec, "⬆", "Enc. du jour", encaissement_jour, "#2ECC71")
@@ -603,11 +603,11 @@ class PageHome(ctk.CTkFrame):
         # SECTION 3 — SOLDES & ENGAGEMENTS
         # ═════════════════════════════════════════════════════════════════════
         SectionHeader(outer, "Soldes & Engagements", "📌").pack(
-            fill="x", padx=14, pady=(4, 2))
+            fill="x", padx=14, pady=(6, 2))
 
         sol_frame = ctk.CTkFrame(outer, fg_color="transparent")
-        sol_frame.pack(fill="x", padx=14, pady=(0, 12))
-        for c in range(4):
+        sol_frame.pack(fill="x", padx=14, pady=(0, 6))
+        for c in range(3):
             sol_frame.grid_columnconfigure(c, weight=1, uniform="sol")
 
         soldes = [
