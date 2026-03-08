@@ -1,12 +1,24 @@
 {
-    "user_id": 18,
-    "username": "olivier",
-    "fonction_id": 13,
-    "fonction_name": "Facturation",
+    "user_id": 26,
+    "username": "brian",
+    "fonction_id": 1,
+    "fonction_name": "Administration",
     "menus": [
+        [
+            "Absence",
+            "PageAbsence"
+        ],
+        [
+            "Ajout Banque",
+            "PageBanqueNv"
+        ],
         [
             "Article",
             "PageArticle"
+        ],
+        [
+            "Article Fournisseur",
+            "PageArticleFrs"
         ],
         [
             "Article Liste",
@@ -17,8 +29,48 @@
             "PageArticleMouvement"
         ],
         [
+            "Autorisation",
+            "PageAutorisation"
+        ],
+        [
+            "Autorisation Admin",
+            "PageCodeAutorisation"
+        ],
+        [
+            "Avance 15e",
+            "PageAVQ"
+        ],
+        [
+            "Avance Spécial",
+            "FenetreAvanceSpec"
+        ],
+        [
+            "Avoir",
+            "PageAvoir"
+        ],
+        [
+            "Banque",
+            "PageBanque"
+        ],
+        [
+            "Base Liste",
+            "PageBaseListe"
+        ],
+        [
+            "Bon de Réceptio",
+            "PageBonReception"
+        ],
+        [
+            "Caisse",
+            "PageCaisse"
+        ],
+        [
             "Catégorie Articl",
             "PageCategorieArticle"
+        ],
+        [
+            "Catégorie Compt",
+            "PageCategorieCompte"
         ],
         [
             "CHAT INTERNE",
@@ -29,8 +81,64 @@
             "PageClient"
         ],
         [
+            "Client Crédi",
+            "PageClientCredit"
+        ],
+        [
+            "Commande Frs",
+            "PageCommandeFrs"
+        ],
+        [
+            "Config DB",
+            "DatabaseConfig"
+        ],
+        [
+            "Décaissemen",
+            "PageDecaissement"
+        ],
+        [
+            "Décaissement Banqu",
+            "PageDecaissementBq"
+        ],
+        [
+            "Encaissement",
+            "PageEncaissement"
+        ],
+        [
+            "Encaissement Banque",
+            "PageEncaissementBq"
+        ],
+        [
+            "Etat de Salaire",
+            "PageSalaireEtatSB"
+        ],
+        [
+            "Etat de Salaire Horaire",
+            "PageEtatSalaireHoraire"
+        ],
+        [
+            "Facture Liste",
+            "PageFactureListe"
+        ],
+        [
+            "Fonction",
+            "PageFonction"
+        ],
+        [
+            "Fournisseur",
+            "PageFournisseur"
+        ],
+        [
+            "Fournisseur Dettes",
+            "PageFrsDette"
+        ],
+        [
             "Information Article",
             "PageInfoArticle"
+        ],
+        [
+            "Init",
+            "DBInitializerApp"
         ],
         [
             "Liste Facture",
@@ -41,24 +149,124 @@
             "PageListeMouvement"
         ],
         [
+            "Liste Personnel",
+            "AppMain"
+        ],
+        [
+            "Livraison Client",
+            "PageLivraisonClient"
+        ],
+        [
+            "Magasin",
+            "PageMagasin"
+        ],
+        [
+            "Menu",
+            "PageMenu"
+        ],
+        [
             "Mouvement d'article",
             "PageArticleMouvement"
+        ],
+        [
+            "Mouvement Stock",
+            "PageInfoMouvementStock"
+        ],
+        [
+            "Nouveau SB",
+            "PageSalaireBase"
+        ],
+        [
+            "Paiement Client",
+            "PagePmtFacture"
+        ],
+        [
+            "Paiement Fournisseur",
+            "PagePmtFrs"
+        ],
+        [
+            "Paiement Salaire",
+            "PageValidationSalaire"
+        ],
+        [
+            "Péremption d'article",
+            "PageGestionPeremption"
         ],
         [
             "Prix d'article",
             "PagePrixListe"
         ],
         [
+            "Prix de revient",
+            "PagePrixRevient"
+        ],
+        [
+            "Prix Liste",
+            "PagePrixListe"
+        ],
+        [
+            "Prix Saisie",
+            "PagePrixSaisie"
+        ],
+        [
+            "Proforma",
+            "PageCommandeCli"
+        ],
+        [
+            "Salaire Base",
+            "PageSalaireBase"
+        ],
+        [
+            "Sauvegarde",
+            "PageSauvegarde"
+        ],
+        [
             "Sortie Article",
             "PageSortie"
+        ],
+        [
+            "Stock Alerte",
+            "PageStockAlerte"
         ],
         [
             "Stock Article",
             "PageStock"
         ],
         [
+            "TABLEAU DE BORD",
+            "page_home"
+        ],
+        [
+            "Taux Horaire",
+            "PageTauxHoraire"
+        ],
+        [
+            "Transfert Article",
+            "PageTransfert"
+        ],
+        [
+            "Transfert Banque",
+            "PageTransfertBanque"
+        ],
+        [
+            "Transfert Caisse",
+            "PageTransfertCaisse"
+        ],
+        [
+            "Type de paiement",
+            "PageTypePmt"
+        ],
+        [
             "Unité Articl",
             "PageUnite"
+        ],
+        [
+            "Users",
+            "PageUsers"
+        ],
+        [
+            "Utilisateurs",
+            "PageUsers"
         ],
         [
             "Ventes par Dépôt",

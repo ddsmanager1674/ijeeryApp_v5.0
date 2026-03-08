@@ -77,8 +77,247 @@ import psycopg2
 import json
 from datetime import datetime
 import tkinter as tk
+import threading
+import os
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE NOTIFICATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Notifier:
+    """
+    Gestionnaire de notifications système cross-platform.
+
+    Stratégie par OS :
+      Windows → toast natif via WinAPI (win32api si dispo, sinon ctypes ShellExecute)
+      Linux   → notify-send (libnotify)
+      macOS   → osascript
+
+    En dernier recours : bannière Tk élégante superposée à la fenêtre principale.
+
+    Usage :
+        Notifier.send(
+            title="iJeery Chat",
+            message="Rakoto : Bonjour !",
+            master=root_window,    # pour le fallback Tk
+        )
+    """
+
+    # Identifiant unique de l'application (pour Windows)
+    APP_ID = "iJeery.Chat"
+
+    @staticmethod
+    def send(title: str, message: str, master=None):
+        """
+        Envoie une notification en arrière-plan (thread séparé pour ne pas bloquer l'UI).
+        """
+        t = threading.Thread(
+            target=Notifier._send_safe,
+            args=(title, message, master),
+            daemon=True,
+        )
+        t.start()
+
+    @staticmethod
+    def _send_safe(title: str, message: str, master):
+        """Envoie la notification (exécuté dans un thread)."""
+        sent = False
+
+        # ── Windows ───────────────────────────────────────────────────────────
+        if os.name == "nt":
+            sent = Notifier._windows_toast(title, message)
+
+        # ── Linux ─────────────────────────────────────────────────────────────
+        elif os.name == "posix" and not Notifier._is_macos():
+            sent = Notifier._linux_notify(title, message)
+
+        # ── macOS ─────────────────────────────────────────────────────────────
+        elif Notifier._is_macos():
+            sent = Notifier._macos_notify(title, message)
+
+        # ── Fallback : bannière Tk dans la fenêtre ────────────────────────────
+        if not sent and master is not None:
+            try:
+                master.after(0, lambda: Notifier._tk_banner(master, title, message))
+            except Exception:
+                pass
+
+    @staticmethod
+    def _is_macos() -> bool:
+        import sys
+        return sys.platform == "darwin"
+
+    @staticmethod
+    def _windows_toast(title: str, message: str) -> bool:
+        """
+        Notification Windows 10/11 via ctypes (Balloon tooltip ou Toast).
+        Utilise win10toast si disponible, sinon fallback ctypes WinAPI.
+        """
+        # Tentative 1 : win10toast (pip install win10toast)
+        try:
+            from win10toast import ToastNotifier
+            toaster = ToastNotifier()
+            toaster.show_toast(
+                title,
+                message,
+                duration=5,
+                threaded=True,
+            )
+            return True
+        except ImportError:
+            pass
+
+        # Tentative 2 : plyer
+        try:
+            from plyer import notification
+            notification.notify(
+                title=title,
+                message=message,
+                app_name="iJeery Chat",
+                timeout=5,
+            )
+            return True
+        except ImportError:
+            pass
+
+        # Tentative 3 : ctypes WinAPI — Balloon tooltip via SystemTray
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            NIF_MESSAGE  = 0x01
+            NIF_ICON     = 0x02
+            NIF_TIP      = 0x04
+            NIF_INFO     = 0x10
+            NIIF_INFO    = 0x01
+            NIM_ADD      = 0x00
+            NIM_MODIFY   = 0x01
+            NIM_DELETE   = 0x02
+
+            class NOTIFYICONDATA(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize",           wintypes.DWORD),
+                    ("hWnd",             wintypes.HWND),
+                    ("uID",              wintypes.UINT),
+                    ("uFlags",           wintypes.UINT),
+                    ("uCallbackMessage", wintypes.UINT),
+                    ("hIcon",            wintypes.HANDLE),
+                    ("szTip",            wintypes.WCHAR * 128),
+                    ("dwState",          wintypes.DWORD),
+                    ("dwStateMask",      wintypes.DWORD),
+                    ("szInfo",           wintypes.WCHAR * 256),
+                    ("uTimeout",         wintypes.UINT),
+                    ("szInfoTitle",      wintypes.WCHAR * 64),
+                    ("dwInfoFlags",      wintypes.DWORD),
+                ]
+
+            shell32 = ctypes.windll.shell32
+            nid = NOTIFYICONDATA()
+            nid.cbSize      = ctypes.sizeof(NOTIFYICONDATA)
+            nid.uFlags      = NIF_INFO | NIF_ICON | NIF_TIP | NIF_MESSAGE
+            nid.szInfoTitle = title[:63]
+            nid.szInfo      = message[:255]
+            nid.uTimeout    = 5000
+            nid.dwInfoFlags = NIIF_INFO
+            nid.szTip       = "iJeery Chat"
+
+            shell32.Shell_NotifyIconW(NIM_ADD,    ctypes.byref(nid))
+            import time; time.sleep(5)
+            shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
+            return True
+        except Exception:
+            pass
+
+        return False
+
+    @staticmethod
+    def _linux_notify(title: str, message: str) -> bool:
+        """Notification Linux via notify-send."""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["notify-send", "--app-name=iJeery Chat",
+                 "--expire-time=5000", title, message],
+                timeout=3,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
+    def _macos_notify(title: str, message: str) -> bool:
+        """Notification macOS via osascript."""
+        try:
+            import subprocess
+            script = (
+                f'display notification "{message}" '
+                f'with title "{title}" '
+                f'sound name "Glass"'
+            )
+            result = subprocess.run(
+                ["osascript", "-e", script], timeout=3
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
+    def _tk_banner(master, title: str, message: str):
+        """
+        Bannière élégante superposée dans le coin inférieur droit de la fenêtre.
+        Apparaît animée, reste 4 secondes puis disparaît.
+        Compatible tous OS — fallback universel.
+        """
+        try:
+            # Calculer la position : coin bas-droit de la fenêtre principale
+            master.update_idletasks()
+            mx = master.winfo_rootx()
+            my = master.winfo_rooty()
+            mw = master.winfo_width()
+            mh = master.winfo_height()
+
+            bw, bh = 320, 80
+            bx = mx + mw - bw - 12
+            by = my + mh - bh - 12
+
+            banner = tk.Toplevel(master)
+            banner.wm_overrideredirect(True)          # sans barre de titre
+            banner.wm_attributes("-topmost", True)   # toujours au-dessus
+            banner.geometry(f"{bw}x{bh}+{bx}+{by}")
+            banner.configure(bg=Colors.MIDNIGHT)
+
+            # Contenu
+            frm = tk.Frame(banner, bg=Colors.MIDNIGHT, padx=12, pady=10)
+            frm.pack(fill="both", expand=True)
+
+            tk.Label(
+                frm, text=title,
+                font=("Roboto", 11, "bold"),
+                fg="#FFFFFF", bg=Colors.MIDNIGHT,
+                anchor="w",
+            ).pack(fill="x")
+
+            tk.Label(
+                frm, text=message,
+                font=("Roboto", 10),
+                fg=Colors.TEXT_ON_DARK_DIM,
+                bg=Colors.MIDNIGHT,
+                anchor="w",
+                wraplength=290,
+                justify="left",
+            ).pack(fill="x")
+
+            # Fermeture au clic
+            banner.bind("<Button-1>", lambda e: banner.destroy())
+
+            # Auto-fermeture après 4s
+            banner.after(4000, banner.destroy)
+
+        except Exception as e:
+            print(f"[Notifier] Erreur bannière Tk: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -535,7 +774,7 @@ class PageChat(ctk.CTkFrame):
         av.configure(bg=Colors.BG_CARD)
         av.pack()
         self.header_name_lbl.configure(text=name)
-        self.header_sub_lbl.configure(text="Collaborateur")
+        self.header_sub_lbl.configure(text="")   # sous-titre retiré
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 3 — SIDEBAR : LISTE DES CONTACTS
@@ -726,9 +965,13 @@ class PageChat(ctk.CTkFrame):
                 fg_color=row_bg,
                 corner_radius=8,
                 cursor="hand2",
+                height=64,          # hauteur fixe identique pour toutes les lignes
             )
             row_frame.grid(sticky="ew", padx=6, pady=2)
+            row_frame.grid_propagate(False)   # empêche le contenu de changer la hauteur
             row_frame.grid_columnconfigure(1, weight=1)
+            row_frame.grid_rowconfigure(0, weight=1)
+            row_frame.grid_rowconfigure(1, weight=1)
 
             # Avatar
             av = AvatarCanvas(row_frame, self._get_initials(nom), info["color"],
@@ -746,12 +989,15 @@ class PageChat(ctk.CTkFrame):
             ).grid(row=0, column=1, sticky="sw", pady=(8, 0))
 
             # Aperçu dernier message
-            last_preview = info["last_msg"] or "Pas encore de message"
+            last_preview = info["last_msg"] if info["last_msg"] else "Commencer à discuter"
+            preview_color = (Colors.PRIMARY if info["unread"] > 0
+                             else Colors.TEXT_MUTED if not info["last_msg"]
+                             else Colors.TEXT_SECONDARY)
             ctk.CTkLabel(
                 row_frame,
                 text=last_preview,
                 font=Fonts.small(10),
-                text_color=Colors.TEXT_SECONDARY if info["unread"] == 0 else Colors.PRIMARY,
+                text_color=preview_color,
                 anchor="w",
                 wraplength=150,
             ).grid(row=1, column=1, sticky="nw", pady=(0, 8))
@@ -760,15 +1006,14 @@ class PageChat(ctk.CTkFrame):
             right_col = ctk.CTkFrame(row_frame, fg_color="transparent")
             right_col.grid(row=0, column=2, rowspan=2, padx=(0, 10), pady=6, sticky="e")
 
-            # Heure du dernier message
-            if info["last_time"]:
-                heure = self._format_time(info["last_time"])
-                ctk.CTkLabel(
-                    right_col,
-                    text=heure,
-                    font=Fonts.small(9),
-                    text_color=Colors.TEXT_MUTED,
-                ).pack(anchor="e")
+            # Heure : affichée même si pas de message (→ "-:-")
+            heure_str = self._format_time(info["last_time"]) if info["last_time"] else "-:-"
+            ctk.CTkLabel(
+                right_col,
+                text=heure_str,
+                font=Fonts.small(9),
+                text_color=Colors.TEXT_MUTED,
+            ).pack(anchor="e")
 
             # Badge rouge non-lus
             if info["unread"] > 0:
@@ -984,7 +1229,7 @@ class PageChat(ctk.CTkFrame):
             bubble = ctk.CTkFrame(
                 line,
                 fg_color=BUBBLE_ME_BG,
-                corner_radius=16,
+                corner_radius=12,
             )
             bubble.grid(row=0, column=1, sticky="e", padx=(60, 6))
 
@@ -996,13 +1241,13 @@ class PageChat(ctk.CTkFrame):
                 wraplength=320,
                 justify="left",
                 anchor="w",
-            ).grid(row=0, column=0, padx=(12, 12), pady=(8, 2), sticky="w")
+            ).grid(row=0, column=0, padx=(10, 10), pady=(5, 1), sticky="w")
 
             # Heure + indicateur lu
             lu_icon = "✓✓" if lu else "✓"
             lu_color = "#A8D5FF" if lu else "#C8E6FF"
             meta = ctk.CTkFrame(bubble, fg_color=BUBBLE_ME_BG, corner_radius=0)
-            meta.grid(row=1, column=0, padx=(12, 12), pady=(0, 6), sticky="e")
+            meta.grid(row=1, column=0, padx=(10, 10), pady=(0, 4), sticky="e")
 
             ctk.CTkLabel(
                 meta,
@@ -1027,7 +1272,7 @@ class PageChat(ctk.CTkFrame):
             bubble = ctk.CTkFrame(
                 line,
                 fg_color=BUBBLE_OTHER_BG,
-                corner_radius=16,
+                corner_radius=12,
             )
             bubble.grid(row=0, column=1, sticky="w", padx=(0, 60))
 
@@ -1038,7 +1283,7 @@ class PageChat(ctk.CTkFrame):
                 font=Fonts.bold(10),
                 text_color=color_avatar,
                 anchor="w",
-            ).grid(row=0, column=0, padx=(12, 12), pady=(6, 0), sticky="w")
+            ).grid(row=0, column=0, padx=(10, 10), pady=(5, 0), sticky="w")
 
             ctk.CTkLabel(
                 bubble,
@@ -1048,7 +1293,7 @@ class PageChat(ctk.CTkFrame):
                 wraplength=320,
                 justify="left",
                 anchor="w",
-            ).grid(row=1, column=0, padx=(12, 12), pady=(2, 2), sticky="w")
+            ).grid(row=1, column=0, padx=(10, 10), pady=(1, 1), sticky="w")
 
             # Heure
             ctk.CTkLabel(
@@ -1057,7 +1302,7 @@ class PageChat(ctk.CTkFrame):
                 font=Fonts.small(9),
                 text_color=Colors.TEXT_MUTED,
                 anchor="e",
-            ).grid(row=2, column=0, padx=(12, 12), pady=(0, 6), sticky="e")
+            ).grid(row=2, column=0, padx=(10, 10), pady=(0, 4), sticky="e")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 6 — ENVOI DE MESSAGE
@@ -1160,9 +1405,10 @@ class PageChat(ctk.CTkFrame):
     def _verifier_nouveaux_messages(self):
         """
         Vérifie s'il y a des messages non-lus et met à jour badges + conversation.
+        Déclenche une notification OS pour chaque nouveau message reçu.
 
         SQL :
-            SELECT id_expediteur, COUNT(*) AS nb
+            SELECT id_expediteur, COUNT(*) AS nb, MAX(message) AS dernier
             FROM tb_chat
             WHERE id_destinataire=%s AND lu=0
             GROUP BY id_expediteur
@@ -1172,33 +1418,64 @@ class PageChat(ctk.CTkFrame):
             return
         try:
             cur = conn.cursor()
+            # On récupère aussi le dernier message pour l'afficher dans la notif
             cur.execute("""
-                SELECT id_expediteur, COUNT(*) AS nb
-                FROM tb_chat
-                WHERE id_destinataire = %s AND lu = 0
-                GROUP BY id_expediteur
-            """, (self.id_user_connecte,))
-            non_lus = {row[0]: row[1] for row in cur.fetchall()}
+                SELECT
+                    c.id_expediteur,
+                    COUNT(*)   AS nb,
+                    (
+                        SELECT message FROM tb_chat
+                        WHERE id_expediteur  = c.id_expediteur
+                          AND id_destinataire = %s
+                          AND lu = 0
+                        ORDER BY date_envoi DESC
+                        LIMIT 1
+                    ) AS dernier_message
+                FROM tb_chat c
+                WHERE c.id_destinataire = %s AND c.lu = 0
+                GROUP BY c.id_expediteur
+            """, (self.id_user_connecte, self.id_user_connecte))
+            non_lus = {
+                row[0]: {"nb": row[1], "msg": row[2] or ""}
+                for row in cur.fetchall()
+            }
             cur.close()
 
             sidebar_changed = False
 
-            for iduser, nb in non_lus.items():
+            for iduser, data in non_lus.items():
                 if iduser not in self.contacts:
                     continue
+                nb         = data["nb"]
+                dernier    = data["msg"]
                 old_unread = self.contacts[iduser]["unread"]
+                nom_exp    = self.contacts[iduser]["name"]
 
                 if iduser == self.destinataire_actuel:
-                    # Conversation ouverte → marquer lu + recharger si nouveau message
+                    # Conversation ouverte → marquer lu + recharger
                     if nb > 0:
                         self.marquer_comme_lu(iduser)
                         self.charger_messages()
                         self._charger_derniers_messages()
                         sidebar_changed = True
+                elif nb > old_unread:
+                    # ── NOUVEAU(X) MESSAGE(S) d'un contact en arrière-plan ────
+                    self.bell()   # bip sonore
+
+                    # Aperçu du message : max 80 caractères
+                    apercu = dernier[:80] + ("…" if len(dernier) > 80 else "")
+
+                    # ── Notification système (Windows / Linux / macOS / Tk) ───
+                    Notifier.send(
+                        title   = f"💬  {nom_exp}",
+                        message = apercu,
+                        master  = self.winfo_toplevel(),
+                    )
+
+                    self.contacts[iduser]["unread"] = nb
+                    sidebar_changed = True
+
                 elif nb != old_unread:
-                    # Nouveau message non-lu d'un autre contact → badge + bip
-                    if nb > old_unread:
-                        self.bell()
                     self.contacts[iduser]["unread"] = nb
                     sidebar_changed = True
 
