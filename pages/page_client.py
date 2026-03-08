@@ -241,13 +241,13 @@ class PageClient(ctk.CTkFrame):
         self.search_entry.bind("<KeyRelease>", self.filter_clients)
         
         # Treeview — tags couleur lignes alternées
-        columns = ("Nom du Client", "Contact", "Adresse", "NIF", "Crédit en cours", "Type")
+        columns = ("Nom du Client", "Contact", "Adresse", "NIF", "Crédit en cours", "Dernier Crédit", "Type")
         self.tree = ttk.Treeview(self, columns=columns, show="headings")
         self.tree.tag_configure("even", background="#FFFFFF", foreground="#2C3E50")
         self.tree.tag_configure("odd",  background="#EBF5FB", foreground="#2C3E50")
         
         col_widths = {"Nom du Client": 120, "Contact": 110, "Adresse": 140,
-                      "NIF": 90, "Crédit en cours": 130, "Type": 110}
+                      "NIF": 90, "Crédit en cours": 130, "Dernier Crédit": 190, "Type": 110}
         for col in columns:
             self.tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
             self.tree.column(col, width=col_widths.get(col, 110))
@@ -280,7 +280,8 @@ class PageClient(ctk.CTkFrame):
                     _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
                 except Exception:
                     credit_restant = 0
-                clients_avec_credits.append((cli, credit_restant))
+                dernier_credit = self._get_dernier_credit_label(cli[0])
+                clients_avec_credits.append((cli, credit_restant, dernier_credit))
             
             clients_avec_credits.sort(key=lambda x: x[1], reverse=True)
             self.all_clients_data = clients_avec_credits
@@ -292,11 +293,11 @@ class PageClient(ctk.CTkFrame):
         for item in self.tree.get_children():
             self.tree.delete(item)
         
-        for idx, (cli, credit_restant) in enumerate(clients_avec_credits):
+        for idx, (cli, credit_restant, dernier_credit) in enumerate(clients_avec_credits):
             tag = "even" if idx % 2 == 0 else "odd"
             credit_str = self._formater_nombre(credit_restant)
             self.tree.insert("", "end", iid=cli[0], values=(
-                cli[1], cli[2], cli[3], cli[4], credit_str, cli[6]
+                cli[1], cli[2], cli[3], cli[4], credit_str, dernier_credit, cli[6]
             ), tags=(tag,))
 
     def sort_by_column(self, column):
@@ -311,11 +312,17 @@ class PageClient(ctk.CTkFrame):
         
         col_index = {
             "Nom du Client": 1, "Contact": 2, "Adresse": 3, "NIF": 4,
-            "Crédit en cours": "credit"
+            "Crédit en cours": "credit", "Dernier Crédit": "dernier_credit"
         }
         
         if column == "Crédit en cours":
             sorted_data = sorted(self.all_clients_data, key=lambda x: x[1], reverse=not self.sort_ascending)
+        elif column == "Dernier Crédit":
+            sorted_data = sorted(
+                self.all_clients_data,
+                key=lambda x: self._extract_days_from_label(x[2]),
+                reverse=not self.sort_ascending
+            )
         else:
             idx = col_index.get(column, 1)
             sorted_data = sorted(self.all_clients_data, 
@@ -414,17 +421,18 @@ class PageClient(ctk.CTkFrame):
         search_query = self.search_entry.get().lower().strip()
 
         filtered_data = []
-        for cli, credit_restant in self.all_clients_data:
+        for cli, credit_restant, dernier_credit in self.all_clients_data:
             searchable_parts = [
                 str(cli[0] or ""), str(cli[1] or ""), str(cli[2] or ""),
                 str(cli[3] or ""), str(cli[4] or ""), str(cli[6] or ""),
                 str(credit_restant or 0),
                 self._formater_nombre(credit_restant),
+                str(dernier_credit or ""),
             ]
             searchable_text = " ".join(searchable_parts).lower()
 
             if not search_query or search_query in searchable_text:
-                filtered_data.append((cli, credit_restant))
+                filtered_data.append((cli, credit_restant, dernier_credit))
 
         self.display_clients(filtered_data)
 
@@ -1177,6 +1185,36 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
         if isinstance(nombre, (int, float)):
             return f"{nombre:,.2f}".replace(",", " ").replace(".", ",")
         return str(nombre)
+
+    def _extract_days_from_label(self, label):
+        if not label or "(" not in label:
+            return float("inf")
+        try:
+            inside = label.split("(", 1)[1].split(")", 1)[0]
+            days_str = "".join(ch for ch in inside if ch.isdigit())
+            return int(days_str) if days_str else float("inf")
+        except Exception:
+            return float("inf")
+
+    def _get_dernier_credit_label(self, idclient):
+        try:
+            self.cursor.execute("""
+                SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
+                FROM tb_pmtfacture
+                WHERE idclient = %s AND idmode = 4 AND deleted = 0
+                ORDER BY datepmt DESC LIMIT 1
+            """, (idclient,))
+            row = self.cursor.fetchone()
+            if not row or not row[3]:
+                return "-"
+
+            date_pmt = row[3]
+            date_ref = date_pmt.date() if hasattr(date_pmt, "date") else date_pmt
+            jours = (datetime.now().date() - date_ref).days
+            jours = max(jours, 0)
+            return "-" if jours is None else "Aujourd'hui" if jours == 0 else f"il y a {jours} jours"
+        except Exception:
+            return "-"
 
     def _fetch_client_credits(self, idclient):
         self.cursor.execute("""
