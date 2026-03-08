@@ -221,7 +221,7 @@ class PageStock(ctk.CTkFrame):
         if self.tree:
             self.tree.destroy()
 
-        colonnes_fixes    = ("Code", "Désignation", "Unité")
+        colonnes_fixes    = ("Code", "Désignation", "Unité", "Prix")
         colonnes_magasins = [mag[1] for mag in self.magasins]
         self.colonnes_dynamiques = colonnes_fixes + tuple(colonnes_magasins) + ("Total",)
 
@@ -253,6 +253,8 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=350, anchor="w",      minwidth=200)
             elif col == "Code":
                 self.tree.column(col, width=150, anchor="center")
+            elif col == "Prix":
+                self.tree.column(col, width=120, anchor="e")
             else:
                 self.tree.column(col, width=110, anchor="center")
 
@@ -298,16 +300,33 @@ class PageStock(ctk.CTkFrame):
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT u.codearticle, a.designation, u.designationunite
+                SELECT
+                    u.codearticle,
+                    a.designation,
+                    u.designationunite,
+                    COALESCE(dp.prix, 0) AS prix
                 FROM tb_unite u
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
+                LEFT JOIN (
+                    SELECT idunite, prix
+                    FROM (
+                        SELECT idunite, prix,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY idunite
+                                   ORDER BY dateregistre DESC
+                               ) AS rn
+                        FROM tb_prix
+                        WHERE deleted = 0
+                    ) x
+                    WHERE x.rn = 1
+                ) dp ON dp.idunite = u.idunite
                 WHERE a.deleted = 0 AND COALESCE(u.deleted, 0) = 0
                 ORDER BY a.designation ASC, u.codearticle ASC
             """)
             base_rows = cursor.fetchall()
             self.all_data = []
-            for code, designation, unite in base_rows:
-                valeurs = [code, designation, unite]
+            for code, designation, unite, prix in base_rows:
+                valeurs = [code, designation, unite, self.formater_nombre(prix)]
                 for _idmag, _nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(0))
                 valeurs.append(self.formater_nombre(0))
@@ -399,9 +418,22 @@ class PageStock(ctk.CTkFrame):
                         ELSE 0 END
                     ) as solde_base
                 FROM mouvements_bruts GROUP BY idarticle, idmag
+            ),
+            dernier_prix AS (
+                SELECT idunite, prix
+                FROM (
+                    SELECT idunite, prix,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY idunite
+                               ORDER BY dateregistre DESC
+                           ) AS rn
+                    FROM tb_prix
+                    WHERE deleted = 0
+                ) p
+                WHERE p.rn = 1
             )
             SELECT u.codearticle, a.designation, u.designationunite,
-                COALESCE((SELECT cd.punitcmd FROM tb_commandedetail cd INNER JOIN tb_commande c ON cd.idcom=c.idcom WHERE cd.idarticle=u.idarticle AND cd.idunite=u.idunite AND c.deleted=0 ORDER BY c.datecom DESC LIMIT 1),0) as prixachat,
+                COALESCE(dp.prix, 0) AS prix,
                 u.idarticle, u.idunite, m.idmag,
                 COALESCE(sb.solde_base,0) / NULLIF(COALESCE(uc.coeff_hierarchique,1),0) as stock
             FROM tb_unite u
@@ -409,6 +441,7 @@ class PageStock(ctk.CTkFrame):
             CROSS JOIN tb_magasin m
             LEFT JOIN solde_base_par_mag sb ON sb.idarticle=u.idarticle AND sb.idmag=m.idmag
             LEFT JOIN unite_coeff uc ON uc.idarticle=u.idarticle AND uc.idunite=u.idunite
+            LEFT JOIN dernier_prix dp ON dp.idunite = u.idunite
             WHERE a.deleted=0 AND m.deleted=0
             ORDER BY a.designation ASC, u.codearticle ASC
             """
@@ -416,17 +449,24 @@ class PageStock(ctk.CTkFrame):
             resultats = cursor.fetchall()
             articles_dict = {}
             for code, desig, unite, prix, idarticle, idunite, idmag, stock in resultats:
-                if code not in articles_dict:
-                    articles_dict[code] = {'designation': desig, 'unite': unite,
-                                           'prix': prix, 'stocks': {}, 'total': 0}
+                key = (code, idunite)
+                if key not in articles_dict:
+                    articles_dict[key] = {
+                        'code': code,
+                        'designation': desig,
+                        'unite': unite,
+                        'prix': prix,
+                        'stocks': {},
+                        'total': 0
+                    }
                 if idmag:
                     nom_mag   = next((m[1] for m in self.magasins if m[0] == idmag), f"Mag{idmag}")
                     stock_val = max(0, stock or 0)
-                    articles_dict[code]['stocks'][nom_mag] = stock_val
-                    articles_dict[code]['total'] += stock_val
+                    articles_dict[key]['stocks'][nom_mag] = stock_val
+                    articles_dict[key]['total'] += stock_val
             all_data = []
-            for idx, (code, data) in enumerate(articles_dict.items()):
-                valeurs = [code, data['designation'], data['unite']]
+            for _idx, (_key, data) in enumerate(articles_dict.items()):
+                valeurs = [data['code'], data['designation'], data['unite'], self.formater_nombre(data['prix'])]
                 for _, nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(data['stocks'].get(nom_mag, 0)))
                 valeurs.append(self.formater_nombre(data['total']))
@@ -599,7 +639,7 @@ class PageStock(ctk.CTkFrame):
             return
         filtered_data = [
             (valeurs, total) for valeurs, total in self.all_data
-            if search_term in f"{valeurs[0]} {valeurs[1]} {valeurs[2]}".lower()
+            if search_term in f"{valeurs[0]} {valeurs[1]} {valeurs[2]} {valeurs[3]}".lower()
         ]
         if filtered_data:
             for idx, (valeurs, total) in enumerate(filtered_data):
@@ -608,7 +648,7 @@ class PageStock(ctk.CTkFrame):
                 self.tree.insert("", "end", values=valeurs, tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(filtered_data)}")
         else:
-            empty = ["", "Aucun résultat trouvé", ""] + [""] * (len(self.colonnes_dynamiques) - 3)
+            empty = ["", "Aucun résultat trouvé", "", ""] + [""] * (len(self.colonnes_dynamiques) - 4)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
 
@@ -628,7 +668,7 @@ class PageStock(ctk.CTkFrame):
                 self.tree.insert("", "end", values=valeurs, tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(self.all_data)}")
         else:
-            empty = ["", "Aucun article trouvé", ""] + [""] * (len(self.colonnes_dynamiques) - 3)
+            empty = ["", "Aucun article trouvé", "", ""] + [""] * (len(self.colonnes_dynamiques) - 4)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
 
