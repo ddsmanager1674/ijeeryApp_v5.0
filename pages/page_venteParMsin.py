@@ -60,6 +60,16 @@ class PasswordDialog(ctk.CTkToplevel):
         self.configure(fg_color=Colors.BG_CARD)
         self.result = None
 
+        # Centrer la fenêtre
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 320
+        window_height = 160
+        x = (screen_width // 2) - (window_width // 2)
+        y = (screen_height // 2) - (window_height // 2)
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
         ctk.CTkLabel(self, text=text, font=Fonts.body(12),
                      text_color=Colors.TEXT_PRIMARY).pack(pady=(18, 6), padx=20)
 
@@ -74,11 +84,46 @@ class PasswordDialog(ctk.CTkToplevel):
         styled.button_primary(self, text="Valider", command=self._ok,
                               width=120, height=36).pack(pady=(0, 14))
         self.grab_set()
+        self.lift()
+        self.focus_force()
+        self.attributes('-topmost', True)
         self.wait_window()
 
     def _ok(self):
         self.result = self.entry.get()
         self.destroy()
+
+
+class ErrorDialog(ctk.CTkToplevel):
+    """Dialogue d'erreur centré avec z-index élevé."""
+
+    def __init__(self, title: str, message: str):
+        super().__init__()
+        self.title(title)
+        self.geometry("350x150")
+        self.resizable(False, False)
+        self.configure(fg_color=Colors.BG_CARD)
+
+        # Centrer la fenêtre
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 350
+        window_height = 150
+        x = (screen_width // 2) - (window_width // 2)
+        y = (screen_height // 2) - (window_height // 2)
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+        ctk.CTkLabel(self, text=message, font=Fonts.body(12),
+                     text_color=Colors.TEXT_PRIMARY, wraplength=300).pack(pady=(20, 10), padx=20)
+
+        styled.button_danger(self, text="OK", command=self.destroy,
+                             width=100, height=36).pack(pady=(0, 14))
+        self.grab_set()
+        self.lift()
+        self.focus_force()
+        self.attributes('-topmost', True)
+        self.wait_window()
 
 
 # ==============================================================================
@@ -2451,7 +2496,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         if dlg.result and self.verifier_code_autorisation(dlg.result):
             self.ouvrir_la_page_avoir_réellement()
         elif dlg.result:
-            messagebox.showerror("Accès Refusé", "Code d'autorisation incorrect.")
+            ErrorDialog("Accès Refusé", "Code d'autorisation incorrect.")
 
     def ouvrir_la_page_avoir_réellement(self):
         """Instancie PageAvoir dans un CTkToplevel modal."""
@@ -2462,6 +2507,9 @@ class PageVenteParMsin(ctk.CTkFrame):
         self.fenetre_avoir.geometry("1200x600")
         Theme.apply_toplevel(self.fenetre_avoir)
         self.fenetre_avoir.grab_set()
+        self.fenetre_avoir.lift()
+        self.fenetre_avoir.focus_force()
+        self.fenetre_avoir.attributes('-topmost', True)
         PageAvoir(self.fenetre_avoir, id_user_connecte=self.id_user_connecte).pack(
             fill="both", expand=True, padx=10, pady=10)
         self.fenetre_avoir.protocol("WM_DELETE_WINDOW", self._fermer_fenetre_avoir)

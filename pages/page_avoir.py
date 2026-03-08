@@ -1485,6 +1485,9 @@ class PageAvoir(ctk.CTkFrame):
         fenetre.title("Rechercher une Facture (Vente)")
         fenetre.geometry("1000x600")
         fenetre.grab_set()
+        fenetre.lift()
+        fenetre.focus_force()
+        fenetre.attributes('-topmost', True)
 
         main_frame = ctk.CTkFrame(fenetre)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1754,14 +1757,14 @@ class PageAvoir(ctk.CTkFrame):
             # Mise à jour des totaux
             self.calculer_totaux()
     
-            messagebox.showinfo(
-                "Chargement réussi", 
-                f"Facture {vente[1]} chargée pour transformation en Avoir.\n\n"
-                f"Instructions :\n"
-                f"• Double-cliquez sur une ligne pour modifier la quantité\n"
-                f"• Mettez la quantité à 0 pour exclure un article\n"
-                f"• Cliquez sur 'Enregistrer l'Avoir' pour finaliser"
-            )
+            # messagebox.showinfo(
+            #     "Chargement réussi", 
+            #     f"Facture {vente[1]} chargée pour transformation en Avoir.\n\n"
+            #     f"Instructions :\n"
+            #     f"• Double-cliquez sur une ligne pour modifier la quantité\n"
+            #     f"• Mettez la quantité à 0 pour exclure un article\n"
+            #     f"• Cliquez sur 'Enregistrer l'Avoir' pour finaliser"
+            # )
     
         except Exception as e:
             self.btn_enregistrer.configure(state="disabled")
