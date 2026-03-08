@@ -16,7 +16,7 @@ from tkinter import ttk, messagebox
 import psycopg2
 from datetime import datetime
 import json
-from resource_utils import get_config_path
+from resource_utils import get_config_path, get_session_path, safe_file_read
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -62,11 +62,12 @@ class PagePrixSaisie(ctk.CTkFrame):
     Champ éditable             : Prix uniquement
     """
 
-    def __init__(self, parent, iduser, codearticle=None):
+    def __init__(self, parent, iduser, codearticle=None, idunite=None):
         super().__init__(parent, fg_color=C.BG_PAGE)
 
         self.iduser      = iduser
         self.codearticle = str(codearticle) if codearticle is not None else None
+        self.initial_idunite = int(idunite) if idunite is not None else None
         self.selected_id = None
         self.articles_dict = {}
         self.unites_dict   = {}
@@ -288,7 +289,7 @@ class PagePrixSaisie(ctk.CTkFrame):
         # Treeview historique
         self.tree = ttk.Treeview(
             hist_card,
-            columns=("ID", "Date", "Prix"),
+            columns=("ID", "Date", "Prix", "Utilisateur"),
             show="headings",
             style="Saisie.Treeview",
             height=8)
@@ -297,8 +298,9 @@ class PagePrixSaisie(ctk.CTkFrame):
 
         for col, w, anchor in [
             ("ID",   60,  "center"),
-            ("Date", 210, "center"),
-            ("Prix", 140, "e"),
+            ("Date", 180, "center"),
+            ("Prix", 120, "e"),
+            ("Utilisateur", 160, "w"),
         ]:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor=anchor)
@@ -340,14 +342,25 @@ class PagePrixSaisie(ctk.CTkFrame):
                 return
             cur = conn.cursor()
             if self.codearticle:
-                cur.execute("""
-                    SELECT a.idarticle, u.codearticle::TEXT,
-                           a.designation, u.designationunite, u.idunite
-                    FROM tb_unite u
-                    INNER JOIN tb_article a ON u.idarticle = a.idarticle
-                    WHERE u.codearticle::TEXT = %s
-                    ORDER BY u.codearticle
-                """, (self.codearticle,))
+                if self.initial_idunite is not None:
+                    cur.execute("""
+                        SELECT a.idarticle, u.codearticle::TEXT,
+                               a.designation, u.designationunite, u.idunite
+                        FROM tb_unite u
+                        INNER JOIN tb_article a ON u.idarticle = a.idarticle
+                        WHERE u.codearticle::TEXT = %s
+                          AND u.idunite = %s
+                        ORDER BY u.codearticle
+                    """, (self.codearticle, self.initial_idunite))
+                else:
+                    cur.execute("""
+                        SELECT a.idarticle, u.codearticle::TEXT,
+                               a.designation, u.designationunite, u.idunite
+                        FROM tb_unite u
+                        INNER JOIN tb_article a ON u.idarticle = a.idarticle
+                        WHERE u.codearticle::TEXT = %s
+                        ORDER BY u.codearticle
+                    """, (self.codearticle,))
             else:
                 cur.execute("""
                     SELECT a.idarticle, u.codearticle::TEXT,
@@ -411,13 +424,13 @@ class PagePrixSaisie(ctk.CTkFrame):
         self._lbl_code.configure(text=code or "—")
         self._lbl_nom.configure(text=designation or "—")
         self._lbl_unite.configure(text=unite or "—")
-        self.charger_historique(idarticle)
+        self.charger_historique(idarticle, idunite)
 
     # Compat avec l'ancienne signature utilisée dans charger_articles
     def on_code_selected(self, choice):
         self._afficher_article(choice)
 
-    def charger_historique(self, idarticle):
+    def charger_historique(self, idarticle, idunite):
         for item in self.tree.get_children():
             self.tree.delete(item)
         try:
@@ -426,19 +439,26 @@ class PagePrixSaisie(ctk.CTkFrame):
                 return
             cur = conn.cursor()
             cur.execute("""
-                SELECT p.id, p.dateregistre, p.prix
+                SELECT
+                    p.id,
+                    p.dateregistre,
+                    p.prix,
+                    COALESCE(u.username, 'Système') AS utilisateur
                 FROM tb_prix p
-                INNER JOIN tb_unite u ON p.idunite = u.idunite
-                WHERE u.idarticle = %s AND p.deleted = 0
+                LEFT JOIN tb_users u ON u.iduser = p.iduser
+                WHERE p.idarticle = %s
+                  AND p.idunite = %s
+                  AND p.deleted = 0
                 ORDER BY p.dateregistre DESC
-            """, (idarticle,))
+            """, (idarticle, idunite))
             for i, row in enumerate(cur.fetchall()):
                 date_str = (row[1].strftime("%d/%m/%Y %H:%M:%S")
                             if row[1] else "")
                 prix_str = f"{row[2]:.2f}" if row[2] else "0.00"
+                user_str = row[3] or "Système"
                 tag = "even" if i % 2 == 0 else "odd"
                 self.tree.insert("", "end",
-                                 values=(row[0], date_str, prix_str),
+                                 values=(row[0], date_str, prix_str, user_str),
                                  tags=(tag,))
             cur.close()
             conn.close()
@@ -537,7 +557,7 @@ class PagePrixSaisie(ctk.CTkFrame):
             conn.close()
 
             messagebox.showinfo("Succès", "Prix modifié avec succès.")
-            self.charger_historique(idarticle)
+            self.charger_historique(idarticle, idunite)
             self.nouveau()
 
         except Exception as e:
@@ -555,6 +575,7 @@ class PagePrixSaisie(ctk.CTkFrame):
         try:
             code      = self._lbl_code.cget("text")
             idarticle = self.articles_dict[code][0]
+            idunite   = self.articles_dict[code][3]
 
             conn = self._connect()
             if not conn:
@@ -567,7 +588,7 @@ class PagePrixSaisie(ctk.CTkFrame):
             conn.close()
 
             messagebox.showinfo("Succès", "Prix supprimé avec succès.")
-            self.charger_historique(idarticle)
+            self.charger_historique(idarticle, idunite)
             self.nouveau()
 
         except Exception as e:
@@ -580,7 +601,7 @@ class PagePrixSaisie(ctk.CTkFrame):
         self.entry_prix.delete(0, "end")
         code = self._lbl_code.cget("text")
         if code and code != "—" and code in self.articles_dict:
-            self.charger_historique(self.articles_dict[code][0])
+            self.charger_historique(self.articles_dict[code][0], self.articles_dict[code][3])
 
 
 # ── Test standalone ───────────────────────────────────────────────────────────
@@ -599,5 +620,18 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    PagePrixSaisie(root, iduser=1).pack(fill="both", expand=True)
+    # Récupérer l'utilisateur connecté depuis la session (fallback = 1)
+    session_user_id = 1
+    try:
+        raw, _enc = safe_file_read(get_session_path())
+        session_data = json.loads(raw) if raw else {}
+        session_user_id = (
+            session_data.get("user_id")
+            or session_data.get("iduser")
+            or 1
+        )
+    except Exception:
+        session_user_id = 1
+
+    PagePrixSaisie(root, iduser=session_user_id).pack(fill="both", expand=True)
     root.mainloop()

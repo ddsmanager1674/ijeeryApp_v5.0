@@ -6,7 +6,7 @@
 ║  • Thème iJeery (app_theme) appliqué — même patron que page_ArticleMouvement║
 ║  • Chargement asynchrone (thread) pour ne pas bloquer l'UI                  ║
 ║  • Treeview stylisé Mouv.Treeview / en-têtes BG_HEADER                     ║
-║  • Double-clic protégé + fenêtre de progression thémée                     ║
+║  • Double-clic protégé + ouverture directe de la saisie prix               ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -15,6 +15,7 @@ from tkinter import ttk, messagebox
 import psycopg2
 import json
 import threading
+from resource_utils import get_session_path, safe_file_read
 
 # page_prixSaisie doit rester optionnel
 try:
@@ -70,23 +71,29 @@ class PagePrixListe(ctk.CTkFrame):
     - after() pour mettre à jour le treeview dans le thread principal
     """
 
-    def __init__(self, parent, db_connector=None,
-                 initial_idarticle=None, iduser=1):
+    def __init__(self, parent, db_connector=None, db_conn=None,
+                 initial_idarticle=None, iduser=None,
+                 id_user_connecte=None, session_data=None):
         super().__init__(parent, fg_color=C.BG_PAGE)
 
         self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        self.db_connector  = db_connector
+        self.db_connector  = db_connector if db_connector is not None else db_conn
         self.code_article  = (str(initial_idarticle).zfill(10)
                               if initial_idarticle else None)
-        self.iduser        = iduser
+        self.iduser        = self._resolve_iduser(
+            parent=parent,
+            iduser=iduser,
+            session_data=session_data,
+            id_user_connecte=id_user_connecte,
+        )
 
         # Protection contre les double-clics
         self.is_opening_window = False
         self._destroyed        = False
 
-        # Mapping item_id → code_article brut
+        # Mapping item_id → (code_article brut, idunite)
         self.code_mapping = {}
 
         self._apply_tree_style()
@@ -101,6 +108,29 @@ class PagePrixListe(ctk.CTkFrame):
     def _on_destroy(self, event):
         if event.widget == self:
             self._destroyed = True
+
+    def _resolve_iduser(self, parent, iduser, session_data, id_user_connecte=None):
+        for src in (
+            iduser,
+            id_user_connecte,
+            (session_data or {}).get("user_id") if isinstance(session_data, dict) else None,
+            (session_data or {}).get("iduser") if isinstance(session_data, dict) else None,
+            getattr(parent, "id_user_connecte", None),
+            getattr(parent, "iduser", None),
+        ):
+            if src is not None:
+                try:
+                    return int(src)
+                except (TypeError, ValueError):
+                    pass
+        try:
+            session_file = get_session_path()
+            raw, _enc = safe_file_read(session_file)
+            data = json.loads(raw) if raw else {}
+            sid = data.get("user_id") or data.get("iduser")
+            return int(sid) if sid is not None else 1
+        except Exception:
+            return 1
 
     def _f(self, size=11, weight="normal"):
         return ctk.CTkFont(
@@ -281,7 +311,8 @@ class PagePrixListe(ctk.CTkFrame):
                     u.codearticle::TEXT,
                     a.designation,
                     u.designationunite,
-                    COALESCE(p.prix, 0) AS prix
+                    COALESCE(p.prix, 0) AS prix,
+                    u.idunite
                 FROM tb_unite u
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN (
@@ -356,6 +387,7 @@ class PagePrixListe(ctk.CTkFrame):
                 nom     = row[1] or ""
                 unite   = row[2] or ""
                 prix    = row[3] if row[3] is not None else 0
+                idunite = row[4]
 
                 prix_fmt  = self._fmt_prix(prix)
                 is_zero   = (float(prix) == 0) if prix else True
@@ -369,7 +401,7 @@ class PagePrixListe(ctk.CTkFrame):
                     "", "end",
                     values=(code_db, nom, unite, prix_fmt),
                     tags=(tag,))
-                self.code_mapping[item_id] = code_db
+                self.code_mapping[item_id] = (code_db, idunite)
 
             except Exception:
                 return
@@ -395,19 +427,20 @@ class PagePrixListe(ctk.CTkFrame):
         sel = self.tree.selection()
         if not sel:
             return
-        code = self.code_mapping.get(sel[0])
-        if not code:
+        mapping = self.code_mapping.get(sel[0])
+        if not mapping:
             messagebox.showwarning("Attention",
                                    "Impossible de récupérer le code article.")
             return
+        code, idunite = mapping
         self.is_opening_window = True
         try:
-            self._open_saisie(code)
+            self._open_saisie(code, idunite)
         finally:
             self.after(500, lambda: setattr(self, 'is_opening_window', False))
 
-    def _open_saisie(self, code_article):
-        """Ouvre la fenêtre de saisie prix avec progression thémée."""
+    def _open_saisie(self, code_article, idunite):
+        """Ouvre directement la fenêtre de saisie prix (sans fenêtre de progression)."""
         if PagePrixSaisie is None:
             messagebox.showerror(
                 "Erreur",
@@ -415,72 +448,27 @@ class PagePrixListe(ctk.CTkFrame):
                 "Vérifiez l'existence du fichier.")
             return
 
-        # Fenêtre de progression
-        prog_win = ctk.CTkToplevel(self)
-        prog_win.title("Chargement…")
-        prog_win.geometry("400x140")
-        prog_win.resizable(False, False)
-        prog_win.transient(self.winfo_toplevel())
-        prog_win.grab_set()
-        if _T:
-            Theme.apply_toplevel(prog_win)
+        try:
+            saisie_win = ctk.CTkToplevel(self)
+            saisie_win.title(f"Saisie Prix — {code_article}")
+            saisie_win.geometry("900x700")
+            saisie_win.transient(self.winfo_toplevel())
+            saisie_win.grab_set()
+            if _T:
+                Theme.apply_toplevel(saisie_win)
 
-        card = ctk.CTkFrame(prog_win, fg_color=C.BG_CARD,
-                            corner_radius=12,
-                            border_width=1, border_color=C.BORDER)
-        card.pack(fill="both", expand=True, padx=16, pady=16)
+            PagePrixSaisie(
+                saisie_win, self.iduser, code_article, idunite
+            ).pack(fill="both", expand=True)
 
-        ctk.CTkLabel(
-            card,
-            text=f"Chargement saisie des prix…\nArticle : {code_article}",
-            font=self._f(11),
-            text_color=C.TEXT_PRIMARY
-        ).pack(pady=(14, 10))
-
-        bar = ctk.CTkProgressBar(card, width=340,
-                                 progress_color=C.PRIMARY,
-                                 fg_color=C.BG_INPUT,
-                                 height=8, corner_radius=4)
-        bar.pack(pady=(0, 14))
-        bar.set(0)
-
-        def _load():
-            import time
-            for v in [0.2, 0.4, 0.6]:
-                prog_win.after(0, lambda val=v: bar.set(val))
-                time.sleep(0.04)
-
-            def _create():
-                try:
-                    bar.set(0.75)
-                    saisie_win = ctk.CTkToplevel(self)
-                    saisie_win.title(f"Saisie Prix — {code_article}")
-                    saisie_win.geometry("900x700")
-                    saisie_win.transient(self.winfo_toplevel())
-                    saisie_win.grab_set()
-                    if _T:
-                        Theme.apply_toplevel(saisie_win)
-
-                    bar.set(0.9)
-                    PagePrixSaisie(saisie_win, self.iduser,
-                                   code_article).pack(fill="both", expand=True)
-                    bar.set(1.0)
-
-                    saisie_win.protocol(
-                        "WM_DELETE_WINDOW",
-                        lambda: self._on_saisie_close(saisie_win))
-
-                    prog_win.after(200, lambda: self._close_toplevel(prog_win))
-
-                except Exception as err:
-                    self._close_toplevel(prog_win)
-                    messagebox.showerror("Erreur",
-                                         f"Ouverture impossible : {err}")
-                    import traceback; traceback.print_exc()
-
-            prog_win.after(0, _create)
-
-        threading.Thread(target=_load, daemon=True).start()
+            saisie_win.protocol(
+                "WM_DELETE_WINDOW",
+                lambda: self._on_saisie_close(saisie_win))
+        except Exception as err:
+            messagebox.showerror("Erreur",
+                                 f"Ouverture impossible : {err}")
+            import traceback
+            traceback.print_exc()
 
     # ── Helpers fenêtres ──────────────────────────────────────────────────────
     @staticmethod
