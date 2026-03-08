@@ -1,14 +1,19 @@
+# -*- coding: utf-8 -*-
 """
-================================================================================
-PAGE: Liste Mouvements d'Articles
-================================================================================
-Module permettant la consultation des listes de mouvements d'articles avec:
-- Navigation par type de mouvement (entrée, sortie, transfert, etc.)
-- Recherche et filtrage avancé
-- Affichage tabulaire détaillé
-- Export vers Excel
-- Statistiques et totaux
-================================================================================
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           iJeery — pages/page_liste_mouvement.py                            ║
+║           Liste des Mouvements d'Articles                                   ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  ARCHITECTURE UI                                                            ║
+║  ┌──────────────────────────────────────────────────────────────────────┐  ║
+║  │ Row 0 — Bandeau titre MIDNIGHT (h=48)                                │  ║
+║  ├────────────────┬─────────────────────────────────────────────────────┤  ║
+║  │ Col 0          │ Col 1 (weight=1)                                    │  ║
+║  │ Nav gauche     │ Row 0 — Barre recherche + Export                    │  ║
+║  │ (5 boutons)    │ Row 1 — Treeview (weight=1)                         │  ║
+║  │                │ Row 2 — Footer statistiques                         │  ║
+║  └────────────────┴─────────────────────────────────────────────────────┘  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import customtkinter as ctk
@@ -19,352 +24,407 @@ import pandas as pd
 import os
 from datetime import datetime
 from resource_utils import get_config_path, safe_file_read
+from app_theme import Colors, Fonts
+
 try:
     from EtatsPDF_Mouvements import EtatPDFMouvements
 except ImportError:
     EtatPDFMouvements = None
 
 
-# ============================================================
-# CONFIGURATION DE L'APPARENCE
-# ============================================================
-NAV_BUTTON_FG = "#034787"  # Bleu pour boutons de navigation
-NAV_BUTTON_HOVER = "#0565c9"
-ACTIVE_NAV_BG = "#268908"  # Vert pour bouton actif
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFIGURATION DES TYPES DE MOUVEMENTS
+# ══════════════════════════════════════════════════════════════════════════════
 
+TYPES_MOUVEMENT = {
+    "entree":      {"label": "📥  Entrées",              "icon": "📥"},
+    "sortie":      {"label": "📤  Sorties",              "icon": "📤"},
+    "transfert":   {"label": "🔄  Transferts",           "icon": "🔄"},
+    "consommation":{"label": "⚙️   Consommation Interne", "icon": "⚙️"},
+    "changement":  {"label": "🔁  Changement d'Article", "icon": "🔁"},
+}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE PRINCIPALE
+# ══════════════════════════════════════════════════════════════════════════════
 
 class PageListeMouvement(ctk.CTkFrame):
     """
     Page de consultation des listes de mouvements d'articles.
-    
-    Affiche différents types de mouvements:
-    - Entrées d'articles
-    - Sorties d'articles
-    - Transferts d'articles
-    - Consommation interne
-    - Changement d'articles
+    Thème iJeery — cohérent avec page_facture_liste.py, page_sortie.py, etc.
     """
-    
+
     def __init__(self, master, iduser=None):
-        """
-        Initialise la page de liste des mouvements.
-        
-        Args:
-            master: Le widget parent (généralement le content_frame de App)
-            iduser: ID de l'utilisateur connecté
-        """
-        super().__init__(master, fg_color="white")
-        
-        # Configuration de la grille principale
-        self.grid_rowconfigure(0, weight=1)
+        super().__init__(master, fg_color=Colors.BG_PAGE)
+
+        self.iduser                = iduser
+        self.type_mouvement_actif  = "entree"
+        self.data_df               = pd.DataFrame()
+        self._nav_buttons          = {}   # {key: CTkButton}
+
+        # Grille principale : row 0 bandeau titre, row 1 corps
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        
-        # Attributs de la classe
-        self.iduser = iduser
-        self.type_mouvement_actif = "entree"  # Type par défaut
-        self.data_df = pd.DataFrame()
-        
-        # Dictionnaire des types de mouvements
-        self.types_mouvement = {
-            "entree": {"label": "📥 Listes Entrées", "id": 1},
-            "sortie": {"label": "📤 Listes Sorties", "id": 2},
-            "transfert": {"label": "🔄 Listes Transfert", "id": 3},
-            "consommation": {"label": "⚙️ Listes Consommation\nInterne", "id": 4},
-            "changement": {"label": "🔁 Listes Changement\nd'article", "id": 5}
-        }
-        
-        # Initialiser l'interface utilisateur
-        self.setup_ui()
-        
-        # Charger les données initiales (entrées)
-        self.on_mouvement_button_click("entree")
-    
-    
-    # ========================================================
-    # MÉTHODES DE CONFIGURATION DE L'INTERFACE
-    # ========================================================
-    
-    def setup_ui(self):
-        """Construit l'interface utilisateur avec panneau latéral et zone de contenu."""
-        
-        # Créer un frame principal avec deux colonnes
-        main_frame = ctk.CTkFrame(self, fg_color="white")
-        main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        main_frame.grid_rowconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(1, weight=1)
-        
-        # ============================================================
-        # PANNEAU DE NAVIGATION GAUCHE
-        # ============================================================
-        self.nav_frame = ctk.CTkFrame(main_frame, fg_color="#F0F0F0", corner_radius=10, border_width=2, border_color="#CCCCCC")
-        self.nav_frame.grid(row=0, column=0, sticky="ns", padx=(0, 10), pady=0)
-        
-        # Titre du panneau de navigation
-        titre_nav = ctk.CTkLabel(
-            self.nav_frame,
-            text="📋 Types de\nMouvements",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color="#034787"
+
+        self._build_title_band()
+        self._build_body()
+
+        # Chargement initial
+        self._select_type("entree")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 1 — CONSTRUCTION UI
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_title_band(self):
+        """Bandeau titre MIDNIGHT pleine largeur (row 0)."""
+        band = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=48)
+        band.grid(row=0, column=0, sticky="ew")
+        band.grid_propagate(False)
+        band.grid_columnconfigure(1, weight=1)
+
+        # Icône + Titre dynamique
+        ctk.CTkLabel(
+            band,
+            text="📋",
+            font=Fonts.heading(18),
+            text_color=Colors.TEXT_ON_DARK,
+        ).grid(row=0, column=0, padx=(16, 6), pady=12)
+
+        self.lbl_titre = ctk.CTkLabel(
+            band,
+            text="Listes des Mouvements — Entrées",
+            font=Fonts.heading(15),
+            text_color=Colors.TEXT_ON_DARK,
+            anchor="w",
         )
-        titre_nav.pack(padx=10, pady=(15, 10), anchor="center")
-        
+        self.lbl_titre.grid(row=0, column=1, sticky="w")
+
+    def _build_body(self):
+        """Corps principal : nav gauche + contenu droit (row 1)."""
+        body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE, corner_radius=0)
+        body.grid(row=1, column=0, sticky="nsew", padx=12, pady=12)
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(1, weight=1)
+
+        self._build_nav(body)       # Col 0
+        self._build_content(body)   # Col 1
+
+    def _build_nav(self, parent):
+        """
+        Panneau de navigation gauche — 5 boutons types de mouvements.
+        Style : fond BG_CARD, bouton actif SUCCESS_DARK, inactif MIDNIGHT.
+        """
+        nav = ctk.CTkFrame(
+            parent,
+            fg_color=Colors.BG_CARD,
+            corner_radius=10,
+            border_width=1,
+            border_color=Colors.BORDER,
+            width=190,
+        )
+        nav.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        nav.grid_propagate(False)
+        nav.grid_columnconfigure(0, weight=1)
+
+        # Titre de la nav
+        ctk.CTkLabel(
+            nav,
+            text="Types de Mouvements",
+            font=Fonts.bold(11),
+            text_color=Colors.TEXT_SECONDARY,
+            anchor="center",
+        ).grid(row=0, column=0, padx=10, pady=(14, 6), sticky="ew")
+
         # Séparateur
-        separator = ctk.CTkFrame(self.nav_frame, height=2, fg_color="#CCCCCC")
-        separator.pack(fill="x", padx=10, pady=(0, 10))
-        
-        # Dictionnaire pour stocker les boutons (pour gérer l'état actif)
-        self.mouvement_buttons = {}
-        
-        # Créer les boutons pour chaque type de mouvement
-        for key, info in self.types_mouvement.items():
+        ctk.CTkFrame(nav, fg_color=Colors.BORDER, height=1, corner_radius=0).grid(
+            row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
+
+        # Boutons
+        for idx, (key, info) in enumerate(TYPES_MOUVEMENT.items()):
             btn = ctk.CTkButton(
-                self.nav_frame,
+                nav,
                 text=info["label"],
-                command=lambda k=key: self.on_mouvement_button_click(k),
-                fg_color=NAV_BUTTON_FG,
-                hover_color=NAV_BUTTON_HOVER,
+                font=Fonts.bold(11),
+                fg_color=Colors.MIDNIGHT,
+                hover_color=Colors.MIDNIGHT_LIGHT,
+                text_color=Colors.TEXT_ON_DARK,
+                anchor="w",
                 corner_radius=8,
-                height=50,
-                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                text_color="white"
+                height=40,
+                command=lambda k=key: self._select_type(k),
             )
-            btn.pack(padx=10, pady=5, fill="x")
-            self.mouvement_buttons[key] = btn
-        
-        # ============================================================
-        # PANNEAU PRINCIPAL (DROITE)
-        # ============================================================
-        content_frame = ctk.CTkFrame(main_frame, fg_color="white")
-        content_frame.grid(row=0, column=1, sticky="nsew", padx=0)
-        content_frame.grid_rowconfigure(2, weight=1)
-        content_frame.grid_columnconfigure(0, weight=1)
-        
-        # --- Titre de la page ---
-        self.titre_page = ctk.CTkLabel(
-            content_frame,
-            text="📥 Listes Entrées d'Articles",
-            font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
-            text_color="#034787"
+            btn.grid(row=idx + 2, column=0, padx=10, pady=3, sticky="ew")
+            self._nav_buttons[key] = btn
+
+        # Remplissage vertical
+        nav.grid_rowconfigure(len(TYPES_MOUVEMENT) + 2, weight=1)
+
+    def _build_content(self, parent):
+        """Zone de contenu droite : barre de recherche + treeview + footer."""
+        content = ctk.CTkFrame(parent, fg_color=Colors.BG_PAGE, corner_radius=0)
+        content.grid(row=0, column=1, sticky="nsew")
+        content.grid_rowconfigure(1, weight=1)
+        content.grid_columnconfigure(0, weight=1)
+
+        # ── Barre recherche + export ──────────────────────────────────────────
+        self._build_search_bar(content)   # row 0
+
+        # ── Treeview ──────────────────────────────────────────────────────────
+        self._build_treeview(content)     # row 1
+
+        # ── Footer statistiques ───────────────────────────────────────────────
+        self._build_footer(content)       # row 2
+
+    def _build_search_bar(self, parent):
+        """Barre horizontale : recherche + boutons Chercher / Réinitialiser / Export."""
+        bar = ctk.CTkFrame(
+            parent,
+            fg_color=Colors.BG_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=Colors.BORDER,
+            height=52,
         )
-        self.titre_page.grid(row=0, column=0, sticky="w", padx=10, pady=(10, 5))
-        
-        # --- Panneau d'en-tête (recherche, filtre, export) ---
-        self.header_frame = ctk.CTkFrame(content_frame, fg_color="#F5F5F5", corner_radius=8, border_width=1, border_color="#E0E0E0")
-        self.header_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(5, 10))
-        self.header_frame.grid_columnconfigure(1, weight=1)
-        
-        # Label recherche
-        ctk.CTkLabel(self.header_frame, text="🔍 Recherche:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        
-        # Entry recherche
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        bar.grid_propagate(False)
+        bar.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            bar,
+            text="🔍",
+            font=Fonts.body(13),
+            text_color=Colors.TEXT_SECONDARY,
+        ).grid(row=0, column=0, padx=(12, 4), pady=10)
+
         self.search_entry = ctk.CTkEntry(
-            self.header_frame,
-            placeholder_text="Entrez un critère de recherche...",
-            width=250
+            bar,
+            placeholder_text="Rechercher…",
+            fg_color=Colors.BG_INPUT,
+            border_color=Colors.BORDER,
+            height=30,
+            corner_radius=8,
+            font=Fonts.input(12),
         )
-        self.search_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        self.search_entry.grid(row=0, column=1, padx=(0, 8), pady=10, sticky="ew")
         self.search_entry.bind("<KeyRelease>", lambda e: self.search_data())
-        
-        # Bouton rechercher
-        btn_search = ctk.CTkButton(
-            self.header_frame,
+
+        # Bouton Chercher
+        ctk.CTkButton(
+            bar,
             text="Chercher",
+            font=Fonts.button(11),
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            height=30, corner_radius=8, width=90,
             command=self.search_data,
-            fg_color="#1f538d",
-            hover_color="#14375e",
-            width=100
-        )
-        btn_search.grid(row=0, column=2, padx=5, pady=10)
-        
-        # Bouton réinitialiser
-        btn_reset = ctk.CTkButton(
-            self.header_frame,
-            text="Réinitialiser",
+        ).grid(row=0, column=2, padx=(0, 6), pady=10)
+
+        # Bouton Réinitialiser
+        ctk.CTkButton(
+            bar,
+            text="↺  Tout",
+            font=Fonts.button(11),
+            fg_color=Colors.MIDNIGHT_LIGHT,
+            hover_color=Colors.MIDNIGHT,
+            text_color=Colors.TEXT_ON_DARK,
+            height=30, corner_radius=8, width=80,
             command=self.reset_search,
-            fg_color="#666666",
-            hover_color="#444444",
-            width=100
-        )
-        btn_reset.grid(row=0, column=3, padx=5, pady=10)
-        
-        # Bouton export Excel
-        btn_export = ctk.CTkButton(
-            self.header_frame,
-            text="📊 Export Excel",
+        ).grid(row=0, column=3, padx=(0, 6), pady=10)
+
+        # Bouton Export Excel
+        ctk.CTkButton(
+            bar,
+            text="📊  Excel",
+            font=Fonts.button(11),
+            fg_color=Colors.SUCCESS_DARK,
+            hover_color=Colors.SUCCESS,
+            height=30, corner_radius=8, width=90,
             command=self.export_to_excel,
-            fg_color="#2e7d32",
-            hover_color="#1b5e20",
-            width=130
+        ).grid(row=0, column=4, padx=(0, 12), pady=10)
+
+    def _build_treeview(self, parent):
+        """Treeview avec style thème iJeery (en-têtes MIDNIGHT, lignes alternées)."""
+        tree_card = ctk.CTkFrame(
+            parent,
+            fg_color=Colors.BG_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=Colors.BORDER,
         )
-        btn_export.grid(row=0, column=4, padx=5, pady=10)
-        
-        # --- Tableau de données ---
-        self.tree_frame = ctk.CTkFrame(content_frame)
-        self.tree_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
-        self.tree_frame.grid_rowconfigure(0, weight=1)
-        self.tree_frame.grid_columnconfigure(0, weight=1)
-        
-        # Configuration du style du Treeview
+        tree_card.grid(row=1, column=0, sticky="nsew")
+        tree_card.grid_rowconfigure(0, weight=1)
+        tree_card.grid_columnconfigure(0, weight=1)
+
+        # Style Treeview isolé "Mouvement.Treeview"
         style = ttk.Style()
-        style.configure("Treeview",
-                       background="#FFFFFF",
-                       foreground="#000000",
-                       rowheight=22,
-                       fieldbackground="#FFFFFF",
-                       borderwidth=0,
-                       font=('Segoe UI', 9))
-        
-        style.configure("Treeview.Heading",
-                       background="#E8E8E8",
-                       foreground="#000000",
-                       font=('Segoe UI', 9, 'bold'))
-        
-        style.map('Treeview', background=[('selected', '#A9A9A9')], foreground=[('selected', '#000000')])
-        
-        # Colonnes du treeview - Configuration par défaut (seront reconfigurées selon le type)
-        columns = ("Date", "Référence", "Fournisseur", "Articles", "Montant Total", "Statut", "Utilisateur")
-        self.tree = ttk.Treeview(self.tree_frame, columns=columns, show="headings", height=15)
-        
-        # Configuration des en-têtes
-        for col in columns:
-            self.tree.heading(col, text=col)
-        
-        # Configuration des largeurs par défaut (sera personnalisée par type de mouvement)
-        self.tree.column("Date", width=100, anchor="center")
-        self.tree.column("Référence", width=120, anchor="center")
-        self.tree.column("Fournisseur", width=120, anchor="w")
-        self.tree.column("Articles", width=100, anchor="center")
-        self.tree.column("Montant Total", width=120, anchor="e")
-        self.tree.column("Statut", width=80, anchor="center")
-        self.tree.column("Utilisateur", width=120, anchor="w")
-        
-        # Tags pour les couleurs alternées
-        self.tree.tag_configure('even', background='#FFFFFF', foreground='black')
-        self.tree.tag_configure('odd', background='#E6EFF8', foreground='black')
-        
-        # Scrollbars
-        scrollbar_y = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.tree.yview)
-        scrollbar_x = ttk.Scrollbar(self.tree_frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
-        
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scrollbar_y.grid(row=0, column=1, sticky="ns")
-        scrollbar_x.grid(row=1, column=0, sticky="ew")
-        # Double-clic sur une ligne -> afficher les détails selon le type de mouvement
-        self.tree.bind("<Double-1>", lambda e: self.on_row_double_click())
-        
-        # --- Footer (statistiques) ---
-        self.footer_frame = ctk.CTkFrame(content_frame, fg_color="#F0F0F0", corner_radius=8, border_width=1, border_color="#E0E0E0")
-        self.footer_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(10, 0))
-        self.footer_frame.grid_columnconfigure(1, weight=1)
-        
-        # Statistiques
-        ctk.CTkLabel(self.footer_frame, text="📊 Statistiques:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        
-        self.stats_label = ctk.CTkLabel(
-            self.footer_frame,
-            text="Total lignes: 0 | Quantité totale: 0",
-            font=ctk.CTkFont(size=11),
-            text_color="#555555"
+        style.theme_use("clam")
+
+        style.configure(
+            "Mouvement.Treeview",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD,
+            rowheight=24,
+            font=("Roboto", 10),
+            borderwidth=0,
         )
-        self.stats_label.grid(row=0, column=1, padx=10, pady=10, sticky="w")
-    
-    
-    # ========================================================
-    # MÉTHODES DE GESTION DES ÉVÉNEMENTS
-    # ========================================================
-    
-    def on_mouvement_button_click(self, type_mouvement):
+        style.configure(
+            "Mouvement.Treeview.Heading",
+            background=Colors.BG_HEADER,
+            foreground=Colors.TEXT_ON_DARK,
+            font=("Roboto", 10, "bold"),
+            relief="flat",
+            padding=(6, 6),
+        )
+        style.map(
+            "Mouvement.Treeview",
+            background=[("selected", Colors.PRIMARY_LIGHT)],
+            foreground=[("selected", Colors.TEXT_PRIMARY)],
+        )
+        style.map(
+            "Mouvement.Treeview.Heading",
+            background=[("active", Colors.MIDNIGHT_LIGHT)],
+        )
+
+        # Treeview
+        cols_default = ("Date", "Référence", "Fournisseur", "Articles",
+                        "Montant Total", "Statut", "Utilisateur")
+        self.tree = ttk.Treeview(
+            tree_card,
+            columns=cols_default,
+            show="headings",
+            style="Mouvement.Treeview",
+        )
+        self.tree.tag_configure("row_white", background=Colors.BG_CARD,
+                                foreground=Colors.TEXT_PRIMARY)
+        self.tree.tag_configure("row_alt",   background=Colors.BG_ROW_ALT,
+                                foreground=Colors.TEXT_PRIMARY)
+
+        for col in cols_default:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=120, anchor="center")
+
+        # Scrollbars via CTkScrollbar (thème cohérent)
+        sb_y = ctk.CTkScrollbar(tree_card, command=self.tree.yview)
+        sb_x = ctk.CTkScrollbar(tree_card, orientation="horizontal",
+                                 command=self.tree.xview)
+        self.tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        sb_y.grid(row=0, column=1, sticky="ns")
+        sb_x.grid(row=1, column=0, sticky="ew")
+
+        # Double-clic → détails
+        self.tree.bind("<Double-1>", lambda e: self.on_row_double_click())
+
+    def _build_footer(self, parent):
+        """Footer statistiques (row 2)."""
+        footer = ctk.CTkFrame(
+            parent,
+            fg_color=Colors.BG_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=Colors.BORDER,
+            height=38,
+        )
+        footer.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        footer.grid_propagate(False)
+        footer.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            footer,
+            text="📊  Statistiques :",
+            font=Fonts.bold(11),
+            text_color=Colors.TEXT_SECONDARY,
+        ).grid(row=0, column=0, padx=(12, 6), pady=8)
+
+        self.stats_label = ctk.CTkLabel(
+            footer,
+            text="Total : 0 ligne",
+            font=Fonts.body(11),
+            text_color=Colors.TEXT_SECONDARY,
+            anchor="w",
+        )
+        self.stats_label.grid(row=0, column=1, sticky="w", pady=8)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 2 — NAVIGATION & CHARGEMENT
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _select_type(self, key: str):
         """
-        Gère le clic sur un bouton de type de mouvement.
-        
-        Args:
-            type_mouvement: La clé du type de mouvement (entree, sortie, etc.)
+        Active un type de mouvement :
+          - Met à jour l'état visuel des boutons nav
+          - Met à jour le titre
+          - Recharge les données
         """
-        # Réinitialiser l'apparence de tous les boutons
-        for key, btn in self.mouvement_buttons.items():
-            if key == type_mouvement:
-                btn.configure(fg_color=ACTIVE_NAV_BG, hover_color="#1b5e20")
+        self.type_mouvement_actif = key
+
+        # Mettre à jour les boutons
+        for k, btn in self._nav_buttons.items():
+            if k == key:
+                btn.configure(fg_color=Colors.SUCCESS_DARK, hover_color=Colors.SUCCESS)
             else:
-                btn.configure(fg_color=NAV_BUTTON_FG, hover_color=NAV_BUTTON_HOVER)
-        
-        # Définir le type actif
-        self.type_mouvement_actif = type_mouvement
-        
+                btn.configure(fg_color=Colors.MIDNIGHT, hover_color=Colors.MIDNIGHT_LIGHT)
+
         # Mettre à jour le titre
-        titre = self.types_mouvement[type_mouvement]["label"]
-        self.titre_page.configure(text=titre)
-        
-        # Réinitialiser la recherche et charger les données
+        icons = {
+            "entree": "Entrées d'Articles",
+            "sortie": "Sorties d'Articles",
+            "transfert": "Transferts d'Articles",
+            "consommation": "Consommation Interne",
+            "changement": "Changement d'Articles",
+        }
+        self.lbl_titre.configure(
+            text=f"Listes des Mouvements — {icons.get(key, key)}"
+        )
+
+        # Réinitialiser la recherche et recharger
         self.search_entry.delete(0, "end")
-        self.load_mouvement_data(type_mouvement)
-    
-    
+        self.load_mouvement_data(key)
+
+    # Alias de compatibilité
+    def on_mouvement_button_click(self, type_mouvement):
+        self._select_type(type_mouvement)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 3 — BASE DE DONNÉES
+    # ══════════════════════════════════════════════════════════════════════════
+
     def connect_db(self):
-        """
-        Établit la connexion à la base de données PostgreSQL.
-        
-        Returns:
-            Une connexion psycopg2 ou None en cas d'erreur
-        """
+        """Ouvre une connexion PostgreSQL depuis config.json."""
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
                 db_config = config['database']
-            
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']
-            )
-            return conn
+            return psycopg2.connect(**db_config)
         except Exception as e:
-            messagebox.showerror("Erreur de connexion", f"Impossible de se connecter à la BDD: {str(e)}")
+            messagebox.showerror("Erreur de connexion",
+                                 f"Impossible de se connecter à la BDD: {e}")
             return None
-    
-    
-    def load_mouvement_data(self, type_mouvement):
-        """
-        Charge et affiche les données des mouvements dans le tableau.
-        
-        Args:
-            type_mouvement: Le type de mouvement à charger
-        """
+
+    def load_mouvement_data(self, type_mouvement: str):
+        """Charge les données du type de mouvement dans le treeview."""
         conn = self.connect_db()
         if not conn:
             return
-        
         try:
-            # Déterminer la table et les colonnes à utiliser selon le type
             query = self.get_query_for_mouvement(type_mouvement)
-            
             if query:
                 self.data_df = pd.read_sql(query, conn)
                 self.display_data_in_tree(self.data_df)
                 self.update_statistics()
             else:
-                messagebox.showwarning("Avertissement", f"Aucune requête définie pour le type: {type_mouvement}")
                 self.clear_tree()
-        
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors du chargement des données: {str(e)}")
+            messagebox.showerror("Erreur", f"Erreur chargement données: {e}")
         finally:
-            if conn:
-                conn.close()
-    
-    
-    def get_query_for_mouvement(self, type_mouvement):
-        """
-        Retourne la requête SQL appropriée selon le type de mouvement.
-        
-        Args:
-            type_mouvement: Le type de mouvement
-            
-        Returns:
-            La requête SQL ou None
-        """
+            conn.close()
+
+    def get_query_for_mouvement(self, type_mouvement: str):
+        """Retourne la requête SQL selon le type de mouvement."""
         queries = {
             "entree": """
                 SELECT
@@ -372,28 +432,27 @@ class PageListeMouvement(ctk.CTkFrame):
                     c.refcom as "Référence",
                     COALESCE(f.nomfrs, 'N/A') as "Fournisseur",
                     COUNT(DISTINCT cd.idarticle) as "Articles",
-                    CASE 
+                    CASE
                         WHEN COALESCE(SUM(CAST(cd.total AS NUMERIC)), 0) = 0 THEN '-'
                         ELSE CAST(COALESCE(SUM(CAST(cd.total AS NUMERIC)), 0) AS TEXT)
                     END as "Montant Total",
-                    CASE 
+                    CASE
                         WHEN EXISTS (
-                            SELECT 1 FROM tb_livraisonfrs lf 
+                            SELECT 1 FROM tb_livraisonfrs lf
                             WHERE lf.idcom = c.idcom AND lf.deleted = 0
                         ) THEN '✅✅ Livrée & Reçue'
                         WHEN (
-                            SELECT COUNT(*) FROM tb_commandedetail 
+                            SELECT COUNT(*) FROM tb_commandedetail
                             WHERE idcom = c.idcom AND COALESCE(qtlivre, 0) > 0
                         ) = (
-                            SELECT COUNT(*) FROM tb_commandedetail 
+                            SELECT COUNT(*) FROM tb_commandedetail
                             WHERE idcom = c.idcom
-                        ) 
-                        AND (
-                            SELECT COUNT(*) FROM tb_commandedetail 
+                        ) AND (
+                            SELECT COUNT(*) FROM tb_commandedetail
                             WHERE idcom = c.idcom
                         ) > 0 THEN '✅ Livré Complet'
                         WHEN EXISTS (
-                            SELECT 1 FROM tb_commandedetail 
+                            SELECT 1 FROM tb_commandedetail
                             WHERE idcom = c.idcom AND COALESCE(qtlivre, 0) > 0
                         ) THEN '⚠️ Livré Partiel'
                         ELSE '⏳ En Attente'
@@ -432,7 +491,8 @@ class PageListeMouvement(ctk.CTkFrame):
                 LEFT JOIN tb_transfertdetail td ON t.idtransfert = td.idtransfert
                 LEFT JOIN tb_users u ON t.iduser = u.iduser
                 WHERE t.deleted = 0
-                GROUP BY t.idtransfert, t.dateregistre, t.reftransfert, t.description, u.prenomuser, u.nomuser
+                GROUP BY t.idtransfert, t.dateregistre, t.reftransfert, t.description,
+                         u.prenomuser, u.nomuser
                 ORDER BY t.dateregistre DESC
             """,
             "consommation": """
@@ -446,7 +506,8 @@ class PageListeMouvement(ctk.CTkFrame):
                 FROM tb_consommationinterne ci
                 LEFT JOIN tb_consommationinterne_details cid ON ci.id = cid.idconsommation
                 LEFT JOIN tb_users u ON ci.iduser = u.iduser
-                GROUP BY ci.id, ci.dateregistre, ci.refconsommation, ci.observation, u.prenomuser, u.nomuser
+                GROUP BY ci.id, ci.dateregistre, ci.refconsommation, ci.observation,
+                         u.prenomuser, u.nomuser
                 ORDER BY ci.dateregistre DESC
             """,
             "changement": """
@@ -458,505 +519,479 @@ class PageListeMouvement(ctk.CTkFrame):
                 FROM tb_changement ch
                 LEFT JOIN tb_users u ON ch.iduser = u.iduser
                 ORDER BY ch.datechg DESC
-            """
+            """,
         }
-        
         return queries.get(type_mouvement)
-    
-    
-    def display_data_in_tree(self, df):
-        """
-        Affiche les données du DataFrame dans le tableau.
-        
-        Args:
-            df: Le DataFrame pandas contenant les données
-        """
-        # Vider le tableau
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 4 — AFFICHAGE TREEVIEW
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def display_data_in_tree(self, df: pd.DataFrame):
+        """Reconfigure les colonnes et remplit le treeview depuis un DataFrame."""
         self.clear_tree()
 
-        # Reconfigurer les colonnes du Treeview pour correspondre au DataFrame
-        try:
-            cols = list(df.columns)
-        except Exception:
-            cols = ["Date", "Référence", "Fournisseur", "Articles", "Montant Total", "Statut", "Utilisateur"]
+        if df is None or df.empty:
+            return
 
+        cols = list(df.columns)
         self.tree.configure(columns=cols)
+
         for col in cols:
             self.tree.heading(col, text=col)
-            # Configuration des largeurs selon le type de colonne
-            if col in ["Montant Total", "Articles", "Nombre d'articles"]:
-                self.tree.column(col, width=100, anchor="e")
-            elif col in ["Date", "Statut"]:
-                self.tree.column(col, width=100, anchor="center")
+            # Largeur adaptée par type de colonne
+            if col in ("Montant Total", "Articles", "Nombre d'articles"):
+                self.tree.column(col, width=110, anchor="e",   minwidth=80)
+            elif col in ("Date", "Statut"):
+                self.tree.column(col, width=105, anchor="center", minwidth=80)
             elif col == "Référence":
-                self.tree.column(col, width=120, anchor="center")
+                self.tree.column(col, width=130, anchor="center", minwidth=90)
+            elif col == "Utilisateur":
+                self.tree.column(col, width=140, anchor="w",   minwidth=100)
             else:
-                self.tree.column(col, width=140, anchor="w")
+                self.tree.column(col, width=150, anchor="w",   minwidth=100)
 
-        # Insérer les nouvelles lignes
         for idx, row in df.iterrows():
-            tag = 'even' if idx % 2 == 0 else 'odd'
-            values = tuple(row)
-            self.tree.insert('', 'end', values=values, tags=(tag,))
-    
-    
+            tag = "row_white" if idx % 2 == 0 else "row_alt"
+            self.tree.insert("", "end", values=tuple(row), tags=(tag,))
+
     def clear_tree(self):
-        """Vide le tableau de toutes les lignes."""
+        """Vide le treeview."""
         for item in self.tree.get_children():
             self.tree.delete(item)
-    
-    
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 5 — RECHERCHE & STATISTIQUES
+    # ══════════════════════════════════════════════════════════════════════════
+
     def search_data(self):
-        """Effectue une recherche en fonction du texte saisi."""
-        search_term = self.search_entry.get().strip().lower()
-        
-        if not search_term:
-            self.load_mouvement_data(self.type_mouvement_actif)
+        """Filtre le DataFrame sur tous les champs selon le texte de recherche."""
+        term = self.search_entry.get().strip().lower()
+        if not term:
+            self.display_data_in_tree(self.data_df)
+            self.update_statistics()
             return
-        
-        # Filtrer le DataFrame
-        filtered_df = self.data_df[
-            self.data_df.astype(str).apply(lambda x: x.str.contains(search_term, case=False)).any(axis=1)
+
+        filtered = self.data_df[
+            self.data_df.astype(str)
+                        .apply(lambda x: x.str.contains(term, case=False, na=False))
+                        .any(axis=1)
         ]
-        
-        self.display_data_in_tree(filtered_df)
-        self.update_statistics(filtered_df)
-    
-    
+        self.display_data_in_tree(filtered)
+        self.update_statistics(filtered)
+
     def reset_search(self):
-        """Réinitialise la recherche et affiche toutes les données."""
+        """Réinitialise la recherche."""
         self.search_entry.delete(0, "end")
         self.load_mouvement_data(self.type_mouvement_actif)
-    
-    
-    def update_statistics(self, df=None):
-        """
-        Met à jour les statistiques affichées dans le footer.
-        
-        Args:
-            df: Le DataFrame à utiliser (par défaut, self.data_df)
-        """
+
+    def update_statistics(self, df: pd.DataFrame = None):
+        """Met à jour le label de statistiques dans le footer."""
         if df is None:
             df = self.data_df
-        
-        if df.empty:
-            self.stats_label.configure(text="Total lignes: 0")
+
+        if df is None or df.empty:
+            self.stats_label.configure(text="Total : 0 ligne")
             return
-        
-        total_lignes = len(df)
-        
-        # Afficher statistiques selon le type de mouvement
-        type_mouvement = self.type_mouvement_actif
-        
-        # Chercher une colonne de montant/total selon le type
-        total_value = 0
-        if type_mouvement == "entree" and "Montant Total" in df.columns:
+
+        n = len(df)
+
+        # Montant total si disponible
+        if "Montant Total" in df.columns:
             try:
-                total_value = df["Montant Total"].sum()
+                total = pd.to_numeric(df["Montant Total"], errors="coerce").sum()
                 self.stats_label.configure(
-                    text=f"Total lignes: {total_lignes} | Montant total: {total_value:.2f}"
+                    text=f"Total : {n} ligne(s)   |   Montant total : {total:,.0f} Ar"
                 )
-            except:
-                self.stats_label.configure(text=f"Total lignes: {total_lignes}")
-        else:
-            # Pour les autres types (sortie, consommation, changement, transfert)
-            self.stats_label.configure(text=f"Total lignes: {total_lignes}")
-    
-    
+                return
+            except Exception:
+                pass
+
+        self.stats_label.configure(text=f"Total : {n} ligne(s)")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 6 — EXPORT EXCEL
+    # ══════════════════════════════════════════════════════════════════════════
+
     def export_to_excel(self):
-        """Exporte les données actuelles au format Excel."""
-        if self.data_df.empty:
-            messagebox.showwarning("Avertissement", "Aucune donnée à exporter.")
+        """Exporte les données affichées vers un fichier Excel sur le Bureau."""
+        if self.data_df is None or self.data_df.empty:
+            messagebox.showwarning("Export", "Aucune donnée à exporter.")
             return
-        
         try:
-            # Créer le nom du fichier
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"mouvements_{self.type_mouvement_actif}_{timestamp}.xlsx"
-            
-            # Exporter vers Excel
-            self.data_df.to_excel(filename, index=False, sheet_name="Mouvements")
-            
-            messagebox.showinfo("Succès", f"Fichier exporté: {filename}")
-        
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de l'export: {str(e)}")
+            ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"mouvements_{self.type_mouvement_actif}_{ts}.xlsx"
+            desktop  = os.path.join(os.path.expanduser("~"), "Desktop")
+            path     = os.path.join(desktop if os.path.isdir(desktop) else ".", filename)
 
-
-    # ========================================================
-    # DÉTAILS LIGNE (DOUBLE-CLIC)
-    # ========================================================
-    
-    def _imprimer_pdf(self, reference, type_mouvement):
-        """
-        Imprime un PDF pour le mouvement sélectionné.
-        
-        Args:
-            reference: Référence du mouvement
-            type_mouvement: Type de mouvement (entree, sortie, etc.)
-        """
-        if not EtatPDFMouvements:
-            messagebox.showerror("Erreur", "Le module EtatsPDF_Mouvements n'est pas disponible.\nVérifiez que le fichier existe.")
-            return
-        
-        try:
-            # Demander le chemin de sauvegarde
-            filetypes = [("PDF files", "*.pdf"), ("All files", "*.*")]
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".pdf",
-                filetypes=filetypes,
-                initialfile=f"Bon_{type_mouvement}_{reference}.pdf"
-            )
-            
-            if not file_path:
-                return  # L'utilisateur a annulé
-            
-            # Générer le PDF
-            etat_gen = EtatPDFMouvements()
-            success = etat_gen.generer_etat(type_mouvement, reference, file_path)
-            etat_gen.close_db()
-            
-            if success:
-                messagebox.showinfo("Succès", f"PDF généré avec succès:\n{file_path}")
-            else:
-                messagebox.showerror("Erreur", f"Erreur lors de la génération du PDF pour {reference}")
-        
+            self.data_df.to_excel(path, index=False, sheet_name="Mouvements")
+            messagebox.showinfo("Export Excel", f"Fichier exporté :\n{path}")
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur lors de l'impression: {str(e)}")
-    
+            messagebox.showerror("Erreur Export", f"Erreur lors de l'export : {e}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 7 — DOUBLE-CLIC ET FENÊTRE DÉTAILS
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def on_row_double_click(self):
+        """Ouvre la fenêtre de détails pour la ligne sélectionnée."""
         selection = self.tree.selection()
         if not selection:
             return
-        item = self.tree.item(selection[0])
-        values = item.get('values', [])
-        # Trouver la colonne 'Référence' si présente
-        ref = None
+        values = self.tree.item(selection[0]).get("values", [])
+        ref = self._extract_ref(values)
+        if not ref:
+            return
         try:
-            cols = list(self.tree['columns'])
-            if 'Référence' in cols:
-                idx = cols.index('Référence')
-                if idx < len(values):
-                    ref = values[idx]
-            else:
-                # fallback: 3ème colonne
-                if len(values) >= 3:
-                    ref = values[2]
-        except Exception:
-            if len(values) >= 3:
-                ref = values[2]
-
-        # Ouvrir la fenêtre de détails selon le type de mouvement
-        try:
-            if self.type_mouvement_actif == 'entree':
-                self.show_commande_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'sortie':
-                self.show_sortie_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'transfert':
-                self.show_transfert_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'consommation':
-                self.show_consommation_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'changement':
-                self.show_changement_details_by_ref(ref)
+            dispatch = {
+                "entree":       self.show_commande_details_by_ref,
+                "sortie":       self.show_sortie_details_by_ref,
+                "transfert":    self.show_transfert_details_by_ref,
+                "consommation": self.show_consommation_details_by_ref,
+                "changement":   self.show_changement_details_by_ref,
+            }
+            dispatch[self.type_mouvement_actif](ref)
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur ouverture détails: {e}")
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir les détails : {e}")
 
-    def _open_details_window(self, title, columns, rows, reference=None, type_mouvement=None):
+    def _extract_ref(self, values) -> str | None:
+        """Extrait la valeur de la colonne 'Référence' depuis les values d'une ligne."""
+        try:
+            cols = list(self.tree["columns"])
+            if "Référence" in cols:
+                idx = cols.index("Référence")
+                if idx < len(values):
+                    return str(values[idx])
+        except Exception:
+            pass
+        return str(values[1]) if len(values) >= 2 else None
+
+    def _open_details_window(self, title: str, columns: tuple,
+                             rows: list, reference: str = None,
+                             type_mouvement: str = None):
+        """
+        Ouvre une fenêtre modale avec un treeview des détails.
+        Boutons : Imprimer PDF (si disponible) + Fermer.
+        """
         win = ctk.CTkToplevel(self)
         win.title(title)
-        win.geometry('900x600')
-        
-        # Frame principale
-        main_frame = ctk.CTkFrame(win)
-        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
-        main_frame.grid_rowconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(0, weight=1)
-        
-        # Frame pour le tableau
-        frame = ctk.CTkFrame(main_frame)
-        frame.grid(row=0, column=0, sticky='nsew', padx=0, pady=(0, 10))
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
+        win.geometry("960x520")
+        win.grab_set()
 
-        tree = ttk.Treeview(frame, columns=columns, show='headings')
-        tree.tag_configure('even', background='#FFFFFF', foreground='black')
-        tree.tag_configure('odd', background='#E6EFF8', foreground='black')
+        # Bandeau titre
+        band = ctk.CTkFrame(win, fg_color=Colors.MIDNIGHT, corner_radius=0, height=44)
+        band.pack(fill="x")
+        band.pack_propagate(False)
+        ctk.CTkLabel(
+            band,
+            text=f"  🔍  {title}",
+            font=Fonts.heading(13),
+            text_color=Colors.TEXT_ON_DARK,
+            anchor="w",
+        ).pack(side="left", padx=12, pady=10)
+
+        # Corps
+        body = ctk.CTkFrame(win, fg_color=Colors.BG_PAGE, corner_radius=0)
+        body.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(0, weight=1)
+
+        # Card treeview
+        card = ctk.CTkFrame(body, fg_color=Colors.BG_CARD, corner_radius=8,
+                            border_width=1, border_color=Colors.BORDER)
+        card.grid(row=0, column=0, sticky="nsew")
+        card.grid_rowconfigure(0, weight=1)
+        card.grid_columnconfigure(0, weight=1)
+
+        tree = ttk.Treeview(card, columns=columns, show="headings",
+                            style="Mouvement.Treeview")
+        tree.tag_configure("row_white", background=Colors.BG_CARD,
+                           foreground=Colors.TEXT_PRIMARY)
+        tree.tag_configure("row_alt",   background=Colors.BG_ROW_ALT,
+                           foreground=Colors.TEXT_PRIMARY)
+
         for col in columns:
             tree.heading(col, text=col)
-            tree.column(col, width=120)
-        ysb = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
-        xsb = ttk.Scrollbar(frame, orient='horizontal', command=tree.xview)
-        tree.configure(yscrollcommand=ysb.set, xscrollcommand=xsb.set)
-        tree.grid(row=0, column=0, sticky='nsew')
-        ysb.grid(row=0, column=1, sticky='ns')
-        xsb.grid(row=1, column=0, sticky='ew')
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
+            tree.column(col, width=130, anchor="w")
+
+        sb_y = ctk.CTkScrollbar(card, command=tree.yview)
+        sb_x = ctk.CTkScrollbar(card, orientation="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+
+        tree.grid(row=0, column=0, sticky="nsew")
+        sb_y.grid(row=0, column=1, sticky="ns")
+        sb_x.grid(row=1, column=0, sticky="ew")
 
         for idx, r in enumerate(rows):
-            tag = 'even' if idx % 2 == 0 else 'odd'
-            tree.insert('', 'end', values=r, tags=(tag,))
-        
-        # Frame pour les boutons (en bas)
-        button_frame = ctk.CTkFrame(main_frame, fg_color="#F5F5F5")
-        button_frame.grid(row=1, column=0, sticky='ew', padx=0, pady=0)
-        button_frame.grid_columnconfigure(1, weight=1)
-        
-        # Bouton Fermer
-        btn_fermer = ctk.CTkButton(
-            button_frame,
-            text="Fermer",
-            command=win.destroy,
-            fg_color="#666666",
-            hover_color="#444444",
-            width=100
-        )
-        btn_fermer.pack(side='right', padx=5, pady=5)
-        
-        # Bouton Imprimer PDF
-        if reference and type_mouvement:
-            btn_imprimer = ctk.CTkButton(
-                button_frame,
-                text="📄 Imprimer PDF",
-                command=lambda: self._imprimer_pdf(reference, type_mouvement),
-                fg_color="#2e7d32",
-                hover_color="#1b5e20",
-                width=130
-            )
-            btn_imprimer.pack(side='right', padx=5, pady=5)
-    
-    def on_row_double_click(self):
-        """Gère le double-clic sur une ligne du tableau."""
-        selection = self.tree.selection()
-        if not selection:
-            return
-        item = self.tree.item(selection[0])
-        values = item.get('values', [])
-        # Trouver la colonne 'Référence' si présente
-        ref = None
-        try:
-            cols = list(self.tree['columns'])
-            if 'Référence' in cols:
-                idx = cols.index('Référence')
-                if idx < len(values):
-                    ref = values[idx]
-            else:
-                # fallback: 3ème colonne
-                if len(values) >= 3:
-                    ref = values[2]
-        except Exception:
-            if len(values) >= 3:
-                ref = values[2]
+            tag = "row_white" if idx % 2 == 0 else "row_alt"
+            tree.insert("", "end", values=r, tags=(tag,))
 
-        # Ouvrir la fenêtre de détails selon le type de mouvement
-        try:
-            if self.type_mouvement_actif == 'entree':
-                self.show_commande_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'sortie':
-                self.show_sortie_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'transfert':
-                self.show_transfert_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'consommation':
-                self.show_consommation_details_by_ref(ref)
-            elif self.type_mouvement_actif == 'changement':
-                self.show_changement_details_by_ref(ref)
-        except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur ouverture détails: {e}")
+        # Barre d'actions
+        actions = ctk.CTkFrame(win, fg_color=Colors.BG_CARD, corner_radius=0, height=52)
+        actions.pack(fill="x", padx=10, pady=10)
+        actions.pack_propagate(False)
+
+        ctk.CTkButton(
+            actions,
+            text="✖  Fermer",
+            font=Fonts.button(11),
+            fg_color=Colors.MIDNIGHT_LIGHT,
+            hover_color=Colors.MIDNIGHT,
+            text_color=Colors.TEXT_ON_DARK,
+            height=32, corner_radius=8, width=100,
+            command=win.destroy,
+        ).pack(side="right", padx=(6, 12), pady=10)
+
+        if reference and type_mouvement and EtatPDFMouvements:
+            ctk.CTkButton(
+                actions,
+                text="🖨  Imprimer PDF",
+                font=Fonts.button(11),
+                fg_color=Colors.PREMIUM,
+                hover_color=Colors.PREMIUM_DARK,
+                height=32, corner_radius=8, width=130,
+                command=lambda: self._imprimer_pdf(reference, type_mouvement),
+            ).pack(side="right", padx=6, pady=10)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 8 — MÉTHODES DÉTAILS PAR TYPE
+    # ══════════════════════════════════════════════════════════════════════════
 
     def show_commande_details_by_ref(self, refcom):
-        """Affiche les détails d'une entrée avec colonnes: Code Article, Désignation, Unité, Qté commandé, Qté livrés, Montant."""
         if not refcom:
-            messagebox.showwarning('Attention', 'Référence commande introuvable')
             return
         conn = self.connect_db()
-        if not conn: return
+        if not conn:
+            return
         try:
             cur = conn.cursor()
             cur.execute("SELECT idcom FROM tb_commande WHERE refcom = %s LIMIT 1", (refcom,))
             row = cur.fetchone()
             if not row:
-                messagebox.showinfo('Info', 'Commande non trouvée')
+                messagebox.showinfo("Info", "Commande introuvable.")
                 return
             idcom = row[0]
-
-            # Détails commande avec colonnes demandées - codearticle depuis tb_unite
             cur.execute("""
-                SELECT 
+                SELECT
                     COALESCE(u.codearticle, '') as "Code Article",
-                    a.designation as "Désignation",
-                    u.designationunite as "Unité",
-                    cd.qtcmd as "Qté commandé",
-                    COALESCE(cd.qtlivre, 0) as "Qté livrés",
-                    CASE 
+                    a.designation                as "Désignation",
+                    u.designationunite           as "Unité",
+                    cd.qtcmd                     as "Qté commandée",
+                    COALESCE(cd.qtlivre, 0)      as "Qté livrée",
+                    CASE
                         WHEN COALESCE(CAST(cd.total AS NUMERIC), 0) = 0 THEN '-'
                         ELSE CAST(cd.total AS TEXT)
                     END as "Montant"
                 FROM tb_commandedetail cd
                 LEFT JOIN tb_article a ON cd.idarticle = a.idarticle
-                LEFT JOIN tb_unite u ON cd.idunite = u.idunite
+                LEFT JOIN tb_unite   u ON cd.idunite   = u.idunite
                 WHERE cd.idcom = %s
                 ORDER BY a.designation
             """, (idcom,))
             details = cur.fetchall()
-
-            cols = ('Code Article', 'Désignation', 'Unité', 'Qté commandé', 'Qté livrés', 'Montant')
-            self._open_details_window(f'Détails Entrée {refcom}', cols, details, refcom, 'entree')
-
+            cols = ("Code Article", "Désignation", "Unité",
+                    "Qté commandée", "Qté livrée", "Montant")
+            self._open_details_window(
+                f"Détails Entrée — {refcom}", cols, details, refcom, "entree")
         finally:
             conn.close()
 
     def show_sortie_details_by_ref(self, refsortie):
-        """Affiche les détails d'une sortie avec colonnes: Code Article, Désignation, Unité, Sortie (Quantité)."""
         if not refsortie:
-            messagebox.showwarning('Attention', 'Référence sortie introuvable')
             return
         conn = self.connect_db()
-        if not conn: return
+        if not conn:
+            return
         try:
             cur = conn.cursor()
-            cur.execute("SELECT id FROM tb_sortie WHERE refsortie = %s LIMIT 1", (refsortie,))
+            cur.execute("SELECT id FROM tb_sortie WHERE refsortie = %s LIMIT 1",
+                        (refsortie,))
             row = cur.fetchone()
             if not row:
-                messagebox.showinfo('Info', 'Sortie non trouvée')
+                messagebox.showinfo("Info", "Sortie introuvable.")
                 return
             idsortie = row[0]
             cur.execute("""
-                SELECT 
+                SELECT
                     COALESCE(u.codearticle, '') as "Code Article",
-                    a.designation as "Désignation",
-                    u.designationunite as "Unité",
-                    sd.qtsortie as "Sortie (Quantité)"
+                    a.designation              as "Désignation",
+                    u.designationunite         as "Unité",
+                    sd.qtsortie                as "Quantité sortie"
                 FROM tb_sortiedetail sd
                 LEFT JOIN tb_article a ON sd.idarticle = a.idarticle
-                LEFT JOIN tb_unite u ON sd.idunite = u.idunite
+                LEFT JOIN tb_unite   u ON sd.idunite   = u.idunite
                 WHERE sd.idsortie = %s
                 ORDER BY a.designation
             """, (idsortie,))
             details = cur.fetchall()
-            cols = ('Code Article', 'Désignation', 'Unité', 'Sortie (Quantité)')
-            self._open_details_window(f'Détails Sortie {refsortie}', cols, details, refsortie, 'sortie')
+            cols = ("Code Article", "Désignation", "Unité", "Quantité sortie")
+            self._open_details_window(
+                f"Détails Sortie — {refsortie}", cols, details, refsortie, "sortie")
         finally:
             conn.close()
 
     def show_transfert_details_by_ref(self, reftrans):
         if not reftrans:
-            messagebox.showwarning('Attention', 'Référence transfert introuvable')
             return
         conn = self.connect_db()
-        if not conn: return
+        if not conn:
+            return
         try:
             cur = conn.cursor()
-            cur.execute("SELECT idtransfert FROM tb_transfert WHERE reftransfert = %s LIMIT 1", (reftrans,))
+            cur.execute(
+                "SELECT idtransfert FROM tb_transfert WHERE reftransfert = %s LIMIT 1",
+                (reftrans,))
             row = cur.fetchone()
             if not row:
-                messagebox.showinfo('Info', 'Transfert non trouvé')
+                messagebox.showinfo("Info", "Transfert introuvable.")
                 return
             idtr = row[0]
             cur.execute("""
-                SELECT td.id, a.designation, u.designationunite, td.qttransfert, td.idmagsortie, td.idmagentree
+                SELECT
+                    a.designation      as "Désignation",
+                    u.designationunite as "Unité",
+                    td.qttransfert     as "Quantité",
+                    td.idmagsortie     as "Magasin Sortie",
+                    td.idmagentree     as "Magasin Entrée"
                 FROM tb_transfertdetail td
                 LEFT JOIN tb_article a ON td.idarticle = a.idarticle
-                LEFT JOIN tb_unite u ON td.idunite = u.idunite
+                LEFT JOIN tb_unite   u ON td.idunite   = u.idunite
                 WHERE td.idtransfert = %s
+                ORDER BY a.designation
             """, (idtr,))
             details = cur.fetchall()
-            cols = ('ID','Désignation','Unité','Quantité','Magasin Sortie','Magasin Entrée')
-            self._open_details_window(f'Détails Transfert {reftrans}', cols, details, reftrans, 'transfert')
+            cols = ("Désignation", "Unité", "Quantité",
+                    "Magasin Sortie", "Magasin Entrée")
+            self._open_details_window(
+                f"Détails Transfert — {reftrans}", cols, details, reftrans, "transfert")
         finally:
             conn.close()
 
     def show_consommation_details_by_ref(self, refcons):
-        """Affiche les détails d'une consommation interne avec colonnes: Code Article, Désignation, Unité, Sortie (Quantité)."""
         if not refcons:
-            messagebox.showwarning('Attention', 'Référence consommation introuvable')
             return
         conn = self.connect_db()
-        if not conn: return
+        if not conn:
+            return
         try:
             cur = conn.cursor()
-            cur.execute("SELECT id FROM tb_consommationinterne WHERE refconsommation = %s LIMIT 1", (refcons,))
+            cur.execute(
+                "SELECT id FROM tb_consommationinterne WHERE refconsommation = %s LIMIT 1",
+                (refcons,))
             row = cur.fetchone()
             if not row:
-                messagebox.showinfo('Info', 'Consommation non trouvée')
+                messagebox.showinfo("Info", "Consommation introuvable.")
                 return
             idc = row[0]
             cur.execute("""
-                SELECT 
+                SELECT
                     COALESCE(u.codearticle, '') as "Code Article",
-                    a.designation as "Désignation",
-                    u.designationunite as "Unité",
-                    d.qtconsomme as "Sortie (Quantité)",
-                    d.prixunit as "Prix Unitaire",
-                    d.montant_total as "Montant"
+                    a.designation              as "Désignation",
+                    u.designationunite         as "Unité",
+                    d.qtconsomme               as "Quantité",
+                    d.prixunit                 as "Prix Unitaire",
+                    d.montant_total            as "Montant"
                 FROM tb_consommationinterne_details d
                 LEFT JOIN tb_article a ON d.idarticle = a.idarticle
-                LEFT JOIN tb_unite u ON d.idunite = u.idunite
+                LEFT JOIN tb_unite   u ON d.idunite   = u.idunite
                 WHERE d.idconsommation = %s
                 ORDER BY a.designation
             """, (idc,))
             details = cur.fetchall()
-            cols = ('Code Article', 'Désignation', 'Unité', 'Sortie (Quantité)', 'Prix Unitaire', 'Montant')
-            self._open_details_window(f'Détails Consommation {refcons}', cols, details, refcons, 'consommation')
+            cols = ("Code Article", "Désignation", "Unité",
+                    "Quantité", "Prix Unitaire", "Montant")
+            self._open_details_window(
+                f"Détails Consommation — {refcons}", cols, details,
+                refcons, "consommation")
         finally:
             conn.close()
 
     def show_changement_details_by_ref(self, refchg):
-        """Affiche les détails d'un changement avec articles sortants puis entrants, colonnes vides remplacées par '-'."""
         if not refchg:
-            messagebox.showwarning('Attention', 'Référence changement introuvable')
             return
         conn = self.connect_db()
-        if not conn: return
+        if not conn:
+            return
         try:
             cur = conn.cursor()
-            cur.execute("SELECT idchg FROM tb_changement WHERE refchg = %s LIMIT 1", (refchg,))
+            cur.execute(
+                "SELECT idchg FROM tb_changement WHERE refchg = %s LIMIT 1", (refchg,))
             row = cur.fetchone()
             if not row:
-                messagebox.showinfo('Info', 'Changement non trouvé')
+                messagebox.showinfo("Info", "Changement introuvable.")
                 return
             idchg = row[0]
-            
+
             details = []
-            
-            # 1. Récupérer d'abord les articles SORTANTS
+
+            # Articles SORTANTS
             cur.execute("""
-                SELECT 
-                    COALESCE(u.codearticle, '-') as "Code Article",
-                    COALESCE(a.designation, '-') as "Désignation",
-                    COALESCE(u.designationunite, '-') as "Unité",
-                    ds.quantite_sortie as "Sortie (Quantité)",
-                    '-' as "Entrée (Quantité)"
+                SELECT
+                    COALESCE(u.codearticle, '-')  as "Code Article",
+                    COALESCE(a.designation, '-')  as "Désignation",
+                    COALESCE(u.designationunite,'-') as "Unité",
+                    ds.quantite_sortie            as "Qté Sortie",
+                    '-'                           as "Qté Entrée"
                 FROM tb_detailchange_sortie ds
                 LEFT JOIN tb_article a ON ds.idarticle = a.idarticle
-                LEFT JOIN tb_unite u ON ds.idunite = u.idunite
+                LEFT JOIN tb_unite   u ON ds.idunite   = u.idunite
                 WHERE ds.idchg = %s
                 ORDER BY a.designation
             """, (idchg,))
-            details_sortie = cur.fetchall()
-            details.extend(details_sortie)
-            
-            # 2. Récupérer ensuite les articles ENTRANTS (qui ne sont pas déjà en sortie)
+            details.extend(cur.fetchall())
+
+            # Articles ENTRANTS (non déjà présents en sortie)
             cur.execute("""
-                SELECT 
-                    COALESCE(u.codearticle, '-') as "Code Article",
-                    COALESCE(a.designation, '-') as "Désignation",
-                    COALESCE(u.designationunite, '-') as "Unité",
-                    '-' as "Sortie (Quantité)",
-                    de.quantite_entree as "Entrée (Quantité)"
+                SELECT
+                    COALESCE(u.codearticle, '-')  as "Code Article",
+                    COALESCE(a.designation, '-')  as "Désignation",
+                    COALESCE(u.designationunite,'-') as "Unité",
+                    '-'                           as "Qté Sortie",
+                    de.quantite_entree            as "Qté Entrée"
                 FROM tb_detailchange_entree de
                 LEFT JOIN tb_article a ON de.idarticle = a.idarticle
-                LEFT JOIN tb_unite u ON de.idunite = u.idunite
+                LEFT JOIN tb_unite   u ON de.idunite   = u.idunite
                 WHERE de.idchg = %s
-                    AND (de.idarticle, de.idunite) NOT IN (
-                        SELECT ds.idarticle, ds.idunite 
-                        FROM tb_detailchange_sortie ds 
-                        WHERE ds.idchg = %s
-                    )
+                  AND (de.idarticle, de.idunite) NOT IN (
+                      SELECT ds.idarticle, ds.idunite
+                      FROM tb_detailchange_sortie ds
+                      WHERE ds.idchg = %s
+                  )
                 ORDER BY a.designation
             """, (idchg, idchg))
-            details_entree = cur.fetchall()
-            details.extend(details_entree)
-            
-            cols = ('Code Article', 'Désignation', 'Unité', 'Sortie (Quantité)', 'Entrée (Quantité)')
-            self._open_details_window(f'Détails Changement {refchg}', cols, details, refchg, 'changement')
+            details.extend(cur.fetchall())
+
+            cols = ("Code Article", "Désignation", "Unité", "Qté Sortie", "Qté Entrée")
+            self._open_details_window(
+                f"Détails Changement — {refchg}", cols, details, refchg, "changement")
         finally:
             conn.close()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # SECTION 9 — IMPRESSION PDF
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _imprimer_pdf(self, reference: str, type_mouvement: str):
+        """Génère un PDF via EtatPDFMouvements et propose la sauvegarde."""
+        if not EtatPDFMouvements:
+            messagebox.showerror("Erreur",
+                                 "Module EtatsPDF_Mouvements introuvable.")
+            return
+        try:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF", "*.pdf"), ("Tous", "*.*")],
+                initialfile=f"Bon_{type_mouvement}_{reference}.pdf",
+            )
+            if not path:
+                return
+            gen = EtatPDFMouvements()
+            ok  = gen.generer_etat(type_mouvement, reference, path)
+            gen.close_db()
+            if ok:
+                messagebox.showinfo("PDF", f"PDF généré :\n{path}")
+            else:
+                messagebox.showerror("Erreur",
+                                     f"Échec génération PDF pour {reference}")
+        except Exception as e:
+            messagebox.showerror("Erreur PDF", f"Erreur : {e}")

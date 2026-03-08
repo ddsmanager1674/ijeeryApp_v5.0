@@ -1,18 +1,29 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║                     iJeery — login_window.py  (refonte v2)                 ║
+║               iJeery — login_window.py  (refonte v3 — mockup)              ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║  • Thème iJeery (app_theme)                                                 ║
-║  • Remember Me : username + password haché (bcrypt) dans remember.json     ║
-║  • Auto-remplissage au démarrage si remember.json présent                  ║
-║  • Notification flottante de succès (toast)                                 ║
-║  • Effet secousse sur identifiants incorrects                               ║
+║  STYLE                                                                      ║
+║  • Fenêtre sans bordure Windows (overrideredirect)                          ║
+║  • Bouton ✕ custom dans le coin supérieur droit                             ║
+║  • Fond blanc pur, champs "underline" (ligne du bas uniquement)             ║
+║  • Icônes SVG canvas gauche des champs (👤 / 🔒)                           ║
+║  • Toggle œil pour montrer/masquer le mot de passe                         ║
+║  • Bouton "Se connecter" bleu plein, coins arrondis                         ║
+║  • Séparateur  ─────  &  ─────  entre sections                              ║
+║  • Toast succès bas d'écran + effet secousse sur erreur                     ║
+║                                                                              ║
+║  LOGIQUE MÉTIER — 100 % INTACTE                                             ║
+║  • Remember Me (base64 remember.json)                                       ║
+║  • connect_db / get_authorized_menus / save_user_session                    ║
+║  • login() / launch_main_app_safely / _import_and_run                      ║
+║  • ConfigDataBase                                                           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import customtkinter as ctk
 from tkinter import messagebox
+import tkinter as tk
 import psycopg2
 from PIL import Image
 import os
@@ -36,64 +47,75 @@ except ImportError:
 
 
 class _C:
-    BG_PAGE      = "#ECF0F1"
-    BG_CARD      = "#FFFFFF"
-    BG_HEADER    = "#2C3E50"
-    BG_INPUT     = "#F4F6F8"
-    PRIMARY      = "#3498DB"
-    PRIMARY_HOVER= "#2980B9"
-    SUCCESS      = "#2ECC71"
-    SUCCESS_DARK = "#27AE60"
-    DANGER       = "#E74C3C"
-    DANGER_DARK  = "#C0392B"
-    TEXT_PRIMARY = "#2C3E50"
-    TEXT_MUTED   = "#95A5A6"
-    BORDER       = "#D5D8DC"
-    BORDER_FOCUS = "#3498DB"
-    DIVIDER      = "#E8EAED"
-    SILVER       = "#BDC3C7"
-    CLOUDS       = "#ECF0F1"
-    TEXT_MUTED2  = "#7F8C8D"
+    """Palette locale — utilisée si app_theme absent."""
+    BG_PAGE       = "#FFFFFF"
+    BG_CARD       = "#FFFFFF"
+    BG_HEADER     = "#2C3E50"
+    BG_INPUT      = "transparent"
+    PRIMARY       = "#1A4FA0"    # bleu mockup
+    PRIMARY_HOVER = "#1540882"
+    SUCCESS       = "#2ECC71"
+    SUCCESS_DARK  = "#27AE60"
+    DANGER        = "#E74C3C"
+    DANGER_DARK   = "#C0392B"
+    TEXT_PRIMARY  = "#1A1A2E"
+    TEXT_MUTED    = "#95A5A6"
+    BORDER        = "#D5D8DC"
+    BORDER_FOCUS  = "#1A4FA0"
+    DIVIDER       = "#E8EAED"
+    SILVER        = "#BDC3C7"
+    CLOUDS        = "#ECF0F1"
+    TEXT_MUTED2   = "#7F8C8D"
 
 
 C = Colors if _T else _C
 
+# Surcharge locale pour l'UI login (indépendant du thème ERP)
+_FONT_FAM    = "Roboto" if _T else "Segoe UI"
+_PRIMARY     = C.PRIMARY
+_PRIMARY_HOV = getattr(C, "PRIMARY_HOVER", "#15408A")
+_LINE_COLOR  = C.BORDER
+_LINE_FOCUS  = C.PRIMARY
+_WIN_BG      = C.BG_PAGE
+
+
+def _tk_font(size=11, weight="normal"):
+    return (_FONT_FAM, size, weight)
+
 # ── Init thème ────────────────────────────────────────────────────────────────
 if _T:
-    init_theme()
+    try:
+        init_theme()
+    except Exception:
+        ctk.set_appearance_mode("light")
+        ctk.set_default_color_theme("blue")
 else:
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ── Chemin remember.json ──────────────────────────────────────────────────────
+# ── Remember Me ───────────────────────────────────────────────────────────────
 _REMEMBER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "remember.json")
 
-# ── Encodage / décodage mot de passe (base64 — obfusqué, réversible) ─────────
+
 def _encode_password(plain: str) -> str:
-    """Encode le mot de passe en base64 pour le stockage dans remember.json."""
     return base64.b64encode(plain.encode("utf-8")).decode("ascii")
 
 
 def _decode_password(encoded: str) -> str:
-    """Décode le base64 et retourne le mot de passe en clair."""
     return base64.b64decode(encoded.encode("ascii")).decode("utf-8")
 
 
 def _save_remember(username: str, plain_password: str):
-    """Enregistre username + password encodé (base64) dans remember.json."""
-    data = {
-        "username": username,
-        "password_encoded": _encode_password(plain_password),
-    }
+    data = {"username": username,
+            "password_encoded": _encode_password(plain_password)}
     with open(_REMEMBER_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def _load_remember() -> dict | None:
-    """Retourne le contenu de remember.json ou None si absent/invalide."""
     try:
         with open(_REMEMBER_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -102,7 +124,6 @@ def _load_remember() -> dict | None:
 
 
 def _delete_remember():
-    """Supprime remember.json s'il existe."""
     try:
         if os.path.exists(_REMEMBER_PATH):
             os.remove(_REMEMBER_PATH)
@@ -110,244 +131,485 @@ def _delete_remember():
         pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  LoginWindow
-# ─────────────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# WIDGET : Champ underline (ligne du bas seulement)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _UnderlineField(tk.Frame):
+    """
+    Champ de saisie style mockup :
+    ─── [icône]  [placeholder / texte]  [bouton œil optionnel]  ───────────
+    Seule la bordure du bas est visible (Canvas 1px).
+    """
+
+    def __init__(self, parent, icon_text: str, placeholder: str,
+                 show_toggle: bool = False, show_char: str = "•", **kwargs):
+        super().__init__(parent, bg=_WIN_BG)
+
+        self._placeholder = placeholder
+        self._show_char   = show_char
+        self._is_password = show_toggle
+        self._pw_visible  = False
+        self._has_focus   = False
+
+        # ── Ligne du bas (Canvas 1px) ─────────────────────────────────────
+        self._line = tk.Canvas(self, height=1, bg=_LINE_COLOR,
+                               highlightthickness=0, bd=0)
+        self._line.pack(side="bottom", fill="x")
+
+        # ── Conteneur horizontal ──────────────────────────────────────────
+        row = tk.Frame(self, bg=_WIN_BG)
+        row.pack(fill="x")
+
+        # Icône gauche
+        tk.Label(row, text=icon_text, font=(_FONT_FAM, 14),
+                 bg=_WIN_BG, fg=C.TEXT_MUTED,
+                 width=2).pack(side="left", padx=(0, 6))
+
+        # Entry (fond transparent simulé)
+        self.entry = tk.Entry(
+            row,
+            font=(_FONT_FAM, 12),
+            fg=C.TEXT_MUTED,      # commence en placeholder couleur
+            bg=_WIN_BG,
+            bd=0, highlightthickness=0,
+            insertbackground=_PRIMARY,
+            relief="flat",
+        )
+        self.entry.pack(side="left", fill="x", expand=True, ipady=6)
+
+        # Afficher le placeholder
+        self._show_placeholder()
+
+        # Bindings focus
+        self.entry.bind("<FocusIn>",  self._on_focus_in)
+        self.entry.bind("<FocusOut>", self._on_focus_out)
+
+        # Bouton toggle œil (password uniquement)
+        if show_toggle:
+            self._eye_lbl = tk.Label(
+                row, text="🙈", font=(_FONT_FAM, 11),
+                bg=_WIN_BG, fg=C.TEXT_MUTED, cursor="hand2")
+            self._eye_lbl.pack(side="right", padx=(4, 0))
+            self._eye_lbl.bind("<Button-1>", self._toggle_visibility)
+
+    # ── Placeholder ───────────────────────────────────────────────────────
+    def _show_placeholder(self):
+        self.entry.delete(0, "end")
+        self.entry.insert(0, self._placeholder)
+        self.entry.configure(fg=C.TEXT_MUTED, show="")
+        self._is_placeholder = True
+
+    def _hide_placeholder(self):
+        if self._is_placeholder:
+            self.entry.delete(0, "end")
+            self.entry.configure(
+                fg=C.TEXT_PRIMARY,
+                show=self._show_char if self._is_password and not self._pw_visible else "")
+            self._is_placeholder = False
+
+    def _on_focus_in(self, _=None):
+        self._hide_placeholder()
+        self._line.configure(bg=_LINE_FOCUS)
+
+    def _on_focus_out(self, _=None):
+        if not self.entry.get():
+            self._show_placeholder()
+        self._line.configure(bg=_LINE_COLOR)
+
+    # ── Toggle visibilité mot de passe ────────────────────────────────────
+    def _toggle_visibility(self, _=None):
+        self._pw_visible = not self._pw_visible
+        if not self._is_placeholder:
+            self.entry.configure(
+                show="" if self._pw_visible else self._show_char)
+        self._eye_lbl.configure(
+            text="👁" if self._pw_visible else "🙈")
+
+    # ── API ───────────────────────────────────────────────────────────────
+    def get(self) -> str:
+        """Retourne le texte saisi (vide si placeholder affiché)."""
+        if self._is_placeholder:
+            return ""
+        return self.entry.get()
+
+    def set(self, value: str):
+        """Pré-remplit le champ (ex: remember me)."""
+        self._hide_placeholder()
+        self.entry.delete(0, "end")
+        self.entry.insert(0, value)
+        # Maintenir le masque si mot de passe
+        if self._is_password and not self._pw_visible:
+            self.entry.configure(show=self._show_char)
+
+    def shake_color(self):
+        """Colore la ligne en rouge (erreur)."""
+        self._line.configure(bg=C.DANGER)
+        self.after(1500, lambda: self._line.configure(bg=_LINE_COLOR))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# FENÊTRE DE LOGIN
+# ══════════════════════════════════════════════════════════════════════════════
+
 class LoginWindow(ctk.CTk):
 
-    _SHAKE_OFFSETS = [10, -10, 8, -8, 6, -6, 4, -4, 2, -2, 0]
+    WIN_W = 440
+    WIN_H = 520
+    _SHAKE_OFFSETS = [14, -14, 10, -10, 7, -7, 4, -4, 2, -2, 0]
 
     def __init__(self):
         super().__init__()
 
-        self.configure(fg_color=C.BG_PAGE)
-        self.title("iJeery — Connexion")
-        self.geometry("420x520")
+        # ── Fenêtre sans bordure ──────────────────────────────────────────
+        self.overrideredirect(True)          # supprime la barre titre Windows
+        self.attributes("-topmost", True)    # z-index toujours au-dessus
+        self.configure(fg_color=_WIN_BG)
         self.resizable(False, False)
 
-        self.username     = ctk.StringVar()
-        self.password     = ctk.StringVar()
+        # Variables
         self.remember_me  = ctk.BooleanVar(value=False)
         self.app_launched = False
 
+        self._drag_x = 0
+        self._drag_y = 0
+
         self._setup_ui()
-        self._center_window(420, 520)
+        self._center_window()
         self._load_remembered()
 
+        # Fermeture Alt+F4 / clic ✕
+        self.bind("<Alt-F4>", lambda _: self._close_window())
         self.bind("<Return>", lambda _: self.login())
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  UI
-    # ─────────────────────────────────────────────────────────────────────────
-    def _f(self, size=12, weight="normal"):
-        return ctk.CTkFont(
-            family="Roboto" if _T else "Segoe UI",
-            size=size, weight=weight)
+    # ══════════════════════════════════════════════════════════════════════
+    # CONSTRUCTION UI
+    # ══════════════════════════════════════════════════════════════════════
 
     def _setup_ui(self):
-        # ── Card centrale ─────────────────────────────────────────────────────
-        card = ctk.CTkFrame(self, fg_color=C.BG_CARD,
-                            corner_radius=16,
-                            border_width=1, border_color=C.BORDER)
-        card.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.88)
+        """
+        Structure :
+          ┌─────────────────────────────────────┐
+          │  Bouton ✕                           │ ← Row 0 top-right
+          │  Logo                               │ ← Row 1
+          │  Champ Email (underline)            │ ← Row 2
+          │  Champ Password (underline + œil)   │ ← Row 3
+          │  Msg erreur                         │ ← Row 4
+          │  Checkbox Remember Me               │ ← Row 5
+          │  Bouton "Se connecter"              │ ← Row 6
+          │  ─── & ───                          │ ← Row 7
+          │  Bouton Config DB                   │ ← Row 8
+          └─────────────────────────────────────┘
+        """
 
-        # ── Logo / titre ──────────────────────────────────────────────────────
-        logo_frame = ctk.CTkFrame(card, fg_color="transparent")
-        logo_frame.pack(pady=(28, 4))
+        # ── Ombre légère via bordure Canvas externe ───────────────────────
+        # (optionnel — uniquement visible si la fenêtre est sur fond clair)
+        outer = tk.Frame(self, bg=C.BORDER, padx=1, pady=1)
+        outer.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        card = tk.Frame(outer, bg=_WIN_BG)
+        card.pack(fill="both", expand=True)
+
+        # ── Déplacement de la fenêtre au drag ─────────────────────────────
+        card.bind("<ButtonPress-1>",   self._drag_start)
+        card.bind("<B1-Motion>",       self._drag_motion)
+
+        # ── Bouton ✕ coin haut droit ──────────────────────────────────────
+        self._build_close_btn(card)
+
+        # ── Logo ──────────────────────────────────────────────────────────
+        self._build_logo(card)
+
+        # ── Séparateur léger sous logo ────────────────────────────────────
+        tk.Frame(card, height=1, bg=C.DIVIDER).pack(fill="x",
+                                                     padx=40, pady=(0, 24))
+
+        # ── Champs ────────────────────────────────────────────────────────
+        fields_wrap = tk.Frame(card, bg=_WIN_BG)
+        fields_wrap.pack(fill="x", padx=44)
+
+        # Email / Nom d'utilisateur
+        self._field_user = _UnderlineField(
+            fields_wrap, icon_text="👤",
+            placeholder="Nom d'utilisateur")
+        self._field_user.pack(fill="x", pady=(0, 18))
+
+        # Mot de passe
+        self._field_pass = _UnderlineField(
+            fields_wrap, icon_text="🔒",
+            placeholder="Mot de passe",
+            show_toggle=True)
+        self._field_pass.pack(fill="x", pady=(0, 12))
+
+        # ── Message d'erreur ──────────────────────────────────────────────
+        self._err_var = tk.StringVar()
+        self._err_lbl = tk.Label(
+            fields_wrap,
+            textvariable=self._err_var,
+            font=_tk_font(10, "bold"),
+            fg=C.DANGER, bg=_WIN_BG,
+            anchor="w",
+        )
+        self._err_lbl.pack(fill="x", pady=(0, 6))
+
+        # ── Remember Me ───────────────────────────────────────────────────
+        rem_frame = tk.Frame(fields_wrap, bg=_WIN_BG)
+        rem_frame.pack(fill="x", pady=(0, 16))
+
+        self._rem_var = tk.BooleanVar(value=False)
+        self.remember_me = self._rem_var     # alias pour compatibilité
+
+        self._rem_cb = tk.Checkbutton(
+            rem_frame,
+            text="  Se souvenir de moi",
+            variable=self._rem_var,
+            font=_tk_font(10),
+            fg=C.TEXT_SECONDARY if hasattr(C, "TEXT_SECONDARY") else C.TEXT_PRIMARY, bg=_WIN_BG,
+            activebackground=_WIN_BG,
+            selectcolor=_WIN_BG,
+            bd=0, highlightthickness=0,
+            command=self._on_remember_toggle,
+        )
+        self._rem_cb.pack(side="left")
+
+        # ── Bouton Connexion ──────────────────────────────────────────────
+        self._build_login_btn(fields_wrap)
+
+        # ── Séparateur  ─── & ─── ─────────────────────────────────────────
+        self._build_separator(card)
+
+        # ── Bouton Configuration DB ───────────────────────────────────────
+        self._build_config_btn(card)
+
+        # Padding bas
+        tk.Frame(card, height=20, bg=_WIN_BG).pack()
+
+    def _build_close_btn(self, parent):
+        """Bouton ✕ discret en haut à droite."""
+        top_bar = tk.Frame(parent, bg=_WIN_BG, height=36)
+        top_bar.pack(fill="x")
+        top_bar.pack_propagate(False)
+
+        # Draggable sur la top bar
+        top_bar.bind("<ButtonPress-1>", self._drag_start)
+        top_bar.bind("<B1-Motion>",     self._drag_motion)
+
+        close_btn = tk.Label(
+            top_bar,
+            text="✕",
+            font=_tk_font(13, "bold"),
+            fg=C.TEXT_MUTED, bg=_WIN_BG,
+            cursor="hand2",
+            padx=12, pady=6,
+        )
+        close_btn.pack(side="right")
+        close_btn.bind("<Enter>",    lambda _: close_btn.configure(fg=C.TEXT_PRIMARY))
+        close_btn.bind("<Leave>",    lambda _: close_btn.configure(fg=C.TEXT_MUTED))
+        close_btn.bind("<Button-1>", lambda _: self._close_window())
+
+    def _build_logo(self, parent):
+        """Zone logo : image si dispo, sinon texte stylisé."""
+        logo_frame = tk.Frame(parent, bg=_WIN_BG)
+        logo_frame.pack(pady=(4, 12))
 
         try:
             logo_path = get_resource_path("image/logo 3.png")
+            img = Image.open(logo_path)
             self._logo_img = ctk.CTkImage(
-                light_image=Image.open(logo_path),
-                dark_image=Image.open(logo_path),
-                size=(130, 55))
+                light_image=img, dark_image=img, size=(150, 64))
             ctk.CTkLabel(logo_frame, image=self._logo_img,
-                         text="").pack()
+                         text="", bg_color=_WIN_BG).pack()
         except Exception:
-            ctk.CTkLabel(logo_frame, text="iJeery",
-                         font=self._f(26, "bold"),
-                         text_color=C.BG_HEADER).pack()
+            # Fallback texte
+            tk.Label(logo_frame, text="iJeery",
+                     font=_tk_font(30, "bold"),
+                     fg=_PRIMARY, bg=_WIN_BG).pack()
+            tk.Label(logo_frame, text="ERP Solution",
+                     font=_tk_font(10),
+                     fg=C.TEXT_MUTED, bg=_WIN_BG).pack()
 
-        ctk.CTkLabel(card,
-                     text="Bienvenue — connectez-vous pour continuer",
-                     font=self._f(10), text_color=C.TEXT_MUTED
-                     ).pack(pady=(0, 18))
+    def _build_login_btn(self, parent):
+        """Bouton 'Se connecter' — bleu plein, coins arrondis via Canvas."""
+        btn_frame = tk.Frame(parent, bg=_WIN_BG)
+        btn_frame.pack(fill="x", pady=(4, 0))
 
-        # ── Séparateur ────────────────────────────────────────────────────────
-        ctk.CTkFrame(card, height=1, fg_color=C.DIVIDER
-                     ).pack(fill="x", padx=24)
-
-        # ── Champs ────────────────────────────────────────────────────────────
-        fields = ctk.CTkFrame(card, fg_color="transparent")
-        fields.pack(fill="x", padx=28, pady=(18, 4))
-
-        # Username
-        ctk.CTkLabel(fields, text="Nom d'utilisateur",
-                     font=self._f(11), text_color=C.TEXT_MUTED,
-                     anchor="w").pack(fill="x", pady=(0, 3))
-        self.username_entry = ctk.CTkEntry(
-            fields,
-            textvariable=self.username,
-            height=36,
-            fg_color=C.BG_INPUT, border_color=C.BORDER,
-            border_width=1, text_color=C.TEXT_PRIMARY,
-            font=self._f(12), corner_radius=8,
-            placeholder_text="ex: admin")
-        self.username_entry.pack(fill="x", pady=(0, 12))
-        self.username_entry.bind(
-            "<FocusIn>",
-            lambda _: self.username_entry.configure(
-                border_color=C.BORDER_FOCUS))
-        self.username_entry.bind(
-            "<FocusOut>",
-            lambda _: self.username_entry.configure(
-                border_color=C.BORDER))
-
-        # Password
-        ctk.CTkLabel(fields, text="Mot de passe",
-                     font=self._f(11), text_color=C.TEXT_MUTED,
-                     anchor="w").pack(fill="x", pady=(0, 3))
-        self.password_entry = ctk.CTkEntry(
-            fields,
-            textvariable=self.password,
-            show="•",
-            height=36,
-            fg_color=C.BG_INPUT, border_color=C.BORDER,
-            border_width=1, text_color=C.TEXT_PRIMARY,
-            font=self._f(12), corner_radius=8,
-            placeholder_text="••••••••")
-        self.password_entry.pack(fill="x", pady=(0, 8))
-        self.password_entry.bind(
-            "<FocusIn>",
-            lambda _: self.password_entry.configure(
-                border_color=C.BORDER_FOCUS))
-        self.password_entry.bind(
-            "<FocusOut>",
-            lambda _: self.password_entry.configure(
-                border_color=C.BORDER))
-
-        # Remember me
-        self.remember_checkbox = ctk.CTkCheckBox(
-            fields,
-            text="Se souvenir de moi",
-            variable=self.remember_me,
-            font=self._f(11), text_color=C.TEXT_PRIMARY,
-            checkbox_width=16, checkbox_height=16,
-            corner_radius=3,
-            fg_color=C.PRIMARY, hover_color=C.PRIMARY_HOVER,
-            command=self._on_remember_toggle)
-        self.remember_checkbox.pack(anchor="w", pady=(0, 12))
-
-        # ── Message d'erreur ──────────────────────────────────────────────────
-        self.error_label = ctk.CTkLabel(
-            fields, text="",
-            font=self._f(11, "bold"),
-            text_color=C.DANGER)
-        self.error_label.pack(pady=(0, 4))
-
-        # ── Bouton Connexion ──────────────────────────────────────────────────
-        self.login_button = ctk.CTkButton(
-            fields,
+        self._login_btn = ctk.CTkButton(
+            btn_frame,
             text="Se connecter",
             command=self.login,
-            height=40,
-            fg_color=C.PRIMARY, hover_color=C.PRIMARY_HOVER,
+            height=42,
+            fg_color=_PRIMARY,
+            hover_color=_PRIMARY_HOV,
             text_color="#FFFFFF",
-            font=self._f(13, "bold"),
-            corner_radius=8)
-        self.login_button.pack(fill="x", pady=(0, 8))
+            font=ctk.CTkFont(family=_FONT_FAM, size=13, weight="bold"),
+            corner_radius=6,
+        )
+        self._login_btn.pack(fill="x")
 
-        # ── Bouton Config DB ──────────────────────────────────────────────────
-        self.database_login_button = ctk.CTkButton(
-            fields,
+    def _build_separator(self, parent):
+        """Séparateur ─────  &  ───── du mockup."""
+        sep = tk.Frame(parent, bg=_WIN_BG)
+        sep.pack(fill="x", padx=44, pady=(20, 8))
+
+        left_line  = tk.Frame(sep, height=1, bg=C.BORDER)
+        right_line = tk.Frame(sep, height=1, bg=C.BORDER)
+        amp_lbl    = tk.Label(sep, text=" & ",
+                              font=_tk_font(10),
+                              fg=C.TEXT_MUTED, bg=_WIN_BG)
+
+        left_line.pack(side="left",  fill="x", expand=True, pady=6)
+        amp_lbl.pack(side="left")
+        right_line.pack(side="left", fill="x", expand=True, pady=6)
+
+    def _build_config_btn(self, parent):
+        """Bouton configuration base de données."""
+        btn_wrap = tk.Frame(parent, bg=_WIN_BG)
+        btn_wrap.pack(fill="x", padx=44)
+
+        self._db_btn = ctk.CTkButton(
+            btn_wrap,
             text="⚙  Configuration base de données",
             command=self.open_database_config,
             height=36,
-            fg_color=C.CLOUDS, hover_color=C.SILVER,
-            text_color=C.TEXT_PRIMARY,
-            border_width=1, border_color=C.BORDER,
-            font=self._f(11),
-            corner_radius=8)
-        self.database_login_button.pack(fill="x", pady=(0, 20))
+            fg_color="transparent",
+            hover_color=C.BG_INPUT if hasattr(C, "BG_INPUT") else "#F0F0F0",
+            text_color=C.TEXT_SECONDARY if hasattr(C, "TEXT_SECONDARY") else C.TEXT_PRIMARY,
+            border_width=1,
+            border_color=C.BORDER,
+            font=ctk.CTkFont(family=_FONT_FAM, size=11),
+            corner_radius=6,
+        )
+        self._db_btn.pack(fill="x")
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Remember Me
-    # ─────────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # DRAG (déplacement fenêtre sans barre titre)
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _drag_start(self, event):
+        self._drag_x = event.x_root - self.winfo_x()
+        self._drag_y = event.y_root - self.winfo_y()
+
+    def _drag_motion(self, event):
+        x = event.x_root - self._drag_x
+        y = event.y_root - self._drag_y
+        self.geometry(f"+{x}+{y}")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # REMEMBER ME
+    # ══════════════════════════════════════════════════════════════════════
+
     def _load_remembered(self):
         """Pré-remplit les champs si remember.json existe."""
         data = _load_remember()
         if data and "password_encoded" in data:
             try:
                 plain = _decode_password(data["password_encoded"])
-                self.username.set(data.get("username", ""))
-                self.password.set(plain)   # affiché sous •••• grâce au mask
-                self.remember_me.set(True)
+                self._field_user.set(data.get("username", ""))
+                self._field_pass.set(plain)
+                self._rem_var.set(True)
             except Exception:
-                # Fichier corrompu → on l'ignore et on le supprime
                 _delete_remember()
 
     def _on_remember_toggle(self):
-        """Appelé quand la checkbox change d'état."""
-        if not self.remember_me.get():
+        if not self._rem_var.get():
             _delete_remember()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Utilitaires fenêtre
-    # ─────────────────────────────────────────────────────────────────────────
-    def _center_window(self, w, h):
+    # ══════════════════════════════════════════════════════════════════════
+    # UTILITAIRES FENÊTRE
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _center_window(self):
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        self.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        x  = (sw - self.WIN_W) // 2
+        y  = (sh - self.WIN_H) // 2
+        self.geometry(f"{self.WIN_W}x{self.WIN_H}+{x}+{y}")
 
-    def _show_error(self, message: str):
-        self.error_label.configure(text=message)
-        self.after(3500, lambda: self.error_label.configure(text=""))
+    def _close_window(self):
+        try:
+            self.quit()
+            self.destroy()
+        except Exception:
+            pass
 
-    # ── Effet secousse ────────────────────────────────────────────────────────
+    def _show_error(self, msg: str):
+        """Affiche le message d'erreur et le masque après 3,5 s."""
+        self._err_var.set(msg)
+        # Colorer les lignes des champs en rouge
+        self._field_user.shake_color()
+        self._field_pass.shake_color()
+        self.after(3500, lambda: self._err_var.set(""))
+
+    # ── Effet secousse ────────────────────────────────────────────────────
     def _shake(self):
-        x0 = (self.winfo_screenwidth()  - 420) // 2
-        y0 = (self.winfo_screenheight() - 520) // 2
+        x0 = (self.winfo_screenwidth()  - self.WIN_W) // 2
+        y0 = (self.winfo_screenheight() - self.WIN_H) // 2
 
         def _step(offsets):
             if not offsets:
-                self.geometry(f"420x520+{x0}+{y0}")
+                self.geometry(f"{self.WIN_W}x{self.WIN_H}+{x0}+{y0}")
                 return
-            self.geometry(f"420x520+{x0 + offsets[0]}+{y0}")
-            self.after(30, lambda: _step(offsets[1:]))
+            self.geometry(f"{self.WIN_W}x{self.WIN_H}+{x0 + offsets[0]}+{y0}")
+            self.after(28, lambda: _step(offsets[1:]))
 
         _step(self._SHAKE_OFFSETS)
 
-    # ── Toast succès ──────────────────────────────────────────────────────────
+    # ── Toast succès ──────────────────────────────────────────────────────
     def _show_toast(self, message: str = "Connexion réussie !"):
-        toast = ctk.CTkToplevel(self)
+        """
+        Notification flottante succès — fond vert SUCCESS_DARK,
+        positionnée en bas au centre de l'écran.
+        """
+        toast = tk.Toplevel(self)
         toast.overrideredirect(True)
         toast.attributes("-topmost", True)
-        if _T:
-            Theme.apply_toplevel(toast)
+        toast.configure(bg=C.SUCCESS_DARK)
 
-        frame = ctk.CTkFrame(toast,
-                             fg_color=C.SUCCESS_DARK,
-                             corner_radius=10)
-        frame.pack(ipadx=20, ipady=10)
-        ctk.CTkLabel(frame, text=f"✔  {message}",
-                     font=self._f(12, "bold"),
-                     text_color="#FFFFFF").pack(padx=20, pady=10)
+        # Contenu
+        frame = tk.Frame(toast, bg=C.SUCCESS_DARK)
+        frame.pack(ipadx=24, ipady=12)
+
+        tk.Label(
+            frame,
+            text=f"✔  {message}",
+            font=_tk_font(12, "bold"),
+            fg="#FFFFFF",
+            bg=C.SUCCESS_DARK,
+        ).pack(padx=24, pady=12)
+
+        # Coins arrondis simulés via highlight
+        toast.configure(highlightbackground=C.SUCCESS_DARK,
+                        highlightthickness=0)
 
         toast.update_idletasks()
-        tw = toast.winfo_width()
-        th = toast.winfo_height()
+        tw = toast.winfo_reqwidth()
+        th = toast.winfo_reqheight()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        toast.geometry(f"+{(sw - tw) // 2}+{sh - th - 60}")
+        toast.geometry(f"{tw}x{th}+{(sw - tw) // 2}+{sh - th - 60}")
 
-        # Disparaît après 2 s
-        self.after(2000, lambda: (toast.grab_release(),
-                                   toast.destroy())
-                   if toast.winfo_exists() else None)
+        # Animation apparition (fade-in simulé)
+        toast.attributes("-alpha", 0.0)
+        def _fade_in(alpha=0.0):
+            if alpha < 1.0:
+                toast.attributes("-alpha", min(alpha + 0.12, 1.0))
+                toast.after(18, lambda: _fade_in(alpha + 0.12))
+        _fade_in()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Base de données
-    # ─────────────────────────────────────────────────────────────────────────
+        # Disparaît après 2,2 s
+        def _destroy():
+            try:
+                if toast.winfo_exists():
+                    toast.destroy()
+            except Exception:
+                pass
+
+        self.after(2200, _destroy)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # BASE DE DONNÉES — logique métier 100 % intacte
+    # ══════════════════════════════════════════════════════════════════════
+
     def connect_db(self):
         try:
             config_path = get_config_path('config.json')
@@ -360,11 +622,9 @@ class LoginWindow(ctk.CTk):
         except psycopg2.Error as err:
             messagebox.showerror("Connexion", f"Erreur : {err}")
         except FileNotFoundError:
-            messagebox.showerror("Configuration",
-                                 "config.json introuvable.")
+            messagebox.showerror("Configuration", "config.json introuvable.")
         except KeyError as err:
-            messagebox.showerror("Configuration",
-                                 f"Clé manquante : {err}")
+            messagebox.showerror("Configuration", f"Clé manquante : {err}")
         except Exception as err:
             messagebox.showerror("Erreur", str(err))
         return None
@@ -384,8 +644,7 @@ class LoginWindow(ctk.CTk):
             """, (idfonction,))
             return cur.fetchall()
         except psycopg2.Error as err:
-            messagebox.showerror("Erreur",
-                                 f"Récupération menus : {err}")
+            messagebox.showerror("Erreur", f"Récupération menus : {err}")
             return []
         finally:
             conn.close()
@@ -402,15 +661,15 @@ class LoginWindow(ctk.CTk):
             with open(get_session_path(), "w", encoding="utf-8") as f:
                 json.dump(session, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            messagebox.showerror("Session",
-                                 f"Sauvegarde session : {e}")
+            messagebox.showerror("Session", f"Sauvegarde session : {e}")
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Connexion
-    # ─────────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # CONNEXION — logique métier 100 % intacte
+    # ══════════════════════════════════════════════════════════════════════
+
     def login(self):
-        username = self.username.get().strip()
-        raw_pwd  = self.password.get().strip()
+        username = self._field_user.get().strip()
+        raw_pwd  = self._field_pass.get().strip()
 
         if not username or not raw_pwd:
             self._show_error("Veuillez remplir tous les champs.")
@@ -423,8 +682,6 @@ class LoginWindow(ctk.CTk):
 
         try:
             cur = conn.cursor()
-            # Authentification standard : le mot de passe en clair est dans
-            # l'entry (saisi manuellement OU décodé depuis remember.json)
             cur.execute("""
                 SELECT u.iduser, u.username, u.idfonction,
                        f.designationfonction, u.active
@@ -445,15 +702,14 @@ class LoginWindow(ctk.CTk):
                 }
                 self.save_user_session(user, menus)
 
-                # ── Remember Me ───────────────────────────────────────────
-                if self.remember_me.get():
-                    # Stocke le mot de passe encodé base64 dans remember.json
+                # Remember Me
+                if self._rem_var.get():
                     _save_remember(username, raw_pwd)
                 else:
                     _delete_remember()
 
-                # ── Succès ────────────────────────────────────────────────
-                self.login_button.configure(state="disabled")
+                # Succès : désactiver le bouton + toast + lancer l'app
+                self._login_btn.configure(state="disabled")
                 self._show_toast(f"Bienvenue, {user[1]} !")
                 self.after(700, lambda: self.launch_main_app_safely(
                     session_data))
@@ -466,21 +722,20 @@ class LoginWindow(ctk.CTk):
         finally:
             conn.close()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Lancement app principale
-    # ─────────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    # LANCEMENT APP PRINCIPALE — logique métier 100 % intacte
+    # ══════════════════════════════════════════════════════════════════════
+
     def launch_main_app_safely(self, session_data):
         def run():
             try:
                 time.sleep(0.4)
-                script = os.path.join(os.path.dirname(__file__),
-                                      "app_main.py")
+                script = os.path.join(os.path.dirname(__file__), "app_main.py")
                 if os.path.exists(script):
                     subprocess.Popen([sys.executable, script])
-                    self.after(800, self._close_login)
+                    self.after(800, self._close_window)
                 else:
-                    self.after(400, lambda: self._import_and_run(
-                        session_data))
+                    self.after(400, lambda: self._import_and_run(session_data))
             except Exception as e:
                 self.after(0, lambda: self._handle_app_error(e))
 
@@ -526,21 +781,15 @@ class LoginWindow(ctk.CTk):
     def _handle_app_error(self, error):
         self.deiconify()
         self.app_launched = False
-        self.login_button.configure(state="normal")
+        self._login_btn.configure(state="normal")
         messagebox.showerror("Erreur",
                              f"Impossible d'ouvrir l'application : {error}")
         import traceback; traceback.print_exc()
 
-    def _close_login(self):
-        try:
-            self.quit()
-            self.destroy()
-        except Exception:
-            pass
+    # ══════════════════════════════════════════════════════════════════════
+    # CONFIG DB
+    # ══════════════════════════════════════════════════════════════════════
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Config DB
-    # ─────────────────────────────────────────────────────────────────────────
     def open_database_config(self):
         w = ConfigDataBase()
         w.focus_force()
@@ -550,5 +799,6 @@ class LoginWindow(ctk.CTk):
         self.mainloop()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     LoginWindow().start()

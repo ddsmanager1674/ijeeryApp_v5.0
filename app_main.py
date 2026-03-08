@@ -903,7 +903,9 @@ class App(ctk.CTk):
 
         # ── Page initiale ─────────────────────────────────────────────────────
         authorized = self._sidebar.authorized
-        if "TABLEAU DE BORD" in authorized:
+        if "CHAT INTERNE" in authorized:
+            self.navigate("pages.page_chat", "PageChat", "chat", "CHAT INTERNE")
+        elif "TABLEAU DE BORD" in authorized:
             self.navigate("pages.page_home", "page_home", None, "TABLEAU DE BORD")
         elif authorized:
             first_auth = next(iter(authorized))
