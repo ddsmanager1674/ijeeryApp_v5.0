@@ -28,7 +28,7 @@ from typing import Optional, Dict, Any, List
 # IMPORTS TIERS
 # ──────────────────────────────────────────────────────────────────────────────
 import customtkinter as ctk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 import psycopg2
 
 # PDF via ReportLab
@@ -124,6 +124,97 @@ class ErrorDialog(ctk.CTkToplevel):
         self.focus_force()
         self.attributes('-topmost', True)
         self.wait_window()
+
+
+class MessageDialog(ctk.CTkToplevel):
+    """Dialogue personnalisé pour remplacer messagebox.showinfo/warning/error avec z-index élevé."""
+
+    def __init__(self, title: str, message: str, type_: str = 'info'):
+        super().__init__()
+        self.title(title)
+        self.geometry("400x180")
+        self.resizable(False, False)
+        self.configure(fg_color=Colors.BG_CARD)
+
+        # Centrer la fenêtre
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 400
+        window_height = 180
+        x = (screen_width // 2) - (window_width // 2)
+        y = (screen_height // 2) - (window_height // 2)
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+        # Icône selon le type
+        icon_text = "ℹ️" if type_ == 'info' else "⚠️" if type_ == 'warning' else "❌"
+        icon_color = Colors.PRIMARY if type_ == 'info' else Colors.WARNING if type_ == 'warning' else Colors.DANGER
+
+        ctk.CTkLabel(self, text=icon_text, font=Fonts.heading(24),
+                     text_color=icon_color).pack(pady=(20, 5))
+
+        ctk.CTkLabel(self, text=message, font=Fonts.body(12),
+                     text_color=Colors.TEXT_PRIMARY, wraplength=350,
+                     justify="center").pack(pady=(0, 20), padx=20)
+
+        styled.button_success(self, text="OK", command=self.destroy,
+                              width=100, height=36).pack(pady=(0, 14))
+
+        self.grab_set()
+        self.lift()
+        self.focus_force()
+        self.attributes('-topmost', True)
+        self.wait_window()
+
+
+class YesNoDialog(ctk.CTkToplevel):
+    """Dialogue personnalisé pour remplacer messagebox.askyesno avec z-index élevé."""
+
+    def __init__(self, title: str, message: str):
+        super().__init__()
+        self.title(title)
+        self.geometry("400x180")
+        self.resizable(False, False)
+        self.configure(fg_color=Colors.BG_CARD)
+        self.result = False
+
+        # Centrer la fenêtre
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 400
+        window_height = 180
+        x = (screen_width // 2) - (window_width // 2)
+        y = (screen_height // 2) - (window_height // 2)
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+        ctk.CTkLabel(self, text="❓", font=Fonts.heading(24),
+                     text_color=Colors.WARNING).pack(pady=(20, 5))
+
+        ctk.CTkLabel(self, text=message, font=Fonts.body(12),
+                     text_color=Colors.TEXT_PRIMARY, wraplength=350,
+                     justify="center").pack(pady=(0, 20), padx=20)
+
+        bf = ctk.CTkFrame(self, fg_color="transparent")
+        bf.pack(pady=(0, 14))
+        styled.button_danger(bf, text="Non", command=self._no,
+                             width=100, height=36).pack(side="left", padx=10)
+        styled.button_success(bf, text="Oui", command=self._yes,
+                              width=100, height=36).pack(side="right", padx=10)
+
+        self.grab_set()
+        self.lift()
+        self.focus_force()
+        self.attributes('-topmost', True)
+        self.wait_window()
+
+    def _yes(self):
+        self.result = True
+        self.destroy()
+
+    def _no(self):
+        self.result = False
+        self.destroy()
 
 
 # ==============================================================================
@@ -264,7 +355,7 @@ class PageVenteParMsin(ctk.CTkFrame):
 
         # ── Vérification utilisateur ──────────────────────────────────────────
         if id_user_connecte is None:
-            messagebox.showerror("Erreur", "Aucun utilisateur connecté. Veuillez vous reconnecter.")
+            MessageDialog("Erreur", "Aucun utilisateur connecté. Veuillez vous reconnecter.", 'error')
             self.id_user_connecte = None
         else:
             self.id_user_connecte = id_user_connecte
@@ -336,9 +427,9 @@ class PageVenteParMsin(ctk.CTkFrame):
                 port=cfg['port']
             )
         except FileNotFoundError:
-            messagebox.showerror("Config manquante", "Fichier 'config.json' introuvable.")
+            MessageDialog("Config manquante", "Fichier 'config.json' introuvable.", 'error')
         except psycopg2.Error as e:
-            messagebox.showerror("Connexion DB", f"Impossible de se connecter : {e}")
+            MessageDialog("Connexion DB", f"Impossible de se connecter : {e}", 'error')
         return None
 
     # Alias public conservé pour compatibilité avec le code existant
@@ -954,7 +1045,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.entry_ref_vente.insert(0, ref)
             self.entry_ref_vente.configure(state="readonly")
         except Exception as e:
-            messagebox.showerror("Erreur", f"Génération référence : {e}")
+            MessageDialog("Erreur", f"Génération référence : {e}", 'error')
         finally:
             cur.close(); conn.close()
 
@@ -986,7 +1077,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             defaut = next((n for n, i in self.magasin_map.items() if i == idmag_user), noms[0])
             self.combo_magasin.set(defaut)
         except Exception as e:
-            messagebox.showerror("Erreur", f"Chargement magasins : {e}")
+            MessageDialog("Erreur", f"Chargement magasins : {e}", 'error')
         finally:
             cur.close(); conn.close()
 
@@ -1001,7 +1092,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.client_map = {nom: id_ for id_, nom in clients}
             self.client_ids = [id_ for id_, _ in clients]
         except Exception as e:
-            messagebox.showerror("Erreur", f"Chargement clients : {e}")
+            MessageDialog("Erreur", f"Chargement clients : {e}", 'error')
         finally:
             cur.close(); conn.close()
 
@@ -1032,7 +1123,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             else:
                 self.infos_societe = _defaults
         except Exception as e:
-            messagebox.showwarning("Avertissement", f"Infos société : {e}")
+            MessageDialog("Avertissement", f"Infos société : {e}", 'warning')
             self.infos_societe = _defaults
         finally:
             cur.close(); conn.close()
@@ -1089,13 +1180,13 @@ class PageVenteParMsin(ctk.CTkFrame):
         self.detail_vente, avec contrôle de stock et de remise.
         """
         if not self.article_selectionne:
-            messagebox.showwarning("Attention", "Veuillez d'abord sélectionner un article.")
+            MessageDialog("Attention", "Veuillez d'abord sélectionner un article.", 'warning')
             return
 
         mag_nom = self.combo_magasin.get()
         idmag   = self.magasin_map.get(mag_nom)
         if not idmag:
-            messagebox.showerror("Erreur", "Veuillez sélectionner un magasin valide.")
+            MessageDialog("Erreur", "Veuillez sélectionner un magasin valide.", 'error')
             return
 
         # Vérification unité Dépôt B
@@ -1104,7 +1195,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.article_selectionne['idunite']
         )
         if not ok:
-            messagebox.showerror("Unité Non Autorisée — Dépôt B", msg)
+            MessageDialog("Unité Non Autorisée — Dépôt B", msg, 'error')
             return
 
         try:
@@ -1112,26 +1203,27 @@ class PageVenteParMsin(ctk.CTkFrame):
             prixunit = self.parser_nombre(self.entry_prixunit.get())
             remise   = self.parser_nombre(self.entry_remise.get() or "0")
         except ValueError:
-            messagebox.showerror("Erreur", "Quantité, prix ou remise invalide.")
+            MessageDialog("Erreur", "Quantité, prix ou remise invalide.", 'error')
             return
 
         if qtvente <= 0:
-            messagebox.showwarning("Avertissement", "La quantité doit être > 0.")
+            MessageDialog("Avertissement", "La quantité doit être > 0.", 'warning')
             return
         if prixunit <= 0:
-            messagebox.showwarning("Attention", "Le prix unitaire doit être positif.")
+            MessageDialog("Attention", "Le prix unitaire doit être positif.", 'warning')
             return
         if remise < 0:
-            messagebox.showwarning("Attention", "La remise ne peut pas être négative.")
+            MessageDialog("Attention", "La remise ne peut pas être négative.", 'warning')
             return
 
         # Contrôle stock (uniquement pour un nouvel ajout, pas en modification)
         if self.index_ligne_selectionnee is None and self.stock_temporaire_selection is not None:
             if qtvente > self.stock_temporaire_selection:
-                messagebox.showwarning(
+                MessageDialog(
                     "Stock Insuffisant",
                     f"Quantité saisie ({self.formater_nombre(qtvente)}) dépasse "
                     f"le stock ({self.formater_nombre(self.stock_temporaire_selection)}).",
+                    'warning'
                 )
                 return
 
@@ -1175,7 +1267,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.index_ligne_selectionnee = self.tree_details.index(item)
             detail = self.detail_vente[self.index_ligne_selectionnee]
         except IndexError:
-            messagebox.showerror("Erreur", "Erreur de récupération de la ligne.")
+            MessageDialog("Erreur", "Erreur de récupération de la ligne.", 'error')
             self.reset_detail_form()
             return
 
@@ -1261,16 +1353,16 @@ class PageVenteParMsin(ctk.CTkFrame):
         """Supprime la ligne sélectionnée dans le Treeview (avec confirmation)."""
         item = self.tree_details.focus()
         if not item:
-            messagebox.showwarning("Attention", "Veuillez sélectionner une ligne.")
+            MessageDialog("Attention", "Veuillez sélectionner une ligne.", 'warning')
             return
-        if messagebox.askyesno("Confirmation", "Supprimer cette ligne de détail ?"):
+        if YesNoDialog("Confirmation", "Supprimer cette ligne de détail ?").result:
             idx = self.tree_details.index(item)
             try:
                 self.detail_vente.pop(idx)
                 self.reset_detail_form()
                 self.charger_details_treeview()
             except IndexError:
-                messagebox.showerror("Erreur", "Erreur lors de la suppression.")
+                MessageDialog("Erreur", "Erreur lors de la suppression.", 'error')
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 9 — LOGIQUE MÉTIER : FENÊTRES DE RECHERCHE
@@ -1348,7 +1440,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                     tree.insert("", "end", values=row,
                                 tags=("even" if idx % 2 == 0 else "odd",))
             except Exception as e:
-                messagebox.showerror("Erreur", str(e))
+                MessageDialog("Erreur", str(e), 'error')
             finally:
                 cur.close(); conn.close()
 
@@ -1358,7 +1450,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         def valider():
             sel = tree.selection()
             if not sel:
-                messagebox.showwarning("Attention", "Sélectionnez un client.")
+                MessageDialog("Attention", "Sélectionnez un client.", 'warning')
                 return
             vals = tree.item(sel[0])['values']
             self.entry_client.delete(0, "end")
@@ -1381,8 +1473,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         pour le magasin sélectionné. Bloque si stock ≤ 0.
         """
         if self.index_ligne_selectionnee is not None:
-            messagebox.showwarning("Attention",
-                                   "Validez ou annulez la modification en cours.")
+            MessageDialog("Attention",
+                          "Validez ou annulez la modification en cours.", 'warning')
             return
 
         fen = ctk.CTkToplevel(self)
@@ -1413,7 +1505,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         tf = ctk.CTkFrame(mf, fg_color="transparent")
         tf.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
-        cols = ("ID_Article", "ID_Unite", "Code", "Désignation", "Unité", "Prix Unitaire", "Stock")
+        cols = ("ID_Article", "ID_Unite", "Code", "Désignation", "Unité", "Quantité", "Prix Unitaire", "Stock")
         tree = ttk.Treeview(tf, columns=cols, show="headings",
                              height=18, style="Vente.Treeview")
         tree.tag_configure("even",      background=Colors.BG_CARD)
@@ -1425,6 +1517,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         tree.heading("Code",       text="Code")
         tree.heading("Désignation",text="Désignation")
         tree.heading("Unité",      text="Unité")
+        tree.heading("Quantité",   text="Quantité")
         tree.heading("Prix Unitaire", text="Prix Unitaire")
         tree.heading("Stock",      text="Stock Magasin")
 
@@ -1433,6 +1526,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         tree.column("Code",       width=150, anchor="w")
         tree.column("Désignation",width=350, anchor="w")
         tree.column("Unité",      width=100, anchor="w")
+        tree.column("Quantité",   width=100, anchor="e")
         tree.column("Prix Unitaire", width=110, anchor="e")
         tree.column("Stock",      width=130, anchor="e")
 
@@ -1454,7 +1548,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 # Requête consolidée avec coefficient hiérarchique
                 cur.execute("""
                 WITH uc AS (
-                    SELECT idarticle, idunite, niveau, designationunite,
+                    SELECT idarticle, idunite, niveau, designationunite, qtunite,
                            exp(sum(ln(NULLIF(CASE WHEN qtunite>0 THEN qtunite ELSE 1 END,0)))
                                OVER (PARTITION BY idarticle ORDER BY niveau
                                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
@@ -1499,7 +1593,8 @@ class PageVenteParMsin(ctk.CTkFrame):
                     FROM tb_prix
                 )
                 SELECT a.idarticle, u.idunite, u.codearticle, a.designation,
-                       uc.designationunite, COALESCE(p.prix,0),
+                       uc.designationunite, COALESCE(uc.qtunite,1),
+                       COALESCE(p.prix,0),
                        COALESCE(s.solde_base,0)/NULLIF(COALESCE(uc.coeff,1),0) AS stock
                 FROM tb_article a
                 JOIN tb_unite u ON a.idarticle=u.idarticle
@@ -1511,17 +1606,18 @@ class PageVenteParMsin(ctk.CTkFrame):
                 """, [idmag]*10 + [f"%{filtre}%", f"%{filtre}%"])
 
                 for idx, row in enumerate(cur.fetchall()):
-                    stk = max(0, row[6])
+                    stk = max(0, row[7])
                     tags = ("even" if idx % 2 == 0 else "odd",)
                     if stk <= 0: tags = tags + ("stock_nul",)
                     tree.insert("", "end", values=(
                         row[0], row[1], row[2] or "",
                         row[3] or "", row[4] or "",
                         self.formater_nombre(row[5]),
+                        self.formater_nombre(row[6]),
                         self.formater_nombre(stk),
                     ), tags=tags)
             except Exception as e:
-                messagebox.showerror("Erreur chargement", str(e))
+                MessageDialog("Erreur chargement", str(e), 'error')
             finally:
                 cur.close(); conn.close()
 
@@ -1533,11 +1629,12 @@ class PageVenteParMsin(ctk.CTkFrame):
                 messagebox.showwarning("Attention", "Sélectionnez un article.")
                 return
             vals = tree.item(sel[0])['values']
-            stk  = self.parser_nombre(str(vals[6]))
+            stk  = self.parser_nombre(str(vals[7]))
             if stk <= 0:
-                messagebox.showwarning(
+                MessageDialog(
                     "Stock insuffisant",
-                    f"Stock disponible : {vals[6]} {vals[4]}. Impossible de continuer.",
+                    f"Stock disponible : {vals[7]} {vals[4]}. Impossible de continuer.",
+                    'warning'
                 )
                 return
             self.stock_temporaire_selection = stk
@@ -1548,7 +1645,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 'code_article': vals[2],
                 'nom_article': vals[3],
                 'nom_unite':   vals[4],
-                'prixunit':    self.parser_nombre(str(vals[5])),
+                'prixunit':    self.parser_nombre(str(vals[6])),
                 'stock_temporaire': stk,
             })
 
@@ -1602,7 +1699,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         if getattr(self, '_enregistrement_en_cours', False):
             return
         if not self.entry_client.get().strip():
-            messagebox.showwarning("Attention", "Veuillez entrer ou choisir un client.")
+            MessageDialog("Attention", "Veuillez entrer ou choisir un client.", 'warning')
             return
         try:
             self.btn_enregistrer.configure(state="disabled")
@@ -1627,10 +1724,10 @@ class PageVenteParMsin(ctk.CTkFrame):
         try:
             # ── Validations préliminaires ──────────────────────────────────────
             if not self.detail_vente:
-                messagebox.showwarning("Attention", "Ajoutez des articles avant d'enregistrer.")
+                MessageDialog("Attention", "Ajoutez des articles avant d'enregistrer.", 'warning')
                 return
             if self.id_user_connecte is None:
-                messagebox.showerror("Erreur", "Aucun utilisateur connecté.")
+                MessageDialog("Erreur", "Aucun utilisateur connecté.", 'error')
                 return
 
             date_str    = self.entry_date_vente.get()
@@ -1638,7 +1735,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             client_nom  = self.entry_client.get().strip()
 
             if not client_nom:
-                messagebox.showerror("Erreur", "Veuillez entrer ou choisir un client.")
+                MessageDialog("Erreur", "Veuillez entrer ou choisir un client.", 'error')
                 return
 
             conn = self._connect_db()
@@ -1657,17 +1754,18 @@ class PageVenteParMsin(ctk.CTkFrame):
                         for d in self.detail_vente
                     )
                     if total_vente > row[0]:
-                        messagebox.showerror(
+                        MessageDialog(
                             "❌ Crédit Dépassé",
                             f"Client : {client_nom}\n"
                             f"Montant vente : {self.formater_nombre(total_vente)} Ar\n"
                             f"Crédit autorisé : {self.formater_nombre(row[0])} Ar\n"
                             f"Dépassement : {self.formater_nombre(total_vente - row[0])} Ar\n\n"
-                            "Réduisez le montant ou augmentez le crédit du client."
+                            "Réduisez le montant ou augmentez le crédit du client.",
+                            'error'
                         )
                         return
             except Exception as e:
-                messagebox.showerror("Erreur", f"Vérification crédit : {e}")
+                MessageDialog("Erreur", f"Vérification crédit : {e}", 'error')
                 return
 
             # ── Gestion / création du client ───────────────────────────────────
@@ -1681,7 +1779,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                     self.client_map[client_nom] = idclient
                 except Exception as e:
                     conn.rollback()
-                    messagebox.showerror("Erreur", f"Impossible d'ajouter le client : {e}")
+                    MessageDialog("Erreur", f"Impossible d'ajouter le client : {e}", 'error')
                     return
 
             # ── Parse de la date ───────────────────────────────────────────────
@@ -1690,7 +1788,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 date_vente = datetime.strptime(date_str, "%d/%m/%Y").replace(
                     hour=now.hour, minute=now.minute, second=now.second)
             except ValueError:
-                messagebox.showerror("Erreur de Date", "Format attendu : JJ/MM/AAAA")
+                MessageDialog("Erreur de Date", "Format attendu : JJ/MM/AAAA", 'error')
                 return
 
             # ── Groupement par magasin ─────────────────────────────────────────
@@ -1755,11 +1853,11 @@ class PageVenteParMsin(ctk.CTkFrame):
 
             except psycopg2.errors.UniqueViolation as e:
                 conn.rollback()
-                messagebox.showerror("Doublon", f"Facture déjà existante.\n{e}")
+                MessageDialog("Doublon", f"Facture déjà existante.\n{e}", 'error')
                 return
             except Exception as e:
                 conn.rollback()
-                messagebox.showerror("Erreur", str(e))
+                MessageDialog("Erreur", str(e), 'error')
                 traceback.print_exc()
                 return
             finally:
@@ -1770,9 +1868,9 @@ class PageVenteParMsin(ctk.CTkFrame):
             if self.settings.get('Vente_ImpressionConfirmation', 1):
                 lines = "\n".join(f"• {f['ref']} ({f['magasin']}): {self.formater_nombre(f['total'])} Ar"
                                   for f in factures_creees)
-                messagebox.showinfo("Succès",
+                MessageDialog("Succès",
                     f"{len(factures_creees)} facture(s) créée(s) :\n\n{lines}"
-                    f"\n\nTotal : {self.formater_nombre(total_general)} Ar")
+                    f"\n\nTotal : {self.formater_nombre(total_general)} Ar", 'info')
 
             # ── Impression automatique selon settings ──────────────────────────
             imp_a5     = self.settings.get('Vente_ImpressionA5', 1)
@@ -1782,8 +1880,8 @@ class PageVenteParMsin(ctk.CTkFrame):
                     if imp_a5 or imp_ticket:
                         self.imprimer_facture_avec_settings(fac['idvente'], imp_a5, imp_ticket)
             except Exception as e:
-                messagebox.showerror("Erreur Impression",
-                                     f"Facture enregistrée mais impression échouée : {e}")
+                MessageDialog("Erreur Impression",
+                              f"Facture enregistrée mais impression échouée : {e}", 'error')
 
             # ── Réinitialisation du formulaire ─────────────────────────────────
             try:
@@ -1841,13 +1939,13 @@ class PageVenteParMsin(ctk.CTkFrame):
                 self.generate_ticket_80mm(data, fn)
                 self.open_file(fn)
         except Exception as e:
-            messagebox.showerror("Erreur Impression", str(e))
+            MessageDialog("Erreur Impression", str(e), 'error')
 
     def imprimer_facture_unique(self, idvente: int):
         """Impression avec dialogue de choix du format (A5 ou Ticket 80 mm)."""
         data = self.get_data_facture(idvente)
         if not data or not data.get('vente'):
-            messagebox.showerror("Erreur", f"Données introuvables (ID: {idvente}).")
+            MessageDialog("Erreur", f"Données introuvables (ID: {idvente}).", 'error')
             return
         dlg = SimpleDialogWithChoice(self,
                                       title="Format d'impression",
@@ -1935,7 +2033,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             data['magasin'] = premier_mag or ''
             return data
         except Exception as e:
-            messagebox.showerror("Erreur", str(e))
+            MessageDialog("Erreur", str(e), 'error')
             traceback.print_exc()
             return None
         finally:
@@ -2177,7 +2275,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             doc.build(elems)
             print(f"✅ Ticket PDF généré : {filename}")
         except Exception as e:
-            messagebox.showerror("Erreur", f"Erreur ticket PDF : {e}")
+            MessageDialog("Erreur", f"Erreur ticket PDF : {e}", 'error')
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 12 — LOGIQUE MÉTIER : PROFORMAS
@@ -2186,7 +2284,7 @@ class PageVenteParMsin(ctk.CTkFrame):
     def open_recherche_proforma(self):
         """Ouvre la fenêtre de sélection d'un proforma avec statut 'A Facturer'."""
         if self.mode_modification:
-            messagebox.showwarning("Attention", "Terminez la modification en cours.")
+            MessageDialog("Attention", "Terminez la modification en cours.", 'warning')
             return
 
         fen = ctk.CTkToplevel(self)
@@ -2243,7 +2341,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                         self.formater_nombre(tot), nb,
                     ), tags=("even" if idx % 2 == 0 else "odd",))
             except Exception as e:
-                messagebox.showerror("Erreur", str(e))
+                MessageDialog("Erreur", str(e), 'error')
             finally:
                 cur.close(); conn.close()
 
@@ -2251,7 +2349,7 @@ class PageVenteParMsin(ctk.CTkFrame):
 
         def valider():
             sel = tree.selection()
-            if not sel: messagebox.showwarning("Attention", "Sélectionnez un proforma."); return
+            if not sel: MessageDialog("Attention", "Sélectionnez un proforma.", 'warning'); return
             idp = tree.item(sel[0])['values'][0]
             fen.destroy()
             self.charger_proforma_pour_vente(idp)
@@ -2279,7 +2377,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 WHERE p.idprof=%s AND p.deleted=0
             """, (idprof,))
             row = cur.fetchone()
-            if not row: messagebox.showerror("Erreur", "Proforma introuvable."); return
+            if not row: MessageDialog("Erreur", "Proforma introuvable.", 'error'); return
             refprof, obs, nomcli, idclient = row
 
             cur.execute("""
@@ -2301,12 +2399,12 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.detail_vente = []; self.charger_details_treeview()
             self.desactiver_entree_manuelle()
             self.afficher_bouton_ajouter_proforma()
-            messagebox.showinfo("Proforma Chargé",
-                                f"Proforma N° {refprof} chargé.\n\n"
-                                "Sélectionnez le Magasin puis cliquez sur "
-                                "'Ajouter Lignes Proforma'.")
+            MessageDialog("Proforma Chargé",
+                          f"Proforma N° {refprof} chargé.\n\n"
+                          "Sélectionnez le Magasin puis cliquez sur "
+                          "'Ajouter Lignes Proforma'.", 'info')
         except Exception as e:
-            messagebox.showerror("Erreur", str(e)); self.reset_proforma_state()
+            MessageDialog("Erreur", str(e), 'error'); self.reset_proforma_state()
         finally:
             cur.close(); conn.close()
 
@@ -2316,13 +2414,13 @@ class PageVenteParMsin(ctk.CTkFrame):
         vérification du stock disponible et des règles Dépôt B.
         """
         if not self.details_proforma_a_ajouter:
-            messagebox.showwarning("Attention", "Aucun détail proforma à ajouter.")
+            MessageDialog("Attention", "Aucun détail proforma à ajouter.", 'warning')
             return
 
         mag_nom = self.combo_magasin.get()
         idmag   = self.magasin_map.get(mag_nom)
         if not idmag:
-            messagebox.showerror("Erreur", "Sélectionnez un magasin valide.")
+            MessageDialog("Erreur", "Sélectionnez un magasin valide.", 'error')
             return
 
         ajoutes = []; bloquee = []; stock_insuf = []
@@ -2357,11 +2455,11 @@ class PageVenteParMsin(ctk.CTkFrame):
         if bloquee:    errs.append("⚠ UNITÉS BLOQUÉES (Dépôt B):\n" + "\n".join(bloquee))
         if stock_insuf: errs.append("📦 STOCK INSUFFISANT:\n" + "\n".join(stock_insuf))
         if errs:
-            messagebox.showwarning("Attention",
-                                   f"{len(ajoutes)} ligne(s) ajoutée(s).\n\n" + "\n\n".join(errs))
+            MessageDialog("Attention",
+                          f"{len(ajoutes)} ligne(s) ajoutée(s).\n\n" + "\n\n".join(errs), 'warning')
         else:
-            messagebox.showinfo("Ajout Réussi",
-                                f"Toutes les {len(ajoutes)} lignes ont été ajoutées.")
+            MessageDialog("Ajout Réussi",
+                          f"Toutes les {len(ajoutes)} lignes ont été ajoutées.", 'info')
 
     def marquer_proforma_comme_facture(self, idprof: int):
         """Met le statut du proforma à 'Facturé' après conversion en vente."""
@@ -2460,11 +2558,11 @@ class PageVenteParMsin(ctk.CTkFrame):
             if cur.fetchone():
                 self.btn_creer_avoir.configure(state="normal")
                 self.entry_remise.configure(state="normal")
-                messagebox.showinfo("Succès", "Accès accordé aux remises et avoirs.")
+                MessageDialog("Succès", "Accès accordé aux remises et avoirs.", 'info')
             else:
-                messagebox.showerror("Erreur", "Code d'autorisation incorrect.")
+                MessageDialog("Erreur", "Code d'autorisation incorrect.", 'error')
         except Exception as e:
-            messagebox.showerror("Erreur", str(e))
+            MessageDialog("Erreur", str(e), 'error')
         finally:
             conn.close()
 
@@ -2556,7 +2654,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             PageSuiviStockDepot(self.fenetre_suivi, iduser=self.id_user_connecte).pack(
                 fill="both", expand=True, padx=10, pady=10)
         except Exception as e:
-            messagebox.showerror("Erreur d'ouverture", str(e))
+            MessageDialog("Erreur d'ouverture", str(e), 'error')
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 16 — TRI DU TREEVIEW (utilitaire partagé)
@@ -2608,7 +2706,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 WHERE v.id=%s
             """, (idvente,))
             row = cur.fetchone()
-            if not row: messagebox.showerror("Erreur", "Facture introuvable."); return
+            if not row: MessageDialog("Erreur", "Facture introuvable.", 'error'); return
             _id, ref, date_r, desc, nomcli, idclient = row
 
             cur.execute("""
@@ -2652,10 +2750,10 @@ class PageVenteParMsin(ctk.CTkFrame):
                 fg_color=Colors.WARNING, hover_color=Colors.WARNING_LIGHT_C,
                 state="normal",
             )
-            messagebox.showinfo("Chargement OK",
-                                f"Facture N° {ref} chargée pour modification.")
+            MessageDialog("Chargement OK",
+                          f"Facture N° {ref} chargée pour modification.", 'info')
         except Exception as e:
-            messagebox.showerror("Erreur", str(e)); traceback.print_exc(); self.nouveau_facture()
+            MessageDialog("Erreur", str(e), 'error'); traceback.print_exc(); self.nouveau_facture()
         finally:
             cur.close(); conn.close()
 
