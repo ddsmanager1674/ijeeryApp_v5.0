@@ -14,7 +14,7 @@
 """
 
 import customtkinter as ctk
-from tkinter import messagebox, simpledialog
+from tkinter import messagebox, simpledialog, ttk
 import psycopg2
 import json
 from datetime import date, datetime, timedelta
@@ -127,6 +127,7 @@ class PagePmtFacture(ctk.CTkToplevel):
         self.deiconify()
         self.grab_set()
         self.focus_set()
+        self.bind("<Return>", self._on_valider_enter)
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION UI — seule partie modifiée
@@ -251,7 +252,20 @@ class PagePmtFacture(ctk.CTkToplevel):
             placeholder_text="Détails du paiement…",
         )
         self.entry_description_credit.grid(
-            row=2, column=1, columnspan=3, padx=(0, 14), pady=(8, 14), sticky="ew")
+            row=2, column=1, columnspan=3, padx=(0, 14), pady=(8, 4), sticky="ew")
+
+        # Lien transparent : aperçu de la vente en cours
+        ctk.CTkButton(
+            card_saisie,
+            text="👁  Voir détails de vente",
+            font=ctk.CTkFont(family="Roboto", size=11, weight="bold", underline=True),
+            fg_color="transparent",
+            hover_color=Colors.BG_INPUT,
+            text_color=Colors.PRIMARY,
+            corner_radius=6,
+            height=26,
+            command=self._ouvrir_apercu_vente,
+        ).grid(row=3, column=1, columnspan=3, padx=(0, 14), pady=(0, 12), sticky="w")
 
         # ── BoolVar (requis par la logique métier) ────────────────────────────
         self.var_use_description = ctk.BooleanVar(value=True)
@@ -285,6 +299,174 @@ class PagePmtFacture(ctk.CTkToplevel):
             height=38, corner_radius=8, width=120,
             command=self.destroy,
         ).grid(row=0, column=2, padx=(0, 0))
+
+    def _charger_apercu_vente_data(self):
+        """Récupère les infos vente + détails pour l'aperçu (lecture seule)."""
+        conn = self.connect_db()
+        if not conn:
+            return None, []
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT
+                    v.refvente,
+                    COALESCE(c.nomcli, 'Client Inconnu') AS nomclient,
+                    COALESCE(v.totmtvente, 0) AS totmtvente,
+                    v.dateregistre,
+                    COALESCE(m.designationmag, 'N/A') AS nommagasin
+                FROM tb_vente v
+                LEFT JOIN tb_client c ON c.idclient = v.idclient
+                LEFT JOIN tb_magasin m ON m.idmag = v.idmag
+                WHERE v.refvente = %s
+                LIMIT 1
+            """, (self.refvente,))
+            vente_info = cur.fetchone()
+
+            cur.execute("""
+                SELECT
+                    vd.qtvente,
+                    COALESCE(a.designation, 'Article') AS designation_article,
+                    COALESCE(u.designationunite, 'Unité') AS designation_unite,
+                    COALESCE(vd.prixunit, 0) AS prixunit,
+                    COALESCE(vd.remise, 0) AS remise,
+                    (COALESCE(vd.qtvente, 0) * (COALESCE(vd.prixunit, 0) - COALESCE(vd.remise, 0))) AS montant
+                FROM tb_ventedetail vd
+                INNER JOIN tb_vente v ON v.id = vd.idvente
+                LEFT JOIN tb_article a ON a.idarticle = vd.idarticle
+                LEFT JOIN tb_unite u ON u.idunite = vd.idunite
+                WHERE v.refvente = %s
+                  AND COALESCE(vd.deleted, 0) = 0
+                ORDER BY a.designation ASC, vd.id ASC
+            """, (self.refvente,))
+            details = cur.fetchall()
+            return vente_info, details
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de charger les détails de vente : {e}")
+            return None, []
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+            conn.close()
+
+    def _ouvrir_apercu_vente(self):
+        """Fenêtre d'aperçu: infos facture + tableau détails (lecture seule)."""
+        vente_info, details = self._charger_apercu_vente_data()
+        if not vente_info:
+            messagebox.showwarning("Attention", "Aucune information de vente trouvée.")
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title(f"Aperçu Vente — {self.refvente}")
+        win.resizable(False, False)
+        win.configure(fg_color=Colors.BG_PAGE)
+        w, h = 900, 520
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+        win.transient(self)
+        win.grab_set()
+
+        # Header
+        hdr = ctk.CTkFrame(win, fg_color=Colors.MIDNIGHT, corner_radius=0, height=42)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+        ctk.CTkLabel(
+            hdr, text="👁  Aperçu de la vente",
+            font=Fonts.bold(14), text_color=Colors.TEXT_ON_DARK
+        ).pack(side="left", padx=12, pady=8)
+
+        # Infos vente
+        info = ctk.CTkFrame(win, fg_color=Colors.BG_CARD, corner_radius=8)
+        info.pack(fill="x", padx=12, pady=(10, 6))
+        for c in range(5):
+            info.grid_columnconfigure(c, weight=1)
+
+        ref, nomclient, total, datereg, nommag = vente_info
+        date_txt = datereg.strftime("%d/%m/%Y %H:%M:%S") if datereg else ""
+        total_txt = self._formater_montant(float(total or 0))
+
+        _mk_info_bloc(info, 0, "Ref Vente", str(ref or ""))
+        _mk_info_bloc(info, 1, "Client", str(nomclient or ""))
+        _mk_info_bloc(info, 2, "Total", f"{total_txt} Ar", val_color=Colors.SUCCESS_DARK)
+        _mk_info_bloc(info, 3, "Date", date_txt)
+        _mk_info_bloc(info, 4, "Magasin", str(nommag or ""))
+
+        # Tableau détails
+        tbl_wrap = ctk.CTkFrame(win, fg_color=Colors.BG_CARD, corner_radius=8)
+        tbl_wrap.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure(
+            "Apercu.Treeview",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD,
+            rowheight=23,
+            font=("Roboto", 10),
+            borderwidth=0
+        )
+        style.configure(
+            "Apercu.Treeview.Heading",
+            background=Colors.BG_HEADER,
+            foreground="#FFFFFF",
+            font=("Roboto", 10, "bold"),
+            relief="flat"
+        )
+
+        cols = ("Qté", "Article", "Unité", "PU", "Remise", "Montant")
+        tree = ttk.Treeview(tbl_wrap, columns=cols, show="headings", style="Apercu.Treeview", height=12)
+        tree.tag_configure("even", background=Colors.BG_CARD)
+        tree.tag_configure("odd", background="#F0F4F8")
+
+        cfg = {
+            "Qté": (70, "e"),
+            "Article": (280, "w"),
+            "Unité": (110, "w"),
+            "PU": (110, "e"),
+            "Remise": (100, "e"),
+            "Montant": (120, "e"),
+        }
+        for col in cols:
+            wcol, anc = cfg[col]
+            tree.heading(col, text=col)
+            tree.column(col, width=wcol, anchor=anc)
+
+        sy = ctk.CTkScrollbar(tbl_wrap, orientation="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sy.set)
+        tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=8)
+        sy.pack(side="right", fill="y", padx=(0, 8), pady=8)
+
+        for i, r in enumerate(details):
+            qte, art, unite, pu, remise, montant = r
+            tree.insert(
+                "", "end",
+                values=(
+                    str(qte or ""),
+                    str(art or ""),
+                    str(unite or ""),
+                    self._formater_montant(float(pu or 0)),
+                    self._formater_montant(float(remise or 0)),
+                    self._formater_montant(float(montant or 0)),
+                ),
+                tags=("even" if i % 2 == 0 else "odd",)
+            )
+
+        # Footer action
+        foot = ctk.CTkFrame(win, fg_color=Colors.BG_PAGE, corner_radius=0)
+        foot.pack(fill="x", padx=12, pady=(0, 12))
+        ctk.CTkButton(
+            foot, text="Fermer",
+            font=Fonts.bold(11),
+            fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
+            text_color=Colors.TEXT_ON_DARK,
+            width=120, height=34, corner_radius=8,
+            command=win.destroy
+        ).pack(side="right")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION UI — Dialogue Autorisation (refonte uniquement)
@@ -726,6 +908,11 @@ class PagePmtFacture(ctk.CTkToplevel):
                         pass
             except Exception:
                 pass
+
+    def _on_valider_enter(self, event=None):
+        """Raccourci clavier Entrée -> même action que le bouton Valider."""
+        self._on_valider_click()
+        return "break"
 
     def valider_paiement(self):
         if self._payment_finalized:

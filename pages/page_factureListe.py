@@ -70,6 +70,7 @@ class PageFactureListe(ctk.CTkFrame):
         # ── État ──────────────────────────────────────────────────────────────
         self.data_df            = pd.DataFrame()
         self.base_df            = pd.DataFrame()
+        self._open_payment_lock = False
         self.filtre_actif       = False
         self.date_debut_filtre  = None
         self.date_fin_filtre    = None
@@ -192,6 +193,7 @@ class PageFactureListe(ctk.CTkFrame):
 
         # ── Double-clic paiement ──────────────────────────────────────────────
         self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<Return>", self.on_double_click)
 
         # ── En-têtes & colonnes ───────────────────────────────────────────────
         col_cfg = {
@@ -287,6 +289,11 @@ class PageFactureListe(ctk.CTkFrame):
         Gère le double-clic pour ouvrir PagePmtFacture.
         *** LOGIQUE MÉTIER — NE PAS MODIFIER ***
         """
+        if self._open_payment_lock:
+            return
+        self._open_payment_lock = True
+        self.after(500, lambda: setattr(self, "_open_payment_lock", False))
+
         if PagePmtFacture is None:
             messagebox.showerror("Erreur", "La page de paiement PagePmtFacture n'a pas pu être chargée.")
             return
@@ -333,8 +340,40 @@ class PageFactureListe(ctk.CTkFrame):
             return
 
         self.tree.item(selected_item, tags=())
-        PagePmtFacture(self.master, paiement_data)
-        self.master.after(200, self.reload_data)
+
+        selected_refvente = str(paiement_data.get("refvente", "")).strip()
+        pay_win = PagePmtFacture(self.master, paiement_data)
+
+        def _after_payment_closed(event=None):
+            if event is not None and event.widget is not pay_win:
+                return
+            should_restore_focus = bool(selected_refvente)
+            try:
+                self.reset_date_filter()
+            except Exception:
+                should_restore_focus = False
+
+            if not should_restore_focus:
+                return
+
+            def _restore_focus():
+                try:
+                    for iid in self.tree.get_children():
+                        vals = self.tree.item(iid, "values")
+                        if vals and str(vals[0]).strip() == selected_refvente:
+                            self.tree.selection_set(iid)
+                            self.tree.focus(iid)
+                            self.tree.see(iid)
+                            break
+                except Exception:
+                    pass
+
+            self.after(120, _restore_focus)
+
+        try:
+            pay_win.bind("<Destroy>", _after_payment_closed, add="+")
+        except Exception:
+            self.master.after(200, self.reload_data)
 
     def reload_data(self):
         """Recharge les données en respectant le filtre actif."""
