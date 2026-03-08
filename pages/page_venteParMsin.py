@@ -1626,7 +1626,10 @@ class PageVenteParMsin(ctk.CTkFrame):
         def valider():
             sel = tree.selection()
             if not sel:
-                messagebox.showwarning("Attention", "Sélectionnez un article.")
+                MessageDialog(
+                    "Attention", 
+                    "Sélectionnez un article!",
+                    'warning')
                 return
             vals = tree.item(sel[0])['values']
             stk  = self.parser_nombre(str(vals[7]))
