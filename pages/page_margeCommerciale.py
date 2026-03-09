@@ -242,6 +242,15 @@ class PageStock(ctk.CTkFrame):
         except:
             return "0,00%"
 
+    def parser_nombre(self, texte):
+        """Convertit un nombre formaté FR (1.234,56) en float."""
+        try:
+            s = str(texte).strip().replace('%', '')
+            s = s.replace('.', '').replace(',', '.')
+            return float(s) if s else 0.0
+        except:
+            return 0.0
+
     def creer_treeview(self):
         """Initialise le tableau avec colonnes larges et barres de défilement"""
         if self.tree:
@@ -253,11 +262,11 @@ class PageStock(ctk.CTkFrame):
             "Unité",
             "Prix d'achat",
             "Prix de vente",
-            "Marge Bénéficiaire",
+            "Marge Unitaire",
             "Marge (%)"
         )
         colonnes_magasins = [mag[1] for mag in self.magasins]
-        self.colonnes_dynamiques = colonnes_fixes + tuple(colonnes_magasins) + ("Total",)
+        self.colonnes_dynamiques = colonnes_fixes + tuple(colonnes_magasins) + ("Total", "Marge Total")
 
         self.tree = ttk.Treeview(
             self.tree_frame_inner,
@@ -287,7 +296,7 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=350, anchor="w",      minwidth=200)
             elif col == "Code":
                 self.tree.column(col, width=150, anchor="center")
-            elif col in ("Prix d'achat", "Prix de vente", "Marge Bénéficiaire", "Marge (%)"):
+            elif col in ("Prix d'achat", "Prix de vente", "Marge Unitaire", "Marge (%)", "Marge Total"):
                 self.tree.column(col, width=120, anchor="e")
             elif col == "Total":
                 self.tree.column(col, width=110, anchor="center", minwidth=90, stretch=True)
@@ -379,6 +388,7 @@ class PageStock(ctk.CTkFrame):
                 ]
                 for _idmag, _nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(0))
+                valeurs.append(self.formater_nombre(0))
                 valeurs.append(self.formater_nombre(0))
                 self.all_data.append((valeurs, 0.0))
             self.recharger_treeview()
@@ -534,6 +544,7 @@ class PageStock(ctk.CTkFrame):
                 for _, nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(data['stocks'].get(nom_mag, 0)))
                 valeurs.append(self.formater_nombre(data['total']))
+                valeurs.append(self.formater_nombre(0))
                 all_data.append((valeurs, data['total']))
             return all_data
         except Exception as e:
@@ -659,6 +670,10 @@ class PageStock(ctk.CTkFrame):
     def on_filtre_magasin_change(self, valeur):
         self.filtre_magasin = (valeur or "Tous").strip() or "Tous"
         self.appliquer_filtre_colonnes_magasin()
+        if self.entry_recherche.get().strip():
+            self.filtrer_stocks()
+        else:
+            self.recharger_treeview()
 
     def appliquer_filtre_colonnes_magasin(self):
         if not self.tree:
@@ -674,6 +689,30 @@ class PageStock(ctk.CTkFrame):
             self.tree.column("Total", width=110, minwidth=90, stretch=True, anchor="center")
         else:
             self.tree.column("Total", width=0, minwidth=0, stretch=False, anchor="center")
+
+    def _valeurs_avec_marge_totale(self, valeurs):
+        """Retourne une copie de valeurs avec 'Marge Total' recalculée selon le filtre magasin actif."""
+        try:
+            valeurs_out = list(valeurs)
+            idx_marge_benef = self.colonnes_dynamiques.index("Marge Unitaire")
+            idx_total = self.colonnes_dynamiques.index("Total")
+            idx_marge_total = self.colonnes_dynamiques.index("Marge Total")
+            marge_benef = self.parser_nombre(valeurs_out[idx_marge_benef])
+
+            if self.filtre_magasin == "Tous":
+                stock_courant = self.parser_nombre(valeurs_out[idx_total])
+            else:
+                if self.filtre_magasin in self.colonnes_dynamiques:
+                    idx_mag = self.colonnes_dynamiques.index(self.filtre_magasin)
+                    stock_courant = self.parser_nombre(valeurs_out[idx_mag])
+                else:
+                    stock_courant = 0.0
+
+            marge_totale = marge_benef * stock_courant
+            valeurs_out[idx_marge_total] = self.formater_nombre(marge_totale)
+            return valeurs_out
+        except Exception:
+            return list(valeurs)
 
     def ouvrir_inventaire_double_clic(self, event):
         """Ouvre la fenêtre d'inventaire lors d'un double-clic sur une ligne"""
@@ -735,7 +774,7 @@ class PageStock(ctk.CTkFrame):
             for idx, (valeurs, total) in enumerate(filtered_data):
                 zebra = "even" if idx % 2 == 0 else "odd"
                 tag   = (f"stock_zero_{zebra}" if abs(float(total)) < 1e-9 else zebra)
-                self.tree.insert("", "end", values=valeurs, tags=(tag,))
+                self.tree.insert("", "end", values=self._valeurs_avec_marge_totale(valeurs), tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(filtered_data)}")
         else:
             empty = ["", "Aucun résultat trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
@@ -759,7 +798,7 @@ class PageStock(ctk.CTkFrame):
             for idx, (valeurs, total) in enumerate(self.all_data):
                 zebra = "even" if idx % 2 == 0 else "odd"
                 tag   = (f"stock_zero_{zebra}" if abs(float(total)) < 1e-9 else zebra)
-                self.tree.insert("", "end", values=valeurs, tags=(tag,))
+                self.tree.insert("", "end", values=self._valeurs_avec_marge_totale(valeurs), tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(self.all_data)}")
         else:
             empty = ["", "Aucun article trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
