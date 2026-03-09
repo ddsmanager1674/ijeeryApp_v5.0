@@ -88,6 +88,8 @@ class PageStock(ctk.CTkFrame):
 
         self.magasins            = []
         self.colonnes_dynamiques = []
+        self.filtre_magasin      = "Tous"
+        self.combo_filtre_magasin = None
         self.all_data            = []
 
         self.grid_columnconfigure(0, weight=1)
@@ -137,6 +139,23 @@ class PageStock(ctk.CTkFrame):
             text_color=C.TEXT_PRIMARY, font=self._f(10))
         self.entry_recherche.pack(side="left", padx=(0, 6))
         self.entry_recherche.bind('<KeyRelease>', lambda e: self.filtrer_stocks())
+
+        ctk.CTkLabel(
+            inner, text="Filtre par magasin :", font=self._f(10),
+            text_color=C.TEXT_SECONDARY
+        ).pack(side="left", padx=(8, 4))
+
+        self.combo_filtre_magasin = ctk.CTkComboBox(
+            inner,
+            values=["Tous"],
+            width=190, height=30,
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            button_color=C.PRIMARY, button_hover_color=C.PRIMARY_HOVER,
+            text_color=C.TEXT_PRIMARY, font=self._f(10),
+            command=self.on_filtre_magasin_change
+        )
+        self.combo_filtre_magasin.set("Tous")
+        self.combo_filtre_magasin.pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(
             inner, text="Réinitialiser",
@@ -255,8 +274,12 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=150, anchor="center")
             elif col == "Prix":
                 self.tree.column(col, width=120, anchor="e")
+            elif col == "Total":
+                self.tree.column(col, width=110, anchor="center", minwidth=90, stretch=True)
             else:
                 self.tree.column(col, width=110, anchor="center")
+
+        self.appliquer_filtre_colonnes_magasin()
 
     def charger_stocks_avec_progression(self):
         """Charge les stocks avec une fenêtre de progression"""
@@ -579,11 +602,37 @@ class PageStock(ctk.CTkFrame):
                 WHERE deleted = 0 ORDER BY designationmag
             """)
             self.magasins = cursor.fetchall()
+            if self.combo_filtre_magasin is not None:
+                options = ["Tous"] + [nom_mag for _, nom_mag in self.magasins]
+                self.combo_filtre_magasin.configure(values=options)
+                if self.filtre_magasin not in options:
+                    self.filtre_magasin = "Tous"
+                self.combo_filtre_magasin.set(self.filtre_magasin)
+                self.appliquer_filtre_colonnes_magasin()
         except Exception as e:
             messagebox.showerror("Erreur", f"Impossible de charger les magasins : {str(e)}")
         finally:
             cursor.close()
             conn.close()
+
+    def on_filtre_magasin_change(self, valeur):
+        self.filtre_magasin = (valeur or "Tous").strip() or "Tous"
+        self.appliquer_filtre_colonnes_magasin()
+
+    def appliquer_filtre_colonnes_magasin(self):
+        if not self.tree:
+            return
+        colonnes_magasins = [nom_mag for _, nom_mag in self.magasins]
+        afficher_total = (self.filtre_magasin == "Tous")
+        for nom_col in colonnes_magasins:
+            if self.filtre_magasin != "Tous" and nom_col == self.filtre_magasin:
+                self.tree.column(nom_col, width=110, minwidth=80, stretch=True, anchor="center")
+            else:
+                self.tree.column(nom_col, width=0, minwidth=0, stretch=False, anchor="center")
+        if afficher_total:
+            self.tree.column("Total", width=110, minwidth=90, stretch=True, anchor="center")
+        else:
+            self.tree.column("Total", width=0, minwidth=0, stretch=False, anchor="center")
 
     def ouvrir_inventaire_double_clic(self, event):
         """Ouvre la fenêtre d'inventaire lors d'un double-clic sur une ligne"""
@@ -655,6 +704,10 @@ class PageStock(ctk.CTkFrame):
     def reinitialiser_filtre(self):
         """Réinitialise le filtre et recharge toutes les données"""
         self.entry_recherche.delete(0, 'end')
+        self.filtre_magasin = "Tous"
+        if self.combo_filtre_magasin is not None:
+            self.combo_filtre_magasin.set("Tous")
+        self.appliquer_filtre_colonnes_magasin()
         self.recharger_treeview()
 
     def recharger_treeview(self):
