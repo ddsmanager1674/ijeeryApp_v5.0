@@ -794,12 +794,23 @@ class PageStock(ctk.CTkFrame):
             return True
 
     def ouvrir_inventaire_double_clic(self, event):
-        """Ouvre la fenêtre d'inventaire lors d'un double-clic sur une ligne"""
+        """Affiche le détail article, historiques de prix et simulateur."""
         selection = self.tree.selection()
         if not selection:
             return
-        item         = self.tree.item(selection[0])
-        code_article = str(item['values'][0]).zfill(10)
+        item = self.tree.item(selection[0])
+        valeurs = item.get('values') or []
+        if not valeurs or (len(valeurs) > 1 and "Aucun" in str(valeurs[1])):
+            return
+
+        code_article = str(valeurs[0]).zfill(10)
+        designation = str(valeurs[1]) if len(valeurs) > 1 else ""
+        unite = str(valeurs[2]) if len(valeurs) > 2 else ""
+        prix_achat = self.parser_nombre(valeurs[3]) if len(valeurs) > 3 else 0.0
+        prix_vente = self.parser_nombre(valeurs[4]) if len(valeurs) > 4 else 0.0
+        marge_unitaire = self.parser_nombre(valeurs[5]) if len(valeurs) > 5 else (prix_vente - prix_achat)
+        marge_pct = self.parser_nombre(valeurs[6]) if len(valeurs) > 6 else 0.0
+
         conn = self.connect_db()
         if not conn:
             return
@@ -814,14 +825,175 @@ class PageStock(ctk.CTkFrame):
             if not result:
                 messagebox.showwarning("Erreur", f"Article {code_article} introuvable")
                 return
-            idarticle, idunite, designation = result
-            article_data = {'code': code_article, 'designation': designation}
-            PageInventaire(self, article_data, self.iduser)
+            idarticle, idunite, designation_db = result
+            designation = designation_db or designation
+
+            cursor.execute("""
+                SELECT id, COALESCE(punitcmd, 0)
+                FROM tb_commandedetail
+                WHERE idunite = %s AND punitcmd IS NOT NULL
+                ORDER BY id DESC
+                LIMIT 200
+            """, (idunite,))
+            hist_achat = cursor.fetchall()
+
+            cursor.execute("""
+                SELECT id, COALESCE(prix, 0), dateregistre
+                FROM tb_prix
+                WHERE idunite = %s AND deleted = 0
+                ORDER BY dateregistre DESC, id DESC
+                LIMIT 200
+            """, (idunite,))
+            hist_vente = cursor.fetchall()
+
+            avg_achat = (sum(float(v[1] or 0) for v in hist_achat) / len(hist_achat)) if hist_achat else 0.0
+            avg_vente = (sum(float(v[1] or 0) for v in hist_vente) / len(hist_vente)) if hist_vente else 0.0
+
+            self._ouvrir_detail_article_modal(
+                code_article=code_article,
+                designation=designation,
+                unite=unite,
+                prix_achat=prix_achat,
+                prix_vente=prix_vente,
+                marge_unitaire=marge_unitaire,
+                marge_pct=marge_pct,
+                hist_achat=hist_achat,
+                hist_vente=hist_vente,
+                avg_achat=avg_achat,
+                avg_vente=avg_vente,
+            )
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'ouverture : {str(e)}")
         finally:
             cursor.close()
             conn.close()
+
+    def _ouvrir_detail_article_modal(
+        self,
+        code_article,
+        designation,
+        unite,
+        prix_achat,
+        prix_vente,
+        marge_unitaire,
+        marge_pct,
+        hist_achat,
+        hist_vente,
+        avg_achat,
+        avg_vente,
+    ):
+        win = ctk.CTkToplevel(self)
+        win.title("Détail Marge Commerciale")
+        win.geometry("980x680")
+        if _T:
+            Theme.apply_toplevel(win)
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+
+        main = ctk.CTkFrame(win, fg_color=C.BG_PAGE)
+        main.pack(fill="both", expand=True, padx=10, pady=10)
+
+        info = ctk.CTkFrame(main, fg_color=C.BG_CARD, corner_radius=8)
+        info.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(
+            info,
+            text=(
+                f"Code: {code_article}   |   Désignation: {designation}   |   Unité: {unite}\n"
+                f"Prix d'achat: {self.formater_nombre(prix_achat)} Ar   |   "
+                f"Prix de vente: {self.formater_nombre(prix_vente)} Ar   |   "
+                f"Marge unitaire: {self.formater_nombre(marge_unitaire)} Ar ({self.formater_pourcentage(marge_pct)})"
+            ),
+            justify="left",
+            anchor="w",
+            font=self._f(10, "bold"),
+            text_color=C.TEXT_PRIMARY
+        ).pack(fill="x", padx=12, pady=10)
+
+        hist_wrap = ctk.CTkFrame(main, fg_color="transparent")
+        hist_wrap.pack(fill="both", expand=True, pady=(0, 8))
+        hist_wrap.grid_columnconfigure(0, weight=1)
+        hist_wrap.grid_columnconfigure(1, weight=1)
+        hist_wrap.grid_rowconfigure(0, weight=1)
+
+        fr_achat = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
+        fr_achat.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        ctk.CTkLabel(
+            fr_achat,
+            text=f"Historique Prix d'achat (Moyenne: {self.formater_nombre(avg_achat)} Ar)",
+            font=self._f(10, "bold"),
+            text_color=C.TEXT_PRIMARY
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+        tv_achat = ttk.Treeview(fr_achat, columns=("id", "val"), show="headings", height=12, style="Stock.Treeview")
+        tv_achat.heading("id", text="N°")
+        tv_achat.heading("val", text="Prix d'achat")
+        tv_achat.column("id", width=80, anchor="center")
+        tv_achat.column("val", width=140, anchor="e")
+        tv_achat.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        for _id, val in hist_achat:
+            tv_achat.insert("", "end", values=(_id, self.formater_nombre(val)))
+
+        fr_vente = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
+        fr_vente.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        ctk.CTkLabel(
+            fr_vente,
+            text=f"Historique Prix de vente (Moyenne: {self.formater_nombre(avg_vente)} Ar)",
+            font=self._f(10, "bold"),
+            text_color=C.TEXT_PRIMARY
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+        tv_vente = ttk.Treeview(fr_vente, columns=("id", "date", "val"), show="headings", height=12, style="Stock.Treeview")
+        tv_vente.heading("id", text="N°")
+        tv_vente.heading("date", text="Date")
+        tv_vente.heading("val", text="Prix de vente")
+        tv_vente.column("id", width=70, anchor="center")
+        tv_vente.column("date", width=120, anchor="center")
+        tv_vente.column("val", width=140, anchor="e")
+        tv_vente.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        for _id, val, dte in hist_vente:
+            dte_txt = dte.strftime("%d/%m/%Y") if dte else ""
+            tv_vente.insert("", "end", values=(_id, dte_txt, self.formater_nombre(val)))
+
+        sim = ctk.CTkFrame(main, fg_color=C.BG_CARD, corner_radius=8)
+        sim.pack(fill="x")
+        ctk.CTkLabel(sim, text="Simulateur", font=self._f(10, "bold"), text_color=C.TEXT_PRIMARY).pack(anchor="w", padx=10, pady=(8, 4))
+
+        row = ctk.CTkFrame(sim, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=(0, 8))
+
+        ctk.CTkLabel(row, text="Prix d'achat", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ent_achat = ctk.CTkEntry(row, width=110, height=28)
+        ent_achat.insert(0, self.formater_nombre(prix_achat))
+        ent_achat.pack(side="left", padx=(6, 10))
+
+        ctk.CTkLabel(row, text="Prix de vente", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ent_vente = ctk.CTkEntry(row, width=110, height=28)
+        ent_vente.insert(0, self.formater_nombre(prix_vente))
+        ent_vente.pack(side="left", padx=(6, 10))
+
+        ctk.CTkLabel(row, text="Stock", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ent_stock = ctk.CTkEntry(row, width=110, height=28)
+        ent_stock.insert(0, "0,00")
+        ent_stock.pack(side="left", padx=(6, 12))
+
+        lbl_res = ctk.CTkLabel(row, text="", font=self._f(9, "bold"), text_color=C.TEXT_PRIMARY)
+        lbl_res.pack(side="left", padx=(8, 0))
+
+        def _simuler(*_):
+            pa = self.parser_nombre(ent_achat.get())
+            pv = self.parser_nombre(ent_vente.get())
+            st = self.parser_nombre(ent_stock.get())
+            mu = pv - pa
+            pct = ((mu / pa) * 100) if pa != 0 else 100.0
+            mt = mu * st
+            lbl_res.configure(
+                text=(
+                    f"Marge unitaire: {self.formater_nombre(mu)} Ar ({self.formater_pourcentage(pct)})   |   "
+                    f"Marge totale: {self.formater_nombre(mt)} Ar"
+                )
+            )
+
+        for ent in (ent_achat, ent_vente, ent_stock):
+            ent.bind("<KeyRelease>", _simuler)
+        _simuler()
 
     def clignoter_bouton(self):
         """Fait clignoter le bouton de péremption"""
