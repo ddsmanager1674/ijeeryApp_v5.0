@@ -60,7 +60,6 @@ class PageSuiviStockDepot(ctk.CTkFrame):
                         foreground="#000000",
                         fieldbackground="#FFFFFF",
                         borderwidth=0)
-                        borderwidth=0)
         
         style.configure("Treeview.Heading", 
                         font=('Segoe UI', 8, 'bold'), 

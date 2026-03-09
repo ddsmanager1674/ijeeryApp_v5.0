@@ -2051,7 +2051,16 @@ class PageVenteParMsin(ctk.CTkFrame):
         """Ouvre le PDF généré avec le lecteur par défaut du système."""
         try:
             if sys.platform == 'win32':
-                os.startfile(filename)
+                # Relâche la fenêtre de vente pour laisser le lecteur PDF
+                # prendre le focus au premier plan.
+                try:
+                    top = self.winfo_toplevel()
+                    top.attributes('-topmost', False)
+                    top.update_idletasks()
+                    top.lower()
+                except Exception:
+                    pass
+                os.startfile(os.path.abspath(filename))
             elif sys.platform == 'darwin':
                 os.system(f'open "{filename}"')
             else:
@@ -2725,10 +2734,7 @@ class PageVenteParMsin(ctk.CTkFrame):
     def ouvrir_suivi_depot(self):
         """Ouvre la fenêtre de suivi du stock par dépôt (import flexible)."""
         try:
-            try:
-                from pages.page_SuiviStockDepot import PageSuiviStockDepot
-            except ImportError:
-                from page_SuiviStockDepot import PageSuiviStockDepot
+            from pages.page_SuiviStockDepot import PageSuiviStockDepot
             if hasattr(self, 'fenetre_suivi') and self.fenetre_suivi.winfo_exists():
                 self.fenetre_suivi.lift(); self.fenetre_suivi.focus_force(); return
             self.fenetre_suivi = ctk.CTkToplevel(self)

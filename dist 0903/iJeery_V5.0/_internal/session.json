@@ -1,0 +1,68 @@
+{
+    "user_id": 18,
+    "username": "olivier",
+    "fonction_id": 13,
+    "fonction_name": "Facturation",
+    "menus": [
+        [
+            "Article",
+            "PageArticle"
+        ],
+        [
+            "Article Liste",
+            "page_listeArticle"
+        ],
+        [
+            "Article Mouvement",
+            "PageArticleMouvement"
+        ],
+        [
+            "Catégorie Articl",
+            "PageCategorieArticle"
+        ],
+        [
+            "CHAT INTERNE",
+            "PageChat"
+        ],
+        [
+            "Client",
+            "PageClient"
+        ],
+        [
+            "Information Article",
+            "PageInfoArticle"
+        ],
+        [
+            "Liste Facture",
+            "PageFactureListe"
+        ],
+        [
+            "Liste mouvements",
+            "PageListeMouvement"
+        ],
+        [
+            "Mouvement d'article",
+            "PageArticleMouvement"
+        ],
+        [
+            "Prix d'article",
+            "PagePrixListe"
+        ],
+        [
+            "Sortie Article",
+            "PageSortie"
+        ],
+        [
+            "Stock Article",
+            "PageStock"
+        ],
+        [
+            "Unité Articl",
+            "PageUnite"
+        ],
+        [
+            "Ventes par Dépôt",
+            "PageVenteParMsin"
+        ]
+    ]
+}

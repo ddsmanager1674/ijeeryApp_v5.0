@@ -443,6 +443,7 @@ class Sidebar(ctk.CTkFrame):
         self._build_logo()
         self._build_scroll_area()
         self._build_menu()
+        self._enable_sidebar_mousewheel()
         self._build_logout()
 
     # ── Construction ─────────────────────────────────────────────────────────
@@ -508,6 +509,40 @@ class Sidebar(ctk.CTkFrame):
             acc = MenuAccordion(self._scroll, cfg, self._app, self)
             acc.pack(fill="x", pady=1)
             self._accordions.append(acc)
+
+    def _enable_sidebar_mousewheel(self):
+        """Active le scroll roulette sur toute la sidebar (frame + boutons)."""
+        self._bind_mousewheel_recursive(self._scroll)
+
+        # Le canvas interne de CTkScrollableFrame doit aussi recevoir l'événement.
+        canvas = getattr(self._scroll, "_parent_canvas", None)
+        if canvas is not None:
+            self._bind_mousewheel_widget(canvas)
+
+    def _bind_mousewheel_recursive(self, widget):
+        self._bind_mousewheel_widget(widget)
+        for child in widget.winfo_children():
+            self._bind_mousewheel_recursive(child)
+
+    def _bind_mousewheel_widget(self, widget):
+        widget.bind("<MouseWheel>", self._on_sidebar_mousewheel, add="+")
+        widget.bind("<Button-4>", self._on_sidebar_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_sidebar_mousewheel, add="+")
+
+    def _on_sidebar_mousewheel(self, event):
+        canvas = getattr(self._scroll, "_parent_canvas", None)
+        if canvas is None:
+            return "break"
+        step = 6  # vitesse de défilement (plus grand = plus rapide)
+        if getattr(event, "num", None) == 4:
+            canvas.yview_scroll(-step, "units")
+        elif getattr(event, "num", None) == 5:
+            canvas.yview_scroll(step, "units")
+        else:
+            delta = int(-1 * (event.delta / 120)) if event.delta else 0
+            if delta:
+                canvas.yview_scroll(delta * step, "units")
+        return "break"
 
     def _is_authorized(self, cfg: dict) -> bool:
         """Retourne True si au moins un élément du groupe est autorisé."""

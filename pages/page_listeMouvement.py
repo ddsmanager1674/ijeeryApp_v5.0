@@ -430,7 +430,12 @@ class PageListeMouvement(ctk.CTkFrame):
                 SELECT
                     c.datecom::DATE as "Date",
                     c.refcom as "Référence",
-                    COALESCE(f.nomfrs, 'N/A') as "Fournisseur",
+                    COALESCE(
+                        STRING_AGG(DISTINCT fcd.nomfrs, ', ')
+                            FILTER (WHERE fcd.nomfrs IS NOT NULL AND fcd.nomfrs <> ''),
+                        f.nomfrs,
+                        'N/A'
+                    ) as "Fournisseur",
                     COUNT(DISTINCT cd.idarticle) as "Articles",
                     CASE
                         WHEN COALESCE(SUM(CAST(cd.total AS NUMERIC)), 0) = 0 THEN '-'
@@ -461,6 +466,7 @@ class PageListeMouvement(ctk.CTkFrame):
                 FROM tb_commande c
                 LEFT JOIN tb_fournisseur f ON c.idfrs = f.idfrs
                 LEFT JOIN tb_commandedetail cd ON c.idcom = cd.idcom
+                LEFT JOIN tb_fournisseur fcd ON cd.idfrs = fcd.idfrs
                 LEFT JOIN tb_users u ON c.iduser = u.iduser
                 WHERE c.deleted = 0
                 GROUP BY c.idcom, c.datecom, c.refcom, f.nomfrs, u.prenomuser, u.nomuser
@@ -471,7 +477,12 @@ class PageListeMouvement(ctk.CTkFrame):
                     s.dateregistre::DATE as "Date",
                     s.refsortie as "Référence",
                     COUNT(DISTINCT sd.idarticle) as "Nombre d'articles",
-                    COALESCE(s.description, 'N/A') as "Description",
+                    COALESCE(
+                        STRING_AGG(DISTINCT sd.motif, ', ')
+                            FILTER (WHERE sd.motif IS NOT NULL AND sd.motif <> ''),
+                        s.description,
+                        'N/A'
+                    ) as "Description",
                     CONCAT(COALESCE(u.prenomuser,''), ' ', COALESCE(u.nomuser,'')) as "Utilisateur"
                 FROM tb_sortie s
                 LEFT JOIN tb_sortiedetail sd ON s.id = sd.idsortie
@@ -485,7 +496,12 @@ class PageListeMouvement(ctk.CTkFrame):
                     t.dateregistre::DATE as "Date",
                     t.reftransfert as "Référence",
                     COUNT(DISTINCT td.idarticle) as "Nombre d'articles",
-                    COALESCE(t.description, 'N/A') as "Description",
+                    COALESCE(
+                        STRING_AGG(DISTINCT td.description, ', ')
+                            FILTER (WHERE td.description IS NOT NULL AND td.description <> ''),
+                        t.description,
+                        'N/A'
+                    ) as "Description",
                     CONCAT(COALESCE(u.prenomuser,''), ' ', COALESCE(u.nomuser,'')) as "Utilisateur"
                 FROM tb_transfert t
                 LEFT JOIN tb_transfertdetail td ON t.idtransfert = td.idtransfert
@@ -500,7 +516,12 @@ class PageListeMouvement(ctk.CTkFrame):
                     ci.dateregistre::DATE as "Date",
                     ci.refconsommation as "Référence",
                     COUNT(DISTINCT cid.idarticle) as "Nombre d'articles",
-                    COALESCE(ci.observation, 'N/A') as "Description",
+                    COALESCE(
+                        STRING_AGG(DISTINCT cid.observation, ', ')
+                            FILTER (WHERE cid.observation IS NOT NULL AND cid.observation <> ''),
+                        ci.observation,
+                        'N/A'
+                    ) as "Description",
                     COALESCE(SUM(CAST(cid.montant_total AS NUMERIC)), 0) as "Montant Total",
                     CONCAT(COALESCE(u.prenomuser,''), ' ', COALESCE(u.nomuser,'')) as "Utilisateur"
                 FROM tb_consommationinterne ci
@@ -668,7 +689,8 @@ class PageListeMouvement(ctk.CTkFrame):
 
     def _open_details_window(self, title: str, columns: tuple,
                              rows: list, reference: str = None,
-                             type_mouvement: str = None):
+                             type_mouvement: str = None,
+                             show_print_button: bool = True):
         """
         Ouvre une fenêtre modale avec un treeview des détails.
         Boutons : Imprimer PDF (si disponible) + Fermer.
@@ -742,7 +764,7 @@ class PageListeMouvement(ctk.CTkFrame):
             command=win.destroy,
         ).pack(side="right", padx=(6, 12), pady=10)
 
-        if reference and type_mouvement and EtatPDFMouvements:
+        if reference and type_mouvement and EtatPDFMouvements and show_print_button:
             ctk.CTkButton(
                 actions,
                 text="🖨  Imprimer PDF",
@@ -771,8 +793,10 @@ class PageListeMouvement(ctk.CTkFrame):
                 messagebox.showinfo("Info", "Commande introuvable.")
                 return
             idcom = row[0]
+            statut = self._get_entree_status_for_idcom(cur, idcom)
             cur.execute("""
                 SELECT
+                    COALESCE(fr.nomfrs, f.nomfrs, 'N/A') as "Fournisseur",
                     COALESCE(u.codearticle, '') as "Code Article",
                     a.designation                as "Désignation",
                     u.designationunite           as "Unité",
@@ -783,18 +807,59 @@ class PageListeMouvement(ctk.CTkFrame):
                         ELSE CAST(cd.total AS TEXT)
                     END as "Montant"
                 FROM tb_commandedetail cd
+                LEFT JOIN tb_commande c ON cd.idcom = c.idcom
                 LEFT JOIN tb_article a ON cd.idarticle = a.idarticle
                 LEFT JOIN tb_unite   u ON cd.idunite   = u.idunite
+                LEFT JOIN tb_fournisseur fr ON cd.idfrs = fr.idfrs
+                LEFT JOIN tb_fournisseur f ON c.idfrs = f.idfrs
                 WHERE cd.idcom = %s
                 ORDER BY a.designation
             """, (idcom,))
             details = cur.fetchall()
-            cols = ("Code Article", "Désignation", "Unité",
+            cols = ("Fournisseur", "Code Article", "Désignation", "Unité",
                     "Qté commandée", "Qté livrée", "Montant")
             self._open_details_window(
-                f"Détails Entrée — {refcom}", cols, details, refcom, "entree")
+                f"Détails Entrée — {refcom}", cols, details, refcom, "entree",
+                show_print_button=self._is_print_allowed_for_entree(statut))
         finally:
             conn.close()
+
+    def _get_entree_status_for_idcom(self, cur, idcom: int) -> str:
+        """Retourne le statut d'une commande d'entrée, aligné avec la liste principale."""
+        cur.execute("""
+            SELECT
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM tb_livraisonfrs lf
+                        WHERE lf.idcom = c.idcom AND lf.deleted = 0
+                    ) THEN '✅✅ Livrée & Reçue'
+                    WHEN (
+                        SELECT COUNT(*) FROM tb_commandedetail
+                        WHERE idcom = c.idcom AND COALESCE(qtlivre, 0) > 0
+                    ) = (
+                        SELECT COUNT(*) FROM tb_commandedetail
+                        WHERE idcom = c.idcom
+                    ) AND (
+                        SELECT COUNT(*) FROM tb_commandedetail
+                        WHERE idcom = c.idcom
+                    ) > 0 THEN '✅ Livré Complet'
+                    WHEN EXISTS (
+                        SELECT 1 FROM tb_commandedetail
+                        WHERE idcom = c.idcom AND COALESCE(qtlivre, 0) > 0
+                    ) THEN '⚠️ Livré Partiel'
+                    ELSE '⏳ En Attente'
+                END as statut
+            FROM tb_commande c
+            WHERE c.idcom = %s
+            LIMIT 1
+        """, (idcom,))
+        row = cur.fetchone()
+        return row[0] if row else ""
+
+    def _is_print_allowed_for_entree(self, statut: str) -> bool:
+        """Autorise l'impression uniquement pour 'Livrée & Reçue' ou 'Livré Partiel'."""
+        s = (statut or "").strip().lower()
+        return ("livrée" in s and "reçue" in s) or ("livre" in s and "recu" in s) or ("livré partiel" in s) or ("livre partiel" in s)
 
     def show_sortie_details_by_ref(self, refsortie):
         if not refsortie:
@@ -816,7 +881,8 @@ class PageListeMouvement(ctk.CTkFrame):
                     COALESCE(u.codearticle, '') as "Code Article",
                     a.designation              as "Désignation",
                     u.designationunite         as "Unité",
-                    sd.qtsortie                as "Quantité sortie"
+                    sd.qtsortie                as "Quantité sortie",
+                    COALESCE(sd.motif, 'N/A')  as "Motif"
                 FROM tb_sortiedetail sd
                 LEFT JOIN tb_article a ON sd.idarticle = a.idarticle
                 LEFT JOIN tb_unite   u ON sd.idunite   = u.idunite
@@ -824,7 +890,7 @@ class PageListeMouvement(ctk.CTkFrame):
                 ORDER BY a.designation
             """, (idsortie,))
             details = cur.fetchall()
-            cols = ("Code Article", "Désignation", "Unité", "Quantité sortie")
+            cols = ("Code Article", "Désignation", "Unité", "Quantité sortie", "Motif")
             self._open_details_window(
                 f"Détails Sortie — {refsortie}", cols, details, refsortie, "sortie")
         finally:
@@ -851,6 +917,7 @@ class PageListeMouvement(ctk.CTkFrame):
                     a.designation      as "Désignation",
                     u.designationunite as "Unité",
                     td.qttransfert     as "Quantité",
+                    COALESCE(td.description, 'N/A') as "Description",
                     td.idmagsortie     as "Magasin Sortie",
                     td.idmagentree     as "Magasin Entrée"
                 FROM tb_transfertdetail td
@@ -860,7 +927,7 @@ class PageListeMouvement(ctk.CTkFrame):
                 ORDER BY a.designation
             """, (idtr,))
             details = cur.fetchall()
-            cols = ("Désignation", "Unité", "Quantité",
+            cols = ("Désignation", "Unité", "Quantité", "Description",
                     "Magasin Sortie", "Magasin Entrée")
             self._open_details_window(
                 f"Détails Transfert — {reftrans}", cols, details, reftrans, "transfert")
@@ -890,7 +957,8 @@ class PageListeMouvement(ctk.CTkFrame):
                     u.designationunite         as "Unité",
                     d.qtconsomme               as "Quantité",
                     d.prixunit                 as "Prix Unitaire",
-                    d.montant_total            as "Montant"
+                    d.montant_total            as "Montant",
+                    COALESCE(d.observation, 'N/A') as "Observation"
                 FROM tb_consommationinterne_details d
                 LEFT JOIN tb_article a ON d.idarticle = a.idarticle
                 LEFT JOIN tb_unite   u ON d.idunite   = u.idunite
@@ -899,7 +967,7 @@ class PageListeMouvement(ctk.CTkFrame):
             """, (idc,))
             details = cur.fetchall()
             cols = ("Code Article", "Désignation", "Unité",
-                    "Quantité", "Prix Unitaire", "Montant")
+                    "Quantité", "Prix Unitaire", "Montant", "Observation")
             self._open_details_window(
                 f"Détails Consommation — {refcons}", cols, details,
                 refcons, "consommation")

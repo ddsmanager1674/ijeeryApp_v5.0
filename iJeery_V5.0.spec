@@ -1,4 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
+
+hiddenimports = ['customtkinter', 'psycopg2', 'reportlab', 'PIL', 'openpyxl', 'pandas']
+hiddenimports += collect_submodules('pages')
 
 
 a = Analysis(
@@ -6,7 +10,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('image', 'image'), ('icons', 'icons'), ('pages', 'pages'), ('config.json', '.'), ('config.ini', '.'), ('settings.json', '.'), ('session.json', '.')],
-    hiddenimports=['customtkinter', 'psycopg2', 'reportlab', 'PIL', 'openpyxl', 'pandas'],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
