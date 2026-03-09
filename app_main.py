@@ -175,6 +175,7 @@ MENU_STRUCTURE = [
             ("📍  Suivi Commande",      "Suivi Commande",        "pages.page_SuiviCommande",    "PageSuiviCommande",   None),
             ("💲  Prix Article",        "Prix d'article",        "pages.page_prixListe",        "PagePrixListe",       None),
             ("📊  Prix de Revient",     "Prix de revient",       "pages.page_prixRevient",      "PagePrixRevient",     None),
+            ("📈  Marge Commerciale",   "Marge Commerciale",     "pages.page_margeCommerciale", "PageStock",           None),
             ("🚚  Livraison Client",    "Livraison Client",      "pages.page_LivraisonClient",  "PageLivraisonClient", "vente"),
         ],
     },
