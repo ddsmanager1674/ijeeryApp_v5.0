@@ -89,7 +89,9 @@ class PageStock(ctk.CTkFrame):
         self.magasins            = []
         self.colonnes_dynamiques = []
         self.filtre_magasin      = "Tous"
+        self.filtre_marge        = "Toutes"
         self.combo_filtre_magasin = None
+        self.combo_filtre_marge   = None
         self.all_data            = []
 
         self.grid_columnconfigure(0, weight=1)
@@ -115,7 +117,7 @@ class PageStock(ctk.CTkFrame):
         hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
         hdr.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(
-            hdr, text="Gestion des Stocks",
+            hdr, text="Marge Commerciale",
             font=self._f(18, "bold"), text_color="#FFFFFF"
         ).pack(side="left", padx=16, pady=10)
 
@@ -141,7 +143,7 @@ class PageStock(ctk.CTkFrame):
         self.entry_recherche.bind('<KeyRelease>', lambda e: self.filtrer_stocks())
 
         ctk.CTkLabel(
-            inner, text="Filtre par magasin :", font=self._f(10),
+            inner, text="Marge par magasin :", font=self._f(10),
             text_color=C.TEXT_SECONDARY
         ).pack(side="left", padx=(8, 4))
 
@@ -157,6 +159,23 @@ class PageStock(ctk.CTkFrame):
         self.combo_filtre_magasin.set("Tous")
         self.combo_filtre_magasin.pack(side="left", padx=(0, 8))
 
+        ctk.CTkLabel(
+            inner, text="Filtre par marge :", font=self._f(10),
+            text_color=C.TEXT_SECONDARY
+        ).pack(side="left", padx=(2, 4))
+
+        self.combo_filtre_marge = ctk.CTkComboBox(
+            inner,
+            values=["Toutes", "Perte", "Marge faible", "Marge moyenne", "Bonne marge"],
+            width=170, height=30,
+            fg_color=C.BG_INPUT, border_color=C.BORDER,
+            button_color=C.PRIMARY, button_hover_color=C.PRIMARY_HOVER,
+            text_color=C.TEXT_PRIMARY, font=self._f(10),
+            command=self.on_filtre_marge_change
+        )
+        self.combo_filtre_marge.set("Toutes")
+        self.combo_filtre_marge.pack(side="left", padx=(0, 8))
+
         ctk.CTkButton(
             inner, text="Réinitialiser",
             command=self.reinitialiser_filtre,
@@ -167,21 +186,13 @@ class PageStock(ctk.CTkFrame):
         ).pack(side="left", padx=(0, 4))
 
         # Boutons actions (côté droit)
-        self.btn_peremption = ctk.CTkButton(
-            inner, text="🛡️  Articles Périmés",
-            command=self.ouvrir_fenetre_peremption,
-            fg_color=C.DANGER, hover_color=C.DANGER_DARK,
-            text_color="#FFFFFF",
-            height=30, width=160, font=self._f(10, "bold"))
-        self.btn_peremption.pack(side="right", padx=(6, 0))
-
         self.btn_export = ctk.CTkButton(
             inner, text="📊  Export Excel",
             command=self.exporter_stocks,
             fg_color=C.INFO_DARK, hover_color=C.INFO,
             text_color="#FFFFFF",
             height=30, width=140, font=self._f(10, "bold"))
-        self.btn_export.pack(side="right", padx=(0, 6))
+        self.btn_export.pack(side="right", padx=(6, 0))
 
         # ── Zone Treeview ─────────────────────────────────────────────────
         self.tree_frame_inner = ctk.CTkFrame(
@@ -201,10 +212,28 @@ class PageStock(ctk.CTkFrame):
             font=self._f(10, "bold"), text_color=C.PRIMARY)
         self.label_total_articles.pack(side="left")
 
-        self.label_derniere_maj = ctk.CTkLabel(
-            footer, text="",
-            font=self._f(9), text_color=C.TEXT_MUTED)
-        self.label_derniere_maj.pack(side="right")
+        legende = ctk.CTkFrame(footer, fg_color="transparent")
+        legende.pack(side="left", padx=(14, 0))
+
+        def _item_legende(couleur, texte):
+            bloc = ctk.CTkFrame(legende, fg_color="transparent")
+            bloc.pack(side="left", padx=(0, 10))
+            ctk.CTkLabel(
+                bloc, text="■", font=self._f(11, "bold"), text_color=couleur
+            ).pack(side="left", padx=(0, 3))
+            ctk.CTkLabel(
+                bloc, text=texte, font=self._f(9), text_color=C.TEXT_SECONDARY
+            ).pack(side="left")
+
+        _item_legende("#E74C3C", "Marge < 0 : Perte")
+        _item_legende("#E67E22", "0% à 10% : Marge faible")
+        _item_legende("#B7950B", "10% à 30% : Marge moyenne")
+        _item_legende("#1E8449", "> 30% : Bonne marge")
+
+        self.label_marge_beneficiaire = ctk.CTkLabel(
+            footer, text="Marge Beneficiaire : 0,00 Ar",
+            font=self._f(16, "bold"), text_color=C.TEXT_SECONDARY)
+        self.label_marge_beneficiaire.pack(side="right")
 
     # ====================================================================
     # LOGIQUE MÉTIER — inchangée
@@ -277,8 +306,14 @@ class PageStock(ctk.CTkFrame):
 
         self.tree.tag_configure("even", background=C.BG_CARD,   foreground=C.TEXT_PRIMARY)
         self.tree.tag_configure("odd",  background="#F0F4F8",   foreground=C.TEXT_PRIMARY)
-        self.tree.tag_configure("stock_zero_even", background=C.BG_CARD, foreground="#E74C3C")
-        self.tree.tag_configure("stock_zero_odd",  background="#F0F4F8", foreground="#E74C3C")
+        self.tree.tag_configure("marge_loss_even", background=C.BG_CARD, foreground="#E74C3C")
+        self.tree.tag_configure("marge_loss_odd", background="#F0F4F8", foreground="#E74C3C")
+        self.tree.tag_configure("marge_low_even", background=C.BG_CARD, foreground="#E67E22")
+        self.tree.tag_configure("marge_low_odd", background="#F0F4F8", foreground="#E67E22")
+        self.tree.tag_configure("marge_mid_even", background=C.BG_CARD, foreground="#B7950B")
+        self.tree.tag_configure("marge_mid_odd", background="#F0F4F8", foreground="#B7950B")
+        self.tree.tag_configure("marge_good_even", background=C.BG_CARD, foreground="#1E8449")
+        self.tree.tag_configure("marge_good_odd", background="#F0F4F8", foreground="#1E8449")
 
         self.tree.bind("<Double-1>", self.ouvrir_inventaire_double_clic)
 
@@ -392,8 +427,6 @@ class PageStock(ctk.CTkFrame):
                 valeurs.append(self.formater_nombre(0))
                 self.all_data.append((valeurs, 0.0))
             self.recharger_treeview()
-            self.label_derniere_maj.configure(
-                text="Chargement des stocks en cours…")
         except Exception as e:
             messagebox.showerror("Erreur de chargement", f"Détails : {str(e)}")
         finally:
@@ -562,8 +595,6 @@ class PageStock(ctk.CTkFrame):
         else:
             self.recharger_treeview()
         self.label_total_articles.configure(text=f"Total articles : {len(self.all_data)}")
-        self.label_derniere_maj.configure(
-            text=f"Actualisé : {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         self.mettre_a_jour_badge_peremption()
 
     def calculer_stock_article(self, idarticle, idunite_cible, idmag=None):
@@ -675,6 +706,13 @@ class PageStock(ctk.CTkFrame):
         else:
             self.recharger_treeview()
 
+    def on_filtre_marge_change(self, valeur):
+        self.filtre_marge = (valeur or "Toutes").strip() or "Toutes"
+        if self.entry_recherche.get().strip():
+            self.filtrer_stocks()
+        else:
+            self.recharger_treeview()
+
     def appliquer_filtre_colonnes_magasin(self):
         if not self.tree:
             return
@@ -714,6 +752,47 @@ class PageStock(ctk.CTkFrame):
         except Exception:
             return list(valeurs)
 
+    def _maj_label_marge_beneficiaire(self, total_marge):
+        try:
+            self.label_marge_beneficiaire.configure(
+                text=f"Marge Beneficiaire : {self.formater_nombre(total_marge)} Ar"
+            )
+        except Exception:
+            pass
+
+    def _tag_marge(self, valeurs, idx):
+        zebra = "even" if idx % 2 == 0 else "odd"
+        try:
+            idx_marge_pct = self.colonnes_dynamiques.index("Marge (%)")
+            marge_pct = self.parser_nombre(valeurs[idx_marge_pct])
+            if marge_pct < 0:
+                return f"marge_loss_{zebra}"
+            if marge_pct <= 10:
+                return f"marge_low_{zebra}"
+            if marge_pct <= 30:
+                return f"marge_mid_{zebra}"
+            return f"marge_good_{zebra}"
+        except Exception:
+            return zebra
+
+    def _match_filtre_marge(self, valeurs):
+        if self.filtre_marge == "Toutes":
+            return True
+        try:
+            idx_marge_pct = self.colonnes_dynamiques.index("Marge (%)")
+            marge_pct = self.parser_nombre(valeurs[idx_marge_pct])
+            if self.filtre_marge == "Perte":
+                return marge_pct < 0
+            if self.filtre_marge == "Marge faible":
+                return 0 <= marge_pct <= 10
+            if self.filtre_marge == "Marge moyenne":
+                return 10 < marge_pct <= 30
+            if self.filtre_marge == "Bonne marge":
+                return marge_pct > 30
+            return True
+        except Exception:
+            return True
+
     def ouvrir_inventaire_double_clic(self, event):
         """Ouvre la fenêtre d'inventaire lors d'un double-clic sur une ligne"""
         selection = self.tree.selection()
@@ -746,6 +825,8 @@ class PageStock(ctk.CTkFrame):
 
     def clignoter_bouton(self):
         """Fait clignoter le bouton de péremption"""
+        if not hasattr(self, "btn_peremption"):
+            return
         if not self.clignotement_actif:
             self.clignotement_actif = True
 
@@ -770,23 +851,34 @@ class PageStock(ctk.CTkFrame):
             (valeurs, total) for valeurs, total in self.all_data
             if search_term in f"{valeurs[0]} {valeurs[1]} {valeurs[2]} {valeurs[3]} {valeurs[4]} {valeurs[5]} {valeurs[6]}".lower()
         ]
+        filtered_data = [
+            (valeurs, total) for valeurs, total in filtered_data
+            if self._match_filtre_marge(self._valeurs_avec_marge_totale(valeurs))
+        ]
         if filtered_data:
+            somme_marge = 0.0
             for idx, (valeurs, total) in enumerate(filtered_data):
-                zebra = "even" if idx % 2 == 0 else "odd"
-                tag   = (f"stock_zero_{zebra}" if abs(float(total)) < 1e-9 else zebra)
-                self.tree.insert("", "end", values=self._valeurs_avec_marge_totale(valeurs), tags=(tag,))
+                valeurs_aff = self._valeurs_avec_marge_totale(valeurs)
+                self.tree.insert("", "end", values=valeurs_aff, tags=(self._tag_marge(valeurs_aff, idx),))
+                idx_mt = self.colonnes_dynamiques.index("Marge Total")
+                somme_marge += self.parser_nombre(valeurs_aff[idx_mt])
             self.label_total_articles.configure(text=f"Total articles : {len(filtered_data)}")
+            self._maj_label_marge_beneficiaire(somme_marge)
         else:
             empty = ["", "Aucun résultat trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
+            self._maj_label_marge_beneficiaire(0.0)
 
     def reinitialiser_filtre(self):
         """Réinitialise le filtre et recharge toutes les données"""
         self.entry_recherche.delete(0, 'end')
         self.filtre_magasin = "Tous"
+        self.filtre_marge = "Toutes"
         if self.combo_filtre_magasin is not None:
             self.combo_filtre_magasin.set("Tous")
+        if self.combo_filtre_marge is not None:
+            self.combo_filtre_marge.set("Toutes")
         self.appliquer_filtre_colonnes_magasin()
         self.recharger_treeview()
 
@@ -795,15 +887,23 @@ class PageStock(ctk.CTkFrame):
         for item in self.tree.get_children():
             self.tree.delete(item)
         if self.all_data:
+            visibles = 0
+            somme_marge = 0.0
             for idx, (valeurs, total) in enumerate(self.all_data):
-                zebra = "even" if idx % 2 == 0 else "odd"
-                tag   = (f"stock_zero_{zebra}" if abs(float(total)) < 1e-9 else zebra)
-                self.tree.insert("", "end", values=self._valeurs_avec_marge_totale(valeurs), tags=(tag,))
-            self.label_total_articles.configure(text=f"Total articles : {len(self.all_data)}")
+                valeurs_aff = self._valeurs_avec_marge_totale(valeurs)
+                if not self._match_filtre_marge(valeurs_aff):
+                    continue
+                self.tree.insert("", "end", values=valeurs_aff, tags=(self._tag_marge(valeurs_aff, idx),))
+                visibles += 1
+                idx_mt = self.colonnes_dynamiques.index("Marge Total")
+                somme_marge += self.parser_nombre(valeurs_aff[idx_mt])
+            self.label_total_articles.configure(text=f"Total articles : {visibles}")
+            self._maj_label_marge_beneficiaire(somme_marge)
         else:
             empty = ["", "Aucun article trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
+            self._maj_label_marge_beneficiaire(0.0)
 
     def exporter_stocks(self):
         """Exporte les stocks vers un fichier CSV"""
@@ -813,7 +913,7 @@ class PageStock(ctk.CTkFrame):
             fichier = filedialog.asksaveasfilename(
                 defaultextension=".csv",
                 filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-                initialfile=f"stocks_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+                initialfile=f"margecommerciale_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
             if not fichier:
                 return
             with open(fichier, 'w', newline='', encoding='utf-8-sig') as f:
@@ -821,7 +921,7 @@ class PageStock(ctk.CTkFrame):
                 writer.writerow(self.colonnes_dynamiques)
                 for item in self.tree.get_children():
                     writer.writerow(self.tree.item(item)['values'])
-            messagebox.showinfo("Succès", f"Stocks exportés vers :\n{fichier}")
+            messagebox.showinfo("Succès", f"Marge commerciale exportée vers :\n{fichier}")
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'export: {str(e)}")
 
@@ -881,6 +981,8 @@ class PageStock(ctk.CTkFrame):
 
     def mettre_a_jour_badge_peremption(self):
         """Analyse les dates et ajuste la couleur et le texte du bouton"""
+        if not hasattr(self, "btn_peremption"):
+            return
         conn = self.connect_db()
         if not conn: return
         try:
@@ -922,7 +1024,7 @@ if __name__ == "__main__":
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
     app = ctk.CTk()
-    app.title("iJeery — Gestion des Stocks")
+    app.title("iJeery — Marge Commerciale")
     app.geometry("1100x750")
     if _T:
         Theme.apply(app)
