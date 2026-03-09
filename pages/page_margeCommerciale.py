@@ -240,7 +240,7 @@ class PageStock(ctk.CTkFrame):
         if self.tree:
             self.tree.destroy()
 
-        colonnes_fixes    = ("Code", "Désignation", "Unité", "Prix")
+        colonnes_fixes    = ("Code", "Désignation", "Unité", "Prix de vente")
         colonnes_magasins = [mag[1] for mag in self.magasins]
         self.colonnes_dynamiques = colonnes_fixes + tuple(colonnes_magasins) + ("Total",)
 
@@ -272,7 +272,7 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=350, anchor="w",      minwidth=200)
             elif col == "Code":
                 self.tree.column(col, width=150, anchor="center")
-            elif col == "Prix":
+            elif col == "Prix de vente":
                 self.tree.column(col, width=120, anchor="e")
             elif col == "Total":
                 self.tree.column(col, width=110, anchor="center", minwidth=90, stretch=True)
@@ -331,17 +331,10 @@ class PageStock(ctk.CTkFrame):
                 FROM tb_unite u
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN (
-                    SELECT idunite, prix
-                    FROM (
-                        SELECT idunite, prix,
-                               ROW_NUMBER() OVER (
-                                   PARTITION BY idunite
-                                   ORDER BY dateregistre DESC
-                               ) AS rn
-                        FROM tb_prix
-                        WHERE deleted = 0
-                    ) x
-                    WHERE x.rn = 1
+                    SELECT idunite, AVG(prix) AS prix
+                    FROM tb_prix
+                    WHERE deleted = 0
+                    GROUP BY idunite
                 ) dp ON dp.idunite = u.idunite
                 WHERE a.deleted = 0 AND COALESCE(u.deleted, 0) = 0
                 ORDER BY a.designation ASC, u.codearticle ASC
@@ -443,17 +436,10 @@ class PageStock(ctk.CTkFrame):
                 FROM mouvements_bruts GROUP BY idarticle, idmag
             ),
             dernier_prix AS (
-                SELECT idunite, prix
-                FROM (
-                    SELECT idunite, prix,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY idunite
-                               ORDER BY dateregistre DESC
-                           ) AS rn
-                    FROM tb_prix
-                    WHERE deleted = 0
-                ) p
-                WHERE p.rn = 1
+                SELECT idunite, AVG(prix) AS prix
+                FROM tb_prix
+                WHERE deleted = 0
+                GROUP BY idunite
             )
             SELECT u.codearticle, a.designation, u.designationunite,
                 COALESCE(dp.prix, 0) AS prix,
