@@ -235,12 +235,27 @@ class PageStock(ctk.CTkFrame):
         except:
             return "0,00"
 
+    def formater_pourcentage(self, valeur):
+        """Formate un pourcentage pour l'affichage (ex: 12,50%)."""
+        try:
+            return f"{float(valeur):,.2f}%".replace(',', ' ').replace('.', ',').replace(' ', '.')
+        except:
+            return "0,00%"
+
     def creer_treeview(self):
         """Initialise le tableau avec colonnes larges et barres de défilement"""
         if self.tree:
             self.tree.destroy()
 
-        colonnes_fixes    = ("Code", "Désignation", "Unité", "Prix de vente")
+        colonnes_fixes    = (
+            "Code",
+            "Désignation",
+            "Unité",
+            "Prix d'achat",
+            "Prix de vente",
+            "Marge Bénéficiaire",
+            "Marge (%)"
+        )
         colonnes_magasins = [mag[1] for mag in self.magasins]
         self.colonnes_dynamiques = colonnes_fixes + tuple(colonnes_magasins) + ("Total",)
 
@@ -272,7 +287,7 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=350, anchor="w",      minwidth=200)
             elif col == "Code":
                 self.tree.column(col, width=150, anchor="center")
-            elif col == "Prix de vente":
+            elif col in ("Prix d'achat", "Prix de vente", "Marge Bénéficiaire", "Marge (%)"):
                 self.tree.column(col, width=120, anchor="e")
             elif col == "Total":
                 self.tree.column(col, width=110, anchor="center", minwidth=90, stretch=True)
@@ -327,9 +342,16 @@ class PageStock(ctk.CTkFrame):
                     u.codearticle,
                     a.designation,
                     u.designationunite,
+                    COALESCE(pc.prix_achat, 0) AS prix_achat,
                     COALESCE(dp.prix, 0) AS prix
                 FROM tb_unite u
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
+                LEFT JOIN (
+                    SELECT idunite, AVG(punitcmd) AS prix_achat
+                    FROM tb_commandedetail
+                    WHERE punitcmd IS NOT NULL
+                    GROUP BY idunite
+                ) pc ON pc.idunite = u.idunite
                 LEFT JOIN (
                     SELECT idunite, AVG(prix) AS prix
                     FROM tb_prix
@@ -341,8 +363,20 @@ class PageStock(ctk.CTkFrame):
             """)
             base_rows = cursor.fetchall()
             self.all_data = []
-            for code, designation, unite, prix in base_rows:
-                valeurs = [code, designation, unite, self.formater_nombre(prix)]
+            for code, designation, unite, prix_achat, prix in base_rows:
+                prix_achat_val = float(prix_achat or 0)
+                prix_vente_val = float(prix or 0)
+                marge_benef = prix_vente_val - prix_achat_val
+                marge_pct = ((marge_benef / prix_achat_val) * 100) if prix_achat_val != 0 else 100.0
+                valeurs = [
+                    code,
+                    designation,
+                    unite,
+                    self.formater_nombre(prix_achat_val),
+                    self.formater_nombre(prix_vente_val),
+                    self.formater_nombre(marge_benef),
+                    self.formater_pourcentage(marge_pct)
+                ]
                 for _idmag, _nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(0))
                 valeurs.append(self.formater_nombre(0))
@@ -440,8 +474,15 @@ class PageStock(ctk.CTkFrame):
                 FROM tb_prix
                 WHERE deleted = 0
                 GROUP BY idunite
+            ),
+            prix_achat_unite AS (
+                SELECT idunite, AVG(punitcmd) AS prix_achat
+                FROM tb_commandedetail
+                WHERE punitcmd IS NOT NULL
+                GROUP BY idunite
             )
             SELECT u.codearticle, a.designation, u.designationunite,
+                COALESCE(pau.prix_achat, 0) AS prix_achat,
                 COALESCE(dp.prix, 0) AS prix,
                 u.idarticle, u.idunite, m.idmag,
                 COALESCE(sb.solde_base,0) / NULLIF(COALESCE(uc.coeff_hierarchique,1),0) as stock
@@ -451,19 +492,21 @@ class PageStock(ctk.CTkFrame):
             LEFT JOIN solde_base_par_mag sb ON sb.idarticle=u.idarticle AND sb.idmag=m.idmag
             LEFT JOIN unite_coeff uc ON uc.idarticle=u.idarticle AND uc.idunite=u.idunite
             LEFT JOIN dernier_prix dp ON dp.idunite = u.idunite
+            LEFT JOIN prix_achat_unite pau ON pau.idunite = u.idunite
             WHERE a.deleted=0 AND m.deleted=0
             ORDER BY a.designation ASC, u.codearticle ASC
             """
             cursor.execute(query_optimisee)
             resultats = cursor.fetchall()
             articles_dict = {}
-            for code, desig, unite, prix, idarticle, idunite, idmag, stock in resultats:
+            for code, desig, unite, prix_achat, prix, idarticle, idunite, idmag, stock in resultats:
                 key = (code, idunite)
                 if key not in articles_dict:
                     articles_dict[key] = {
                         'code': code,
                         'designation': desig,
                         'unite': unite,
+                        'prix_achat': prix_achat,
                         'prix': prix,
                         'stocks': {},
                         'total': 0
@@ -475,7 +518,19 @@ class PageStock(ctk.CTkFrame):
                     articles_dict[key]['total'] += stock_val
             all_data = []
             for _idx, (_key, data) in enumerate(articles_dict.items()):
-                valeurs = [data['code'], data['designation'], data['unite'], self.formater_nombre(data['prix'])]
+                prix_achat_val = float(data['prix_achat'] or 0)
+                prix_vente_val = float(data['prix'] or 0)
+                marge_benef = prix_vente_val - prix_achat_val
+                marge_pct = ((marge_benef / prix_achat_val) * 100) if prix_achat_val != 0 else 100.0
+                valeurs = [
+                    data['code'],
+                    data['designation'],
+                    data['unite'],
+                    self.formater_nombre(prix_achat_val),
+                    self.formater_nombre(prix_vente_val),
+                    self.formater_nombre(marge_benef),
+                    self.formater_pourcentage(marge_pct)
+                ]
                 for _, nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(data['stocks'].get(nom_mag, 0)))
                 valeurs.append(self.formater_nombre(data['total']))
@@ -674,7 +729,7 @@ class PageStock(ctk.CTkFrame):
             return
         filtered_data = [
             (valeurs, total) for valeurs, total in self.all_data
-            if search_term in f"{valeurs[0]} {valeurs[1]} {valeurs[2]} {valeurs[3]}".lower()
+            if search_term in f"{valeurs[0]} {valeurs[1]} {valeurs[2]} {valeurs[3]} {valeurs[4]} {valeurs[5]} {valeurs[6]}".lower()
         ]
         if filtered_data:
             for idx, (valeurs, total) in enumerate(filtered_data):
@@ -683,7 +738,7 @@ class PageStock(ctk.CTkFrame):
                 self.tree.insert("", "end", values=valeurs, tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(filtered_data)}")
         else:
-            empty = ["", "Aucun résultat trouvé", "", ""] + [""] * (len(self.colonnes_dynamiques) - 4)
+            empty = ["", "Aucun résultat trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
 
@@ -707,7 +762,7 @@ class PageStock(ctk.CTkFrame):
                 self.tree.insert("", "end", values=valeurs, tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(self.all_data)}")
         else:
-            empty = ["", "Aucun article trouvé", "", ""] + [""] * (len(self.colonnes_dynamiques) - 4)
+            empty = ["", "Aucun article trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
 
