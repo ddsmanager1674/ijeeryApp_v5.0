@@ -1102,10 +1102,17 @@ class PageArticleMouvement(ctk.CTkFrame):
                                 if mouv[0] else "")
 
             unite_display = unite_map.get(idunite, "")
-            e_fmt = '-' if entree == 0 else self.formater_nombre(entree)
-            s_fmt = '-' if sortie == 0 else self.formater_nombre(sortie)
-            if entree: te += entree
-            if sortie: ts += sortie
+            is_inventaire = "inventaire" in type_doc_display.lower()
+            if is_inventaire:
+                e_fmt = "-"
+                s_fmt = "-"
+            else:
+                e_fmt = '-' if entree == 0 else self.formater_nombre(entree)
+                s_fmt = '-' if sortie == 0 else self.formater_nombre(sortie)
+                if entree:
+                    te += entree
+                if sortie:
+                    ts += sortie
 
             self._full_rows.append({
                 "idarticle":      idarticle,
