@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import customtkinter as ctk
 from tkinter import messagebox
 import psycopg2
@@ -5,20 +6,29 @@ import json
 from datetime import datetime
 from resource_utils import get_config_path, safe_file_read
 import traceback
+from app_theme import Theme, Colors, Fonts, Layout, styled
 
 
 class PageInventaire(ctk.CTkToplevel):
     def __init__(self, master, article_data, iduser):
         super().__init__(master)
         self.title(f"Inventaire - {article_data['designation']}")
-        self.geometry("450x500")
+        self.geometry("860x640")
         self.iduser = iduser
-        self.article_data = article_data # Contient 'code' (codearticle) et 'designation'
+        self.article_data = article_data
         self.magasins_dict = {}
+        self.unites_dict = {}
 
         self.attributes('-topmost', True)
+        Theme.apply_toplevel(self)
         self.setup_ui()
         self.charger_magasins()
+        self.charger_unites()
+        self.refresh_stocks_overview()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # DB
+    # ─────────────────────────────────────────────────────────────────────────
 
     def connect_db(self):
         try:
@@ -34,33 +44,100 @@ class PageInventaire(ctk.CTkToplevel):
             messagebox.showerror("Erreur", f"Connexion impossible : {e}")
             return None
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # UI
+    # ─────────────────────────────────────────────────────────────────────────
+
     def setup_ui(self):
-        ctk.CTkLabel(self, text="📦 Ajustement d'Inventaire", font=("Arial", 18, "bold")).pack(pady=15)
-        ctk.CTkLabel(self, text=f"Article: {self.article_data['designation']}\nCode: {self.article_data['code']}", 
-                    font=("Arial", 12)).pack(pady=5)
+        header = styled.frame(self)
+        header.pack(fill="x", padx=20, pady=(18, 10))
+        styled.label_title(header, text="Ajustement d'inventaire").pack(anchor="w")
+        styled.label_muted(
+            header,
+            text="Contrôlez le stock par magasin, puis validez l'inventaire par unité."
+        ).pack(anchor="w", pady=(2, 0))
 
-        self.frame = ctk.CTkFrame(self)
-        self.frame.pack(pady=10, padx=20, fill="both", expand=True)
+        body = styled.frame(self)
+        body.pack(fill="both", expand=True, padx=20, pady=(0, 18))
 
-        ctk.CTkLabel(self.frame, text="Magasin:").pack(pady=(10,0))
-        self.combo_magasin = ctk.CTkComboBox(self.frame, width=250, command=self.afficher_stock_actuel)
-        self.combo_magasin.pack(pady=5)
+        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(1, weight=2)
 
-        self.label_stock_actuel = ctk.CTkLabel(self.frame, text="Stock actuel: --", 
-                                                font=("Arial", 12, "bold"), 
-                                                text_color="#1976d2")
-        self.label_stock_actuel.pack(pady=(5,0))
+        # ── Colonne gauche : infos article + stocks ──────────────────────────
+        left = styled.frame(body)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
 
-        ctk.CTkLabel(self.frame, text="Quantité réelle comptée:").pack(pady=(10,0))
-        self.entry_qt = ctk.CTkEntry(self.frame, width=250)
-        self.entry_qt.pack(pady=5)
+        info_card = styled.card(left)
+        info_card.pack(fill="x", pady=(0, 12))
+        info_card.pack_propagate(False)
+        styled.label_heading(info_card, text="Article").pack(anchor="w", padx=16, pady=(12, 6))
+        styled.label(info_card, text=self.article_data["designation"], size=15, weight="bold").pack(
+            anchor="w", padx=16
+        )
+        styled.label_muted(
+            info_card, text=f"Code : {self.article_data['code']}"
+        ).pack(anchor="w", padx=16, pady=(2, 10))
 
-        ctk.CTkLabel(self.frame, text="Observation (Traçabilité):").pack(pady=(10,0))
-        self.entry_obs = ctk.CTkEntry(self.frame, width=250)
-        self.entry_obs.pack(pady=5)
+        unit_row = styled.frame(info_card)
+        unit_row.pack(fill="x", padx=16, pady=(0, 12))
+        styled.label_muted(unit_row, text="Unité d'inventaire", anchor="w").pack(side="left")
+        self.combo_unite = styled.combobox(unit_row, values=[], command=self.on_unite_change, width=220)
+        self.combo_unite.pack(side="right")
 
-        ctk.CTkButton(self.frame, text="Valider l'Inventaire", fg_color="#2e7d32", 
-                      command=self.valider).pack(pady=20)
+        stock_card = styled.card(left)
+        stock_card.pack(fill="both", expand=True)
+        styled.label_heading(stock_card, text="Stocks par magasin").pack(anchor="w", padx=16, pady=(12, 6))
+        self.label_stock_total = styled.label(
+            stock_card, text="Stock total: --", size=14, weight="bold", color=Colors.PRIMARY
+        )
+        self.label_stock_total.pack(anchor="w", padx=16, pady=(0, 8))
+
+        self.stock_list = styled.scrollable_frame(stock_card)
+        self.stock_list.pack(fill="both", expand=True, padx=8, pady=(0, 12))
+
+        # ── Colonne droite : inventaire ──────────────────────────────────────
+        right = styled.frame(body)
+        right.grid(row=0, column=1, sticky="nsew")
+
+        inv_card = styled.card(right)
+        inv_card.pack(fill="x")
+        styled.label_heading(inv_card, text="Inventaire ciblé").pack(anchor="w", padx=16, pady=(12, 6))
+
+        styled.label_muted(inv_card, text="Magasin", anchor="w").pack(fill="x", padx=16, pady=(4, 2))
+        self.combo_magasin = styled.combobox(inv_card, values=[], command=self.afficher_stock_actuel, width=250)
+        self.combo_magasin.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.label_stock_actuel = styled.label(
+            inv_card, text="Stock actuel: --", size=13, weight="bold", color=Colors.INFO
+        )
+        self.label_stock_actuel.pack(anchor="w", padx=16, pady=(0, 8))
+
+        styled.label_muted(inv_card, text="Quantité réelle comptée", anchor="w").pack(
+            fill="x", padx=16, pady=(6, 2)
+        )
+        self.entry_qt = styled.entry(inv_card, placeholder="ex: 120")
+        self.entry_qt.pack(fill="x", padx=16, pady=(0, 8))
+
+        styled.label_muted(inv_card, text="Observation (traçabilité)", anchor="w").pack(
+            fill="x", padx=16, pady=(6, 2)
+        )
+        self.entry_obs = styled.entry(inv_card, placeholder="ex: comptage inventaire mensuel")
+        self.entry_obs.pack(fill="x", padx=16, pady=(0, 12))
+
+        actions = styled.frame(inv_card)
+        actions.pack(fill="x", padx=16, pady=(0, 14))
+        styled.button_success(
+            actions, text="Valider l'inventaire", icon="✔", width=180, height=Layout.BTN_H,
+            command=self.valider
+        ).pack(side="left")
+        styled.button_secondary(
+            actions, text="Rafraîchir stocks", icon="↻", width=160, height=Layout.BTN_H,
+            command=self.refresh_stocks_overview
+        ).pack(side="right")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Chargement des données
+    # ─────────────────────────────────────────────────────────────────────────
 
     def charger_magasins(self):
         conn = self.connect_db()
@@ -81,7 +158,10 @@ class PageInventaire(ctk.CTkToplevel):
                     user_row = cursor.fetchone()
                     if user_row and user_row[0]:
                         idmag_user = user_row[0]
-                        magasin_defaut_nom = next((nom for nom, idmag in self.magasins_dict.items() if idmag == idmag_user), None)
+                        magasin_defaut_nom = next(
+                            (nom for nom, idmag in self.magasins_dict.items() if idmag == idmag_user),
+                            None
+                        )
                 except Exception:
                     magasin_defaut_nom = None
 
@@ -91,357 +171,620 @@ class PageInventaire(ctk.CTkToplevel):
                 self.afficher_stock_actuel(nom_selectionne)
             conn.close()
 
-    def afficher_stock_actuel(self, magasin_nom=None):
-        """Affiche le stock actuel calculé dynamiquement (même logique que page_stock.py)"""
-        if magasin_nom is None:
-            magasin_nom = self.combo_magasin.get()
-        
-        idmag = self.magasins_dict.get(magasin_nom)
-        code_article = self.article_data['code']
-        
+    def charger_unites(self):
         conn = self.connect_db()
         if conn:
             cursor = conn.cursor()
-            
-            # Récupérer idarticle et idunite pour ce codearticle
             cursor.execute("""
-                SELECT idarticle, idunite, COALESCE(qtunite, 1)
-                FROM tb_unite 
-                WHERE codearticle = %s
-            """, (code_article,))
-            res = cursor.fetchone()
-            
-            if not res:
-                self.label_stock_actuel.configure(text=f"Stock actuel: 0,00")
-                conn.close()
-                return
-                
-            idarticle, idunite, qtunite_affichage = res
-            
-            # Calculer le stock en utilisant la MÊME logique que page_stock.py
-            stock_actuel = self.calculer_stock_article(idarticle, idunite, idmag)
-            
-            #self.label_stock_actuel.configure(text=f"Stock actuel: {self.formater_nombre(stock_actuel)}")
-            self.label_stock_actuel.configure(text=f"")
+                SELECT idunite, designationunite
+                FROM tb_unite
+                WHERE codearticle = %s AND COALESCE(deleted, 0) = 0
+                ORDER BY COALESCE(niveau, 0) ASC, idunite ASC
+            """, (self.article_data["code"],))
+            rows = cursor.fetchall()
+            self.unites_dict = {r[1] or f"Unité {r[0]}": r[0] for r in rows}
+            self.combo_unite.configure(values=list(self.unites_dict.keys()))
+            if rows:
+                default_id = self.article_data.get("idunite")
+                default_name = None
+                if default_id:
+                    default_name = next(
+                        (name for name, uid in self.unites_dict.items() if uid == default_id),
+                        None
+                    )
+                first_name = default_name or rows[0][1] or f"Unité {rows[0][0]}"
+                self.combo_unite.set(first_name)
             conn.close()
-    
-    def calculer_stock_article(self, idarticle, idunite_cible, idmag=None):
-        """
-        Calcule le stock consolidé pour un article (MÊME LOGIQUE que page_stock.py).
-        Cette fonction calcule le stock réel basé sur tous les mouvements :
-        réceptions, ventes, sorties, transferts, inventaires, avoirs.
-        """
-        conn = self.connect_db()
-        if not conn: 
-            return 0
-    
-        try:
-            cursor = conn.cursor()
-            
-            # 1. Récupérer TOUTES les unités liées à cet idarticle
-            cursor.execute("""
-                SELECT idunite, codearticle, COALESCE(qtunite, 1) 
-                FROM tb_unite 
-                WHERE idarticle = %s
-            """, (idarticle,))
-            unites_liees = cursor.fetchall()
-            
-            # 2. Identifier le qtunite de l'unité qu'on veut afficher
-            qtunite_affichage = 1
-            for idu, code, qt_u in unites_liees:
-                if idu == idunite_cible:
-                    qtunite_affichage = qt_u if qt_u > 0 else 1
-                    break
 
-            total_stock_global_base = 0  # Le "réservoir" total en unité de base (qtunite=1)
+    def get_selected_unite_id(self):
+        label = self.combo_unite.get().strip()
+        return self.unites_dict.get(label)
 
-            # 3. Sommer les mouvements de chaque variante
-            for idu_boucle, code_boucle, qtunite_boucle in unites_liees:
-                # Réceptions
-                q_rec = "SELECT COALESCE(SUM(qtlivrefrs), 0) FROM tb_livraisonfrs WHERE idarticle = %s AND idunite = %s AND deleted = 0"
-                p_rec = [idarticle, idu_boucle]
-                if idmag: 
-                    q_rec += " AND idmag = %s"
-                    p_rec.append(idmag)
-                cursor.execute(q_rec, p_rec)
-                receptions = cursor.fetchone()[0] or 0
-        
-                # Ventes
-                q_ven = "SELECT COALESCE(SUM(qtvente), 0) FROM tb_ventedetail WHERE idarticle = %s AND idunite = %s AND deleted = 0"
-                p_ven = [idarticle, idu_boucle]
-                if idmag: 
-                    q_ven += " AND idmag = %s"
-                    p_ven.append(idmag)
-                cursor.execute(q_ven, p_ven)
-                ventes = cursor.fetchone()[0] or 0
-        
-                # Sorties
-                q_sort = "SELECT COALESCE(SUM(qtsortie), 0) FROM tb_sortiedetail WHERE idarticle = %s AND idunite = %s"
-                p_sort = [idarticle, idu_boucle]
-                if idmag: 
-                    q_sort += " AND idmag = %s"
-                    p_sort.append(idmag)
-                cursor.execute(q_sort, p_sort)
-                sorties = cursor.fetchone()[0] or 0
-        
-                # Transferts (In)
-                q_tin = "SELECT COALESCE(SUM(qttransfert), 0) FROM tb_transfertdetail WHERE idarticle = %s AND idunite = %s AND deleted = 0"
-                p_tin = [idarticle, idu_boucle]
-                if idmag:
-                    q_tin += " AND idmagentree = %s"
-                    p_tin.append(idmag)
-                cursor.execute(q_tin, p_tin)
-                t_in = cursor.fetchone()[0] or 0
-                
-                # Transferts (Out)
-                q_tout = "SELECT COALESCE(SUM(qttransfert), 0) FROM tb_transfertdetail WHERE idarticle = %s AND idunite = %s AND deleted = 0"
-                p_tout = [idarticle, idu_boucle]
-                if idmag:
-                    q_tout += " AND idmagsortie = %s"
-                    p_tout.append(idmag)
-                cursor.execute(q_tout, p_tout)
-                t_out = cursor.fetchone()[0] or 0
-        
-                # Inventaires (via codearticle)
-                q_inv = "SELECT COALESCE(SUM(qtinventaire), 0) FROM tb_inventaire WHERE codearticle = %s"
-                p_inv = [code_boucle]
-                if idmag: 
-                    q_inv += " AND idmag = %s"
-                    p_inv.append(idmag)
-                cursor.execute(q_inv, p_inv)
-                inv = cursor.fetchone()[0] or 0
-
-                # Avoirs (AUGMENTENT le stock - annulation de vente)
-                q_avoir = """
-                    SELECT COALESCE(SUM(ad.qtavoir), 0) 
-                    FROM tb_avoirdetail ad
-                    INNER JOIN tb_avoir a ON ad.idavoir = a.id
-                    WHERE ad.idarticle = %s AND ad.idunite = %s 
-                    AND a.deleted = 0 AND ad.deleted = 0
-                """
-                p_avoir = [idarticle, idu_boucle]
-                if idmag: 
-                    q_avoir += " AND ad.idmag = %s"
-                    p_avoir.append(idmag)
-                cursor.execute(q_avoir, p_avoir)
-                avoirs = cursor.fetchone()[0] or 0
-
-                # Normalisation : (Solde unité) * (Son poids)
-                # Les avoirs s'AJOUTENT car c'est une annulation de vente (retour marchandise)
-                solde_unite = (receptions + t_in + inv + avoirs - ventes - sorties - t_out)
-                total_stock_global_base += (solde_unite * qtunite_boucle)
-
-            # 4. Conversion finale pour l'affichage
-            stock_final = total_stock_global_base / qtunite_affichage
-            return max(0, stock_final)
-        
-        except Exception as e:
-            print(f"Erreur calcul stock consolidé : {e}")
-            return 0
-        finally:
-            cursor.close()
-            conn.close()
+    def on_unite_change(self, _=None):
+        self.afficher_stock_actuel()
+        self.refresh_stocks_overview()
 
     def formater_nombre(self, nombre):
         try:
             return f"{float(nombre):,.2f}".replace(',', ' ').replace('.', ',').replace(' ', '.')
-        except:
+        except Exception:
             return "0,00"
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    #  CALCUL DU STOCK RÉEL — requête SQL consolidée (idarticle, idunite, idmag)
+    # ══════════════════════════════════════════════════════════════════════════
+    # ─────────────────────────────────────────────────────────────────────────
+
+    _SQL_STOCK = """
+    WITH
+      -- ════════════════════════════════════════════════════════════════
+      -- PARAMÈTRES  (transmis via %(p_idarticle)s / %(p_idunite)s / %(p_idmag)s)
+      -- ════════════════════════════════════════════════════════════════
+      params AS (
+        SELECT
+          %(p_idarticle)s::integer AS p_idarticle,
+          %(p_idunite)s::integer   AS p_idunite,
+          %(p_idmag)s::integer     AS p_idmag   -- NULL => tous magasins
+      ),
+
+      -- ════════════════════════════════════════════════════════════════
+      -- HIÉRARCHIE DES UNITÉS DE L'ARTICLE CIBLÉ
+      -- ════════════════════════════════════════════════════════════════
+      unite_hierarchie AS (
+        SELECT
+          u.idarticle,
+          u.idunite,
+          u.niveau,
+          CASE WHEN COALESCE(u.qtunite, 1) > 0 THEN u.qtunite ELSE 1 END AS qtunite
+        FROM tb_unite u, params p
+        WHERE u.idarticle = p.p_idarticle
+          AND COALESCE(u.deleted, 0) = 0
+      ),
+
+      -- Coefficient cumulé de chaque unité vers l'unité de base (la plus petite)
+      unite_coeff AS (
+        SELECT
+          idarticle,
+          idunite,
+          EXP(
+            SUM(LN(qtunite))
+            OVER (
+              PARTITION BY idarticle
+              ORDER BY niveau
+              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )
+          ) AS coeff_vers_base
+        FROM unite_hierarchie
+      ),
+
+      -- Coefficient de l'unité cible (p_idunite)
+      coeff_cible AS (
+        SELECT uc.coeff_vers_base AS coeff
+        FROM unite_coeff uc, params p
+        WHERE uc.idunite = p.p_idunite
+      ),
+
+      -- Code article pour tb_inventaire (lié via codearticle)
+      code_cible AS (
+        SELECT u.codearticle
+        FROM tb_unite u, params p
+        WHERE u.idarticle = p.p_idarticle
+          AND u.idunite   = p.p_idunite
+        LIMIT 1
+      ),
+
+      -- ════════════════════════════════════════════════════════════════
+      -- MOUVEMENTS AGRÉGÉS PAR (idunite, idmag) — filtrés sur p_idmag
+      -- Quand p_idmag IS NULL → tous les magasins (somme globale)
+      -- ════════════════════════════════════════════════════════════════
+
+      rec AS (
+        SELECT lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS qt
+        FROM tb_livraisonfrs lf, params p
+        WHERE lf.idarticle = p.p_idarticle
+          AND lf.deleted   = 0
+          AND (p.p_idmag IS NULL OR lf.idmag = p.p_idmag)
+        GROUP BY lf.idunite, lf.idmag
+      ),
+
+      ven AS (
+        SELECT vd.idunite, v.idmag, SUM(vd.qtvente) AS qt
+        FROM tb_ventedetail vd
+        INNER JOIN tb_vente v ON v.id      = vd.idvente
+                              AND v.deleted = 0
+                              AND v.statut  = 'VALIDEE',
+             params p
+        WHERE vd.idarticle = p.p_idarticle
+          AND vd.deleted   = 0
+          AND (p.p_idmag IS NULL OR v.idmag = p.p_idmag)
+        GROUP BY vd.idunite, v.idmag
+      ),
+
+      t_in AS (
+        SELECT td.idunite, td.idmagentree AS idmag, SUM(td.qttransfert) AS qt
+        FROM tb_transfertdetail td, params p
+        WHERE td.idarticle = p.p_idarticle
+          AND td.deleted   = 0
+          AND (p.p_idmag IS NULL OR td.idmagentree = p.p_idmag)
+        GROUP BY td.idunite, td.idmagentree
+      ),
+
+      t_out AS (
+        SELECT td.idunite, td.idmagsortie AS idmag, SUM(td.qttransfert) AS qt
+        FROM tb_transfertdetail td, params p
+        WHERE td.idarticle = p.p_idarticle
+          AND td.deleted   = 0
+          AND (p.p_idmag IS NULL OR td.idmagsortie = p.p_idmag)
+        GROUP BY td.idunite, td.idmagsortie
+      ),
+
+      sor AS (
+        SELECT sd.idunite, sd.idmag, SUM(sd.qtsortie) AS qt
+        FROM tb_sortiedetail sd, params p
+        WHERE sd.idarticle = p.p_idarticle
+          AND (p.p_idmag IS NULL OR sd.idmag = p.p_idmag)
+        GROUP BY sd.idunite, sd.idmag
+      ),
+
+      inv AS (
+        SELECT u.idunite, i.idmag, SUM(i.qtinventaire) AS qt
+        FROM tb_inventaire i
+        INNER JOIN tb_unite u ON u.codearticle = i.codearticle
+        CROSS JOIN params p
+        CROSS JOIN code_cible cc
+        WHERE i.codearticle = cc.codearticle
+          AND u.idarticle   = p.p_idarticle
+          AND (p.p_idmag IS NULL OR i.idmag = p.p_idmag)
+        GROUP BY u.idunite, i.idmag
+      ),
+
+      avo AS (
+        SELECT ad.idunite, ad.idmag, SUM(ad.qtavoir) AS qt
+        FROM tb_avoirdetail ad
+        INNER JOIN tb_avoir a ON a.id = ad.idavoir AND a.deleted = 0,
+             params p
+        WHERE ad.idarticle = p.p_idarticle
+          AND ad.deleted   = 0
+          AND (p.p_idmag IS NULL OR ad.idmag = p.p_idmag)
+        GROUP BY ad.idunite, ad.idmag
+      ),
+
+      conso AS (
+        SELECT cd.idunite, cd.idmag, SUM(cd.qtconsomme) AS qt
+        FROM tb_consommationinterne_details cd, params p
+        WHERE cd.idarticle = p.p_idarticle
+          AND (p.p_idmag IS NULL OR cd.idmag = p.p_idmag)
+        GROUP BY cd.idunite, cd.idmag
+      ),
+
+      ech_in AS (
+        SELECT dce.idunite, dce.idmagasin AS idmag, SUM(dce.quantite_entree) AS qt
+        FROM tb_detailchange_entree dce, params p
+        WHERE dce.idarticle = p.p_idarticle
+          AND (p.p_idmag IS NULL OR dce.idmagasin = p.p_idmag)
+        GROUP BY dce.idunite, dce.idmagasin
+      ),
+
+      ech_out AS (
+        SELECT dcs.idunite, dcs.idmagasin AS idmag, SUM(dcs.quantite_sortie) AS qt
+        FROM tb_detailchange_sortie dcs, params p
+        WHERE dcs.idarticle = p.p_idarticle
+          AND (p.p_idmag IS NULL OR dcs.idmagasin = p.p_idmag)
+        GROUP BY dcs.idunite, dcs.idmagasin
+      ),
+
+      -- ════════════════════════════════════════════════════════════════
+      -- SOLDE EN UNITÉ DE BASE — on somme TOUS les mouvements de toutes
+      -- les unités sources, convertis vers la base via coeff_vers_base
+      -- ════════════════════════════════════════════════════════════════
+      solde_base AS (
+        SELECT
+          SUM(
+            (  COALESCE(r.qt,  0)
+             + COALESCE(ti.qt, 0)
+             + COALESCE(iv.qt, 0)
+             + COALESCE(av.qt, 0)
+             + COALESCE(ei.qt, 0)
+             - COALESCE(ve.qt, 0)
+             - COALESCE(so.qt, 0)
+             - COALESCE(to_.qt, 0)
+             - COALESCE(co.qt,  0)
+             - COALESCE(eo.qt,  0)
+            ) * uc.coeff_vers_base
+          ) AS total_base
+        FROM unite_coeff uc
+        LEFT JOIN rec     r   ON r.idunite   = uc.idunite
+        LEFT JOIN ven     ve  ON ve.idunite  = uc.idunite
+        LEFT JOIN t_in    ti  ON ti.idunite  = uc.idunite
+        LEFT JOIN t_out   to_ ON to_.idunite = uc.idunite
+        LEFT JOIN sor     so  ON so.idunite  = uc.idunite
+        LEFT JOIN inv     iv  ON iv.idunite  = uc.idunite
+        LEFT JOIN avo     av  ON av.idunite  = uc.idunite
+        LEFT JOIN conso   co  ON co.idunite  = uc.idunite
+        LEFT JOIN ech_in  ei  ON ei.idunite  = uc.idunite
+        LEFT JOIN ech_out eo  ON eo.idunite  = uc.idunite
+      )
+
+    -- ════════════════════════════════════════════════════════════════
+    -- RÉSULTAT : stock réel dans l'unité cible (p_idunite)
+    -- ════════════════════════════════════════════════════════════════
+    SELECT
+      GREATEST(0,
+        COALESCE(sb.total_base, 0) / NULLIF(cc.coeff, 0)
+      ) AS stock_reel
+    FROM solde_base sb, coeff_cible cc
+    """
+
+    def calculer_stock_article(self, idarticle, idunite_cible, idmag=None):
+        """
+        Calcule le stock réel d'un article via la requête SQL consolidée.
+
+        Paramètres
+        ----------
+        idarticle     : int  — identifiant de l'article
+        idunite_cible : int  — identifiant de l'unité d'affichage souhaitée
+        idmag         : int | None — magasin ciblé ; None = tous magasins confondus
+
+        Retourne
+        --------
+        float — stock réel >= 0 dans l'unité cible
+        """
+        conn = self.connect_db()
+        if not conn:
+            return 0.0
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                self._SQL_STOCK,
+                {
+                    'p_idarticle': idarticle,
+                    'p_idunite':   idunite_cible,
+                    'p_idmag':     idmag,          # NULL accepté → tous magasins
+                }
+            )
+            row = cursor.fetchone()
+            return float(row[0]) if row and row[0] is not None else 0.0
+        except Exception as e:
+            print(f"[PageInventaire] Erreur calcul stock (idarticle={idarticle}, "
+                  f"idunite={idunite_cible}, idmag={idmag}) : {e}")
+            return 0.0
+        finally:
+            cursor.close()
+            conn.close()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Affichage des stocks
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _get_idarticle(self, cursor=None):
+        """Retourne l'idarticle depuis article_data ou via requête DB."""
+        idarticle = self.article_data.get("idarticle")
+        if idarticle:
+            return idarticle
+        # Fallback : chercher via le code article
+        conn_local = None
+        try:
+            if cursor is None:
+                conn_local = self.connect_db()
+                if not conn_local:
+                    return None
+                cur = conn_local.cursor()
+            else:
+                cur = cursor
+
+            cur.execute(
+                "SELECT idarticle FROM tb_unite WHERE codearticle = %s LIMIT 1",
+                (self.article_data["code"],)
+            )
+            res = cur.fetchone()
+            return res[0] if res else None
+        finally:
+            if conn_local:
+                conn_local.close()
+
+    def afficher_stock_actuel(self, magasin_nom=None):
+        """Affiche le stock actuel du magasin sélectionné (colonne droite)."""
+        if magasin_nom is None:
+            magasin_nom = self.combo_magasin.get()
+
+        idmag    = self.magasins_dict.get(magasin_nom)
+        idunite  = self.get_selected_unite_id()
+        idarticle = self._get_idarticle()
+
+        if not idarticle or not idunite:
+            self.label_stock_actuel.configure(text="Stock actuel : 0,00")
+            return
+
+        # Libellé de l'unité
+        unite_label = self.combo_unite.get().strip()
+
+        # ── Calcul via la requête consolidée ──────────────────────────────────
+        stock = self.calculer_stock_article(idarticle, idunite, idmag)
+
+        self.label_stock_actuel.configure(
+            text=f"Stock Actuelle : {self.formater_nombre(stock)} {unite_label}".strip()
+        )
+
+    def refresh_stocks_overview(self):
+        """Recharge la liste des stocks par magasin (colonne gauche)."""
+        for child in self.stock_list.winfo_children():
+            child.destroy()
+
+        if not self.magasins_dict:
+            return
+
+        idunite   = self.get_selected_unite_id()
+        idarticle = self._get_idarticle()
+
+        if not idarticle or not idunite:
+            self.label_stock_total.configure(text="Stock total : 0,00")
+            return
+
+        # ── Stock TOTAL (tous magasins, idmag=None) ────────────────────────────
+        stock_total = self.calculer_stock_article(idarticle, idunite, None)
+        self.label_stock_total.configure(
+            text=f"Stock total : {self.formater_nombre(stock_total)}"
+        )
+
+        # ── Stock par magasin ──────────────────────────────────────────────────
+        for nom_mag, idmag in self.magasins_dict.items():
+            stock_mag = self.calculer_stock_article(idarticle, idunite, idmag)
+
+            row = styled.frame(self.stock_list)
+            row.pack(fill="x", padx=8, pady=4)
+
+            styled.label(row, text=nom_mag, size=12).pack(side="left")
+
+            if stock_mag > 0:
+                variant = "info"
+            elif stock_mag == 0:
+                variant = "warning"
+            else:
+                variant = "danger"
+
+            styled.badge(
+                row,
+                text=self.formater_nombre(stock_mag),
+                variant=variant
+            ).pack(side="right")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Validation de l'inventaire (logique inchangée)
+    # ─────────────────────────────────────────────────────────────────────────
+
     def _log_step(self, step, message):
-        """Log console simple pour suivre le process d'inventaire pas à pas."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[INVENTAIRE][{timestamp}][STEP {step}] {message}")
 
     def valider(self):
         self._log_step("01", "Début valider()")
-        mag_nom = self.combo_magasin.get()
-        idmag = self.magasins_dict.get(mag_nom)
-        obs = self.entry_obs.get()
-        code_article = self.article_data['code']
-        designation = self.article_data['designation']
-        self._log_step("02", f"Entrées UI récupérées: magasin='{mag_nom}', idmag={idmag}, code='{code_article}', designation='{designation}'")
-        
+
+        # ── Collecte des saisies ──────────────────────────────────────────────
+        mag_nom        = self.combo_magasin.get()
+        idmag          = self.magasins_dict.get(mag_nom)
+        obs            = self.entry_obs.get()
+        code_article   = self.article_data['code']
+        designation    = self.article_data['designation']
+        idunite_saisie = self.get_selected_unite_id()
+        unite_label    = self.combo_unite.get().strip()
+
+        rapport = []   # ← toutes les lignes du rapport affiché à la fin
+        sep     = "─" * 52
+
+        rapport.append("╔══════════════════════════════════════════════════╗")
+        rapport.append("║       PIPELINE DE VALIDATION D'INVENTAIRE        ║")
+        rapport.append("╚══════════════════════════════════════════════════╝")
+        rapport.append("")
+        rapport.append("▶ ÉTAPE 1 — SAISIE UTILISATEUR")
+        rapport.append(sep)
+        rapport.append(f"  Article     : {designation}")
+        rapport.append(f"  Code        : {code_article}")
+        rapport.append(f"  Magasin     : {mag_nom}  (idmag={idmag})")
+        rapport.append(f"  Unité       : {unite_label}  (idunite={idunite_saisie})")
+        rapport.append(f"  Observation : {obs}")
+        rapport.append("")
+
         if not obs:
-            self._log_step("03", "Observation vide -> arrêt")
             messagebox.showwarning("Attention", "L'observation est obligatoire.")
             return
 
         conn = self.connect_db()
         if not conn:
-            self._log_step("04", "Connexion DB impossible -> arrêt")
             return
-        self._log_step("04", "Connexion DB ouverte")
 
         try:
             nouveau = float(self.entry_qt.get().replace(',', '.'))
-            cursor = conn.cursor()
-            self._log_step("05", f"Quantité saisie convertie: nouveau={nouveau}")
+            cursor  = conn.cursor()
+            rapport.append(f"  Quantité saisie : {nouveau} {unite_label}")
+            rapport.append("")
 
-            # --- LOGIQUE MULTI-UNITÉS CORRIGÉE ---
-            
-            # 1. Récupérer la qtunite de l'article saisi
-            self._log_step("06", f"Recherche qtunite pour codearticle='{code_article}'")
+            # ── ÉTAPE 2 : Résolution idarticle ────────────────────────────────
+            rapport.append("▶ ÉTAPE 2 — RÉSOLUTION DE L'ARTICLE (DB)")
+            rapport.append(sep)
             cursor.execute("""
-                SELECT qtunite FROM tb_unite WHERE codearticle = %s
-            """, (code_article,))
-            res_u = cursor.fetchone()
-            qt_unite_saisie = res_u[0] if res_u and res_u[0] > 0 else 1
-            self._log_step("07", f"qt_unite_saisie={qt_unite_saisie}")
-
-            # 2. Trouver TOUTES les unités avec la MÊME désignation
-            self._log_step("08", f"Recherche des unités liées pour designation='{designation}'")
-            cursor.execute("""
-                SELECT u.codearticle, u.qtunite, a.designation
+                SELECT u.idarticle, u.idunite
                 FROM tb_unite u
-                INNER JOIN tb_article a ON u.idarticle = a.idarticle
-                WHERE a.designation = %s
-                AND a.deleted = 0
-                ORDER BY u.codearticle
-            """, (designation,))
-            unites_liees = cursor.fetchall()
-            self._log_step("09", f"Nombre d'unités liées trouvées: {len(unites_liees)}")
-            
+                INNER JOIN tb_article a ON a.idarticle = u.idarticle
+                WHERE u.codearticle = %s AND a.deleted = 0 AND COALESCE(u.deleted, 0) = 0
+                LIMIT 1
+            """, (code_article,))
+            res_article = cursor.fetchone()
+            if not res_article:
+                messagebox.showwarning("Attention", f"Code article introuvable : {code_article}")
+                conn.close()
+                return
+            idarticle_saisi, idunite_saisie_db = res_article
+            if idunite_saisie is None:
+                idunite_saisie = idunite_saisie_db
+            rapport.append(f"  SQL : SELECT idarticle, idunite FROM tb_unite")
+            rapport.append(f"        WHERE codearticle = '{code_article}'")
+            rapport.append(f"  → idarticle = {idarticle_saisi}")
+            rapport.append(f"  → idunite   = {idunite_saisie}")
+            rapport.append("")
+
+            # ── ÉTAPE 3 : Hiérarchie des unités + coefficients ────────────────
+            rapport.append("▶ ÉTAPE 3 — HIÉRARCHIE DES UNITÉS & COEFFICIENTS")
+            rapport.append(sep)
+            cursor.execute("""
+                SELECT idunite, codearticle, COALESCE(qtunite, 1), COALESCE(niveau, 0),
+                       COALESCE(designationunite, '')
+                FROM tb_unite
+                WHERE idarticle = %s AND COALESCE(deleted, 0) = 0
+                ORDER BY COALESCE(niveau, 0) ASC, idunite ASC
+            """, (idarticle_saisi,))
+            unites_liees_full = cursor.fetchall()
+            # On garde aussi la version sans designation pour la suite
+            unites_liees = [(r[0], r[1], r[2], r[3]) for r in unites_liees_full]
+
             if not unites_liees:
-                self._log_step("10", "Aucune unité liée -> arrêt")
-                messagebox.showwarning("Attention", 
-                    f"Aucune unité trouvée pour '{designation}'.\n"
-                    "Vérifiez que tb_unite et tb_article contiennent bien les enregistrements.")
+                messagebox.showwarning("Attention", f"Aucune unité trouvée pour '{designation}'.")
                 conn.close()
                 return
 
-            # 3. CALCUL CORRIGÉ : Conversion en unité de base puis vers unité cible
-            # qtunite = combien d'unités de base contient cette unité
-            # Exemple : 30 CARTONS (qtunite=4) 
-            #   → En unité de base : 30 * 4 = 120 sachets
-            #   → Pour SACHET (qtunite=1) : 120 / 1 = 120
-            #   → Pour CARTON (qtunite=4) : 120 / 4 = 30
-            
-            # Calcul de la quantité en unité de base (plus petite unité)
-            qte_unite_base = nouveau * qt_unite_saisie
-            self._log_step("11", f"Quantité convertie en unité de base: qte_unite_base={qte_unite_base}")
-            
+            # Construction des coefficients cumulés
+            coeffs_cumules = {}
+            coeff_courant  = 1.0
+            rapport.append(f"  {'Niveau':<8} {'Unité':<18} {'qtunite':<10} {'Coeff cumulé':<14}")
+            rapport.append(f"  {'------':<8} {'-----':<18} {'-------':<10} {'------------':<14}")
+            for idu, code_u, qt_u, niv, desig_u in unites_liees_full:
+                qt_safe = qt_u if qt_u and qt_u > 0 else 1
+                coeff_courant *= qt_safe
+                coeffs_cumules[idu] = coeff_courant
+                marker = " ◄ unité saisie" if idu == idunite_saisie else ""
+                rapport.append(f"  {niv:<8} {desig_u or code_u:<18} {qt_safe:<10.4g} {coeff_courant:<14.4g}{marker}")
+
+            coeff_unite_saisie = coeffs_cumules.get(idunite_saisie, 1.0)
+            qte_unite_base     = nouveau * coeff_unite_saisie
+
+            rapport.append("")
+            rapport.append(f"  Conversion vers unité de BASE :")
+            rapport.append(f"  {nouveau} × {coeff_unite_saisie} = {qte_unite_base} (unité base)")
+            rapport.append("")
+
+            # ── ÉTAPE 4 : Boucle par unité ────────────────────────────────────
+            rapport.append("▶ ÉTAPE 4 — TRAITEMENT PAR UNITÉ (boucle DB)")
+            rapport.append(sep)
+
             unites_mises_a_jour = []
-            derniers_ids = []  # Pour stocker les IDs générés
-            
-            for code_lie, qt_u_lie, desig in unites_liees:
-                # Pour chaque unité : quantité_base / qtunite_de_cette_unité
-                stock_calcule = qte_unite_base / qt_u_lie
-                self._log_step("12", f"Traitement unité code='{code_lie}', qtunite={qt_u_lie}, stock_calcule={stock_calcule}")
+            derniers_ids        = []
 
-                # a) Récupérer l'ancien stock pour le log
-                cursor.execute("""
-                    SELECT COALESCE(qtstock, 0) FROM tb_stock 
-                    WHERE codearticle = %s AND idmag = %s
-                """, (code_lie, idmag))
+            for idx, (idu_lie, code_lie, qt_u_lie, niv_lie, desig_lie) in enumerate(unites_liees_full, 1):
+                coeff_unite_liee = coeffs_cumules.get(idu_lie, 1.0)
+                stock_cible      = qte_unite_base / coeff_unite_liee if coeff_unite_liee else 0.0
+                stock_courant    = self.calculer_stock_article(idarticle_saisi, idu_lie, idmag)
+                delta_inventaire = stock_cible - stock_courant
+
+                rapport.append(f"  [{idx}] Unité : {desig_lie or code_lie}  (code={code_lie}, niveau={niv_lie})")
+                rapport.append(f"      Coeff cumulé      = {coeff_unite_liee:.4g}")
+                rapport.append(f"      Stock cible       = {qte_unite_base:.4g} ÷ {coeff_unite_liee:.4g} = {stock_cible:.4f}")
+                rapport.append(f"      Stock actuel (DB) = {stock_courant:.4f}")
+                rapport.append(f"      Delta             = {delta_inventaire:+.4f}")
+                rapport.append("")
+
+                # tb_stock
+                cursor.execute(
+                    "SELECT COALESCE(qtstock, 0) FROM tb_stock WHERE codearticle = %s AND idmag = %s",
+                    (code_lie, idmag))
                 res_old = cursor.fetchone()
-                ancien_stock_unite = res_old[0] if res_old else 0
-                self._log_step("13", f"Ancien stock lu: {ancien_stock_unite}")
+                ancien_tb_stock = res_old[0] if res_old else None
 
-                # b) Mise à jour de tb_stock
-                cursor.execute("""
-                    UPDATE tb_stock SET qtstock = %s 
-                    WHERE codearticle = %s AND idmag = %s
-                """, (stock_calcule, code_lie, idmag))
-                
+                cursor.execute(
+                    "UPDATE tb_stock SET qtstock = %s WHERE codearticle = %s AND idmag = %s",
+                    (stock_cible, code_lie, idmag))
+
                 if cursor.rowcount == 0:
-                    # Insertion si n'existe pas
-                    self._log_step("14", f"Aucune ligne tb_stock mise à jour -> INSERT pour code='{code_lie}'")
-                    cursor.execute("""
-                        INSERT INTO tb_stock (codearticle, idmag, qtstock, qtalert, deleted)
-                        VALUES (%s, %s, %s, 0, 0)
-                    """, (code_lie, idmag, stock_calcule))
+                    cursor.execute(
+                        "INSERT INTO tb_stock (codearticle, idmag, qtstock, qtalert, deleted) VALUES (%s,%s,%s,0,0)",
+                        (code_lie, idmag, stock_cible))
+                    action_tb_stock = f"INSERT qtstock={stock_cible:.4f}"
                 else:
-                    self._log_step("14", f"tb_stock UPDATE effectué pour code='{code_lie}'")
-                
+                    action_tb_stock = f"UPDATE qtstock: {ancien_tb_stock} → {stock_cible:.4f}"
+
+                rapport.append(f"      ✏ tb_stock      : {action_tb_stock}")
+
                 try:
-                    # AJOUT DE LA SYNCHRONISATION AVANT L'INSERTION
-                    self._log_step("15", "Synchronisation séquence tb_inventaire.id")
                     cursor.execute("""
-                        SELECT setval(pg_get_serial_sequence('tb_inventaire', 'id'), 
-                          COALESCE((SELECT MAX(id) FROM tb_inventaire), 0) + 1, 
-                          false);
+                        SELECT setval(pg_get_serial_sequence('tb_inventaire', 'id'),
+                          COALESCE((SELECT MAX(id) FROM tb_inventaire), 0) + 1, false)
                     """)
-
-                    # c) Enregistrement dans tb_inventaire
-                    # On utilise qtinventaire (colonne réelle) et RETURNING id
-                    # Troncature sécurisée de l'observation pour éviter les erreurs
-                    # (champ observation potentiellement VARCHAR(50) dans la base)
-                    obs_trim = obs if len(obs) <= 50 else obs[:50]
+                    obs_trim = obs[:50] if len(obs) > 50 else obs
                     cursor.execute("""
-                    INSERT INTO tb_inventaire (codearticle, idmag, qtinventaire, iduser, observation, date)
-                    VALUES (%s, %s, %s, %s, %s, NOW())
-                    RETURNING id
-                    """, (code_lie, idmag, stock_calcule, self.iduser, obs_trim))
-                
-                    # Récupération sécurisée du nouvel ID généré (43849, 43850, etc.)
+                        INSERT INTO tb_inventaire (codearticle, idmag, qtinventaire, iduser, observation, date)
+                        VALUES (%s, %s, %s, %s, %s, NOW()) RETURNING id
+                    """, (code_lie, idmag, delta_inventaire, self.iduser, obs_trim))
+
                     resultat = cursor.fetchone()
-                    if resultat:
-                        id_genere = resultat[0]
-                        derniers_ids.append(f"{code_lie}: ID {id_genere}")
-                        self._log_step("16", f"tb_inventaire INSERT OK, id={id_genere}")
-                    else:
-                        self._log_step("16", "tb_inventaire INSERT OK, mais aucun id retourné")
+                    inv_id   = resultat[0] if resultat else "?"
+                    derniers_ids.append(f"{code_lie}: ID {inv_id}")
+                    rapport.append(f"      ✏ tb_inventaire : INSERT qtinventaire={delta_inventaire:+.4f}  → id={inv_id}")
 
-                    # AJOUT DE LA SYNCHRONISATION AVANT L'INSERTION
-                    self._log_step("17", "Synchronisation séquence tb_log_stock.id")
                     cursor.execute("""
-                        SELECT setval(pg_get_serial_sequence('tb_log_stock', 'id'), 
-                          COALESCE((SELECT MAX(id) FROM tb_log_stock), 0) + 1, 
-                          false);
+                        SELECT setval(pg_get_serial_sequence('tb_log_stock', 'id'),
+                          COALESCE((SELECT MAX(id) FROM tb_log_stock), 0) + 1, false)
                     """)
-
-                    # d) Log pour traçabilité dans tb_log_stock
-                    # Préparer une description d'action tronquée pour le log (éviter VARCHAR(50) overflow)
-                    type_action_raw = f"INV AUTO ({designation}): {obs}"
-                    type_action = type_action_raw if len(type_action_raw) <= 50 else type_action_raw[:50]
+                    type_action = f"INV AUTO ({designation}): {obs}"[:50]
                     cursor.execute("""
-                    INSERT INTO tb_log_stock (codearticle, idmag, ancien_stock, nouveau_stock, iduser, type_action, date_action) 
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    """, (code_lie, idmag, ancien_stock_unite, stock_calcule, self.iduser, type_action))
-                    self._log_step("18", f"tb_log_stock INSERT OK (ancien={ancien_stock_unite}, nouveau={stock_calcule})")
-                
-                    unites_mises_a_jour.append(f"{code_lie} → {stock_calcule:.2f}")
+                        INSERT INTO tb_log_stock (codearticle, idmag, ancien_stock, nouveau_stock, iduser, type_action, date_action)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    """, (code_lie, idmag, stock_courant, stock_cible, self.iduser, type_action))
+                    rapport.append(f"      ✏ tb_log_stock  : INSERT ancien={stock_courant:.4f}  nouveau={stock_cible:.4f}")
+                    rapport.append("")
+
+                    unites_mises_a_jour.append(
+                        f"{code_lie} : ancien={stock_courant:.2f}, cible={stock_cible:.2f}, delta={delta_inventaire:.2f}"
+                    )
 
                 except psycopg2.Error as e:
-                    self._log_step("19", f"Erreur psycopg2 dans la boucle: {e}")
                     conn.rollback()
                     messagebox.showerror("Erreur SQL", f"Erreur lors de l'insertion : {e}")
                     return
+
+            # ── COMMIT ────────────────────────────────────────────────────────
             conn.commit()
-            self._log_step("20", "Transaction COMMIT effectuée")
-            
-            # Message de confirmation détaillé avec les IDs
-            detail_msg = "\n".join(unites_mises_a_jour)
-            ids_msg = "\n".join(derniers_ids)
-            messagebox.showinfo("Succès", 
-                f"✓ {len(unites_liees)} unité(s) mise(s) à jour :\n\n{detail_msg}\n\n"
-                f"IDs d'inventaire créés :\n{ids_msg}")
-    
-            # Rafraîchir la page stock parente
+            self._log_step("20", "COMMIT effectué")
+
+            rapport.append("▶ ÉTAPE 5 — COMMIT TRANSACTION")
+            rapport.append(sep)
+            rapport.append("  ✅ conn.commit() — toutes les écritures sont validées.")
+            rapport.append("")
+            rapport.append("▶ RÉCAPITULATIF FINAL")
+            rapport.append(sep)
+            rapport.append(f"  Article  : {designation}  (code={code_article})")
+            rapport.append(f"  Magasin  : {mag_nom}")
+            rapport.append(f"  Saisie   : {nouveau} {unite_label}")
+            rapport.append(f"  Base     : {qte_unite_base} (unité de base)")
+            rapport.append("")
+            for ligne in unites_mises_a_jour:
+                rapport.append(f"  • {ligne}")
+            rapport.append("")
+            rapport.append(f"  IDs tb_inventaire créés :")
+            for id_ligne in derniers_ids:
+                rapport.append(f"    → {id_ligne}")
+
+            # ── Affichage messagebox ──────────────────────────────────────────
+            # messagebox.showinfo(
+            #     "✅ Pipeline de validation — Détail complet",
+            #     "\n".join(rapport)
+            # )
+
             if hasattr(self.master, 'charger_stocks'):
-                self._log_step("21", "Rafraîchissement page stock parente")
                 self.master.charger_stocks()
-    
-            self._log_step("22", "Fermeture de la fenêtre inventaire")
+
             self.destroy()
-            
+
         except ValueError:
-            self._log_step("E1", f"Valeur quantité invalide: '{self.entry_qt.get()}'")
             messagebox.showerror("Erreur", "Quantité saisie invalide.")
         except Exception as e:
-            self._log_step("E2", f"Erreur inattendue: {e}")
             self._log_step("E2", traceback.format_exc())
             conn.rollback()
             messagebox.showerror("Erreur SQL", f"Détails : {str(e)}")
         finally:
             try:
                 cursor.close()
-                self._log_step("F1", "Cursor fermé")
             except Exception:
                 pass
             try:
                 conn.close()
-                self._log_step("F2", "Connexion fermée")
             except Exception:
                 pass

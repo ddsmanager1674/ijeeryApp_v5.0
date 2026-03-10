@@ -607,7 +607,12 @@ class PageStock(ctk.CTkFrame):
                 messagebox.showwarning("Erreur", f"Article {code_article} introuvable")
                 return
             idarticle, idunite, designation = result
-            article_data = {'code': code_article, 'designation': designation}
+            article_data = {
+                'code': code_article,
+                'designation': designation,
+                'idarticle': idarticle,
+                'idunite': idunite
+            }
             PageInventaire(self, article_data, self.iduser)
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'ouverture : {str(e)}")
