@@ -187,6 +187,9 @@ MENU_STRUCTURE = [
         "hover": "#2ec8cd",
         "subs": [
             ("👥  Liste Personnel",     "Liste Personnel",       "pages.page_mainPers",         "PageMainPersonnel",   None),
+            ("📌  Suivi de présence",   "Suivi de présence",     "pages.page_suiviPresence",    "PageSuiviPresence",   None),
+            ("🧾  Gérer Personnels",    "Gérer Personnels",      "pages.page_personnelCRUD",    "PagePersonnelCRUD",   None),
+            ("📅  Présence Personnel",  "Présence Personnel",    "pages.page_presencePersonnel","PagePresencePersonnel", None),
             ("❌  Absence",             "Absence",               "pages.page_absence",          "PageAbsence",         None),
             ("✅  Présence",            "Présence",              "pages.page_presence",         "PagePresence",        None),
             ("💸  Avance 15e",          "Avance 15e",            "pages.page_avance15e",        "PageAVQ",             "iduser"),
