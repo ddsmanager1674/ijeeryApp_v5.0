@@ -166,6 +166,7 @@ MENU_STRUCTURE = [
             ("📄  Facturation",         "Facturation",           None,                          None,                  "vente_tab"),
             ("📋  Liste Facture",       "Liste Facture",         "pages.page_ListeFacture",     "PageListeFacture",    None),
             ("📦  Stock Article",       "Stock Article",         "pages.page_stock",            "PageStock",           None),
+            ("📦  Inventaire du Jour",  "Inventaire du Jour",    "pages.page_inventaireJour",   "PageInventaireJour",  None),
             ("⚠️  Stock Alerte",        "Stock Alerte",          "pages.page_StockAlerte",      "PageStockAlerte",     None),
             ("🛡️  Péremption Article",  "Péremption d'article",  "pages.page_peremption",       "PageGestionPeremption", None),
             ("🚚  Stock Livraison",     "Stock Livraison",       "pages.page_StockLivraison",   "PageStockLivraison",  None),

@@ -2,7 +2,7 @@ import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import threading
 from tkinter import ttk
 from resource_utils import get_config_path, safe_file_read
@@ -64,8 +64,8 @@ def _apply_tree_style():
 
 
 # ── Importations des classes externes ─────────────────────────────────────────
-from pages.page_peremption import PageGestionPeremption
 from pages.page_inventaire import PageInventaire
+from pages.page_inventaireJour import PageInventaireJour
 
 
 # ====================================================================
@@ -76,9 +76,6 @@ class PageStock(ctk.CTkFrame):
 
     def __init__(self, master, db_conn=None, session_data=None, iduser=None):
         super().__init__(master, fg_color=C.BG_PAGE)
-        self.clignotement_actif = False
-        self.couleur_alerte     = C.DANGER
-
         if iduser is not None:
             self.iduser = iduser
         elif session_data and 'user_id' in session_data:
@@ -148,13 +145,13 @@ class PageStock(ctk.CTkFrame):
         ).pack(side="left", padx=(0, 4))
 
         # Boutons actions (côté droit)
-        self.btn_peremption = ctk.CTkButton(
-            inner, text="🛡️  Articles Périmés",
-            command=self.ouvrir_fenetre_peremption,
-            fg_color=C.DANGER, hover_color=C.DANGER_DARK,
+        self.btn_verif_inventaire = ctk.CTkButton(
+            inner, text="✅  Vérification inventaire",
+            command=self.ouvrir_fenetre_verification_inventaire,
+            fg_color=C.SUCCESS, hover_color=C.SUCCESS_DARK,
             text_color="#FFFFFF",
-            height=30, width=160, font=self._f(10, "bold"))
-        self.btn_peremption.pack(side="right", padx=(6, 0))
+            height=30, width=190, font=self._f(10, "bold"))
+        self.btn_verif_inventaire.pack(side="right", padx=(6, 0))
 
         self.btn_export = ctk.CTkButton(
             inner, text="📊  Export Excel",
@@ -489,7 +486,6 @@ class PageStock(ctk.CTkFrame):
         self.label_total_articles.configure(text=f"Total articles : {len(self.all_data)}")
         self.label_derniere_maj.configure(
             text=f"Actualisé : {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-        self.mettre_a_jour_badge_peremption()
 
     def calculer_stock_article(self, idarticle, idunite_cible, idmag=None):
         conn = self.connect_db()
@@ -620,20 +616,6 @@ class PageStock(ctk.CTkFrame):
             cursor.close()
             conn.close()
 
-    def clignoter_bouton(self):
-        """Fait clignoter le bouton de péremption"""
-        if not self.clignotement_actif:
-            self.clignotement_actif = True
-
-        def toggle_color():
-            if self.clignotement_actif:
-                couleur_actuelle = self.btn_peremption.cget("fg_color")
-                nouvelle_couleur = "#ffffff" if couleur_actuelle == self.couleur_alerte else self.couleur_alerte
-                self.btn_peremption.configure(fg_color=nouvelle_couleur)
-                self.after(500, toggle_color)
-
-        toggle_color()
-
     def filtrer_stocks(self):
         """Filtre les données selon le critère de recherche"""
         for item in self.tree.get_children():
@@ -739,54 +721,22 @@ class PageStock(ctk.CTkFrame):
             cursor.close()
             conn.close()
 
-    def ouvrir_fenetre_peremption(self):
-        """Ouvre une fenêtre Toplevel affichant les articles périmés"""
-        self.fenetre_peremp = ctk.CTkToplevel(self)
-        self.fenetre_peremp.title("Suivi des Péremptions")
-        self.fenetre_peremp.geometry("1100x700")
+    def ouvrir_fenetre_verification_inventaire(self):
+        """Ouvre la fenêtre d'inventaire du jour en mode vérification."""
+        win = ctk.CTkToplevel(self)
+        win.title("Vérification inventaire du jour")
+        win.geometry("1200x720")
         if _T:
-            Theme.apply_toplevel(self.fenetre_peremp)
-        self.fenetre_peremp.attributes('-topmost', True)
-        self.fenetre_peremp.focus_set()
-        self.page_peremp = PageGestionPeremption(self.fenetre_peremp, iduser=self.iduser)
-        self.page_peremp.pack(fill="both", expand=True, padx=10, pady=10)
-
-    def mettre_a_jour_badge_peremption(self):
-        """Analyse les dates et ajuste la couleur et le texte du bouton"""
-        conn = self.connect_db()
-        if not conn: return
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT l.idarticle, l.idunite, l.dateperemption FROM tb_livraisonfrs l WHERE l.dateperemption IS NOT NULL")
-            lignes     = cursor.fetchall()
-            aujourdhui = datetime.now().date()
-            un_mois    = aujourdhui + timedelta(days=30)
-            nb_perimes = nb_urgents = 0
-            for id_art, id_uni, d_peremp in lignes:
-                stock = self.calculer_stock_article(id_art, id_uni)
-                if stock > 0:
-                    if d_peremp <= aujourdhui: nb_perimes += 1
-                    elif d_peremp <= un_mois:  nb_urgents += 1
-            if nb_perimes > 0:
-                self.btn_peremption.configure(text=f"🚨  PÉRIMÉS ({nb_perimes})")
-                self.couleur_alerte = C.DANGER
-                if not self.clignotement_actif:
-                    self.clignoter_bouton()
-            elif nb_urgents > 0:
-                self.clignotement_actif = False
-                self.btn_peremption.configure(
-                    text=f"⚠️  Alerte ({nb_urgents})",
-                    fg_color=C.WARNING, hover_color="#E67E22")
-            else:
-                self.clignotement_actif = False
-                self.btn_peremption.configure(
-                    text="🛡️  Articles Périmés",
-                    fg_color=C.DANGER, hover_color=C.DANGER_DARK)
-        except Exception as e:
-            print(f"Erreur badge: {e}")
-        finally:
-            cursor.close()
-            conn.close()
+            Theme.apply_toplevel(win)
+        win.attributes('-topmost', True)
+        win.focus_set()
+        page = PageInventaireJour(
+            win,
+            db_conn=None,
+            session_data={"user_id": self.iduser},
+            mode="verification",
+        )
+        page.pack(fill="both", expand=True, padx=10, pady=10)
 
 
 # ── Test standalone ───────────────────────────────────────────────────────────
