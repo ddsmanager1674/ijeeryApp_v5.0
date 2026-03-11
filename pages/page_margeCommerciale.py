@@ -93,6 +93,15 @@ class PageStock(ctk.CTkFrame):
         self.combo_filtre_magasin = None
         self.combo_filtre_marge   = None
         self.all_data            = []
+        self._col_visible_default = {
+            "Prix d'achat": False,
+            "Frais/Charges": False,
+            "Marge (%)": False,
+        }
+        self._col_widths         = {}
+        self._col_menu           = None
+        self._col_listbox        = None
+        self._magasin_cols       = []
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -184,6 +193,22 @@ class PageStock(ctk.CTkFrame):
             border_width=1, border_color=C.BORDER,
             height=30, width=110, font=self._f(10)
         ).pack(side="left", padx=(0, 4))
+
+        # Filtre "Afficher" (sélection avec cases à cocher)
+        ctk.CTkLabel(
+            inner, text="Afficher :", font=self._f(10),
+            text_color=C.TEXT_SECONDARY
+        ).pack(side="left", padx=(8, 4))
+
+        btn_afficher = ctk.CTkButton(
+            inner, text="Sélection ▾",
+            command=self._toggle_afficher_menu,
+            fg_color=C.BG_INPUT, hover_color=C.DIVIDER,
+            text_color=C.TEXT_PRIMARY,
+            border_width=1, border_color=C.BORDER,
+            height=30, width=110, font=self._f(10)
+        )
+        btn_afficher.pack(side="left", padx=(0, 8))
 
         # Boutons actions (côté droit)
         self.btn_export = ctk.CTkButton(
@@ -297,6 +322,7 @@ class PageStock(ctk.CTkFrame):
             "Marge (%)"
         )
         colonnes_magasins = [mag[1] for mag in self.magasins]
+        self._magasin_cols = list(colonnes_magasins)
         self.colonnes_dynamiques = colonnes_fixes + tuple(colonnes_magasins) + ("Total", "Marge Total")
 
         self.tree = ttk.Treeview(
@@ -342,6 +368,100 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=110, anchor="center")
 
         self.appliquer_filtre_colonnes_magasin()
+        self._init_col_visibility()
+        self._apply_column_visibility()
+
+    # ── Visibilité des colonnes ──────────────────────────────────────────────
+    def _init_col_visibility(self):
+        if self._col_widths:
+            return
+        for col in self.colonnes_dynamiques:
+            try:
+                self._col_widths[col] = int(self.tree.column(col, "width"))
+            except Exception:
+                self._col_widths[col] = 110
+
+    def _apply_column_visibility(self, visible_cols=None):
+        if not self.tree:
+            return
+        if visible_cols is None and self._col_listbox and self._col_listbox.winfo_exists():
+            visible_cols = set(self._col_listbox.get(i) for i in self._col_listbox.curselection())
+        if visible_cols is None:
+            visible_cols = set()
+            for col in self.colonnes_dynamiques:
+                if col in self._col_visible_default:
+                    if self._col_visible_default[col]:
+                        visible_cols.add(col)
+                else:
+                    visible_cols.add(col)
+
+        for col in self.colonnes_dynamiques:
+            if col in self._magasin_cols:
+                continue
+            visible = col in visible_cols
+            if visible:
+                width = self._col_widths.get(col, 110)
+                self.tree.column(col, width=width, minwidth=40, stretch=True)
+                self.tree.heading(col, text=col)
+            else:
+                self.tree.column(col, width=0, minwidth=0, stretch=False)
+                self.tree.heading(col, text="")
+
+        # Magasins: toujours cachés
+        for col in self._magasin_cols:
+            self.tree.column(col, width=0, minwidth=0, stretch=False)
+            self.tree.heading(col, text="")
+
+    def _toggle_afficher_menu(self):
+        if self._col_menu and self._col_menu.winfo_exists():
+            self._col_menu.destroy()
+            self._col_menu = None
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title("Afficher")
+        win.geometry("220x160")
+        win.resizable(False, False)
+        if _T:
+            Theme.apply_toplevel(win)
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+        self._col_menu = win
+
+        frm = ctk.CTkFrame(win, fg_color=C.BG_CARD, corner_radius=8)
+        frm.pack(fill="both", expand=True, padx=10, pady=10)
+
+        import tkinter as tk
+        ctk.CTkLabel(
+            frm, text="Colonnes visibles",
+            font=self._f(10, "bold"), text_color=C.TEXT_PRIMARY
+        ).pack(anchor="w", padx=6, pady=(4, 6))
+
+        lb = tk.Listbox(
+            frm, selectmode="multiple",
+            height=8, exportselection=False,
+            font=("Roboto" if _T else "Segoe UI", 10),
+            relief="flat", activestyle="dotbox",
+            bg=C.BG_CARD, fg=C.TEXT_PRIMARY,
+            selectbackground=C.PRIMARY,
+            selectforeground="#FFFFFF",
+            bd=0, highlightthickness=1)
+        for col in self.colonnes_dynamiques:
+            if col in self._magasin_cols:
+                continue
+            lb.insert("end", col)
+        lb.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self._col_listbox = lb
+
+        for i, col in enumerate(self.colonnes_dynamiques):
+            if col in self._col_visible_default:
+                if self._col_visible_default[col]:
+                    lb.selection_set(i)
+            else:
+                lb.selection_set(i)
+
+        lb.bind("<<ListboxSelect>>", lambda _e: self._apply_column_visibility())
+        self._apply_column_visibility()
 
     def charger_stocks_avec_progression(self):
         """Charge les stocks avec une fenêtre de progression"""
