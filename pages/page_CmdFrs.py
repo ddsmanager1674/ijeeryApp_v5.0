@@ -137,6 +137,7 @@ class PageCommandeFrs(ctk.CTkFrame):
         # Transporteur
         self.transporteur_id = None
         self.transporteur_nom = None
+        self._infos_charge_value = ""
 
         self.setup_ui()
         self.generer_reference()
@@ -478,6 +479,16 @@ class PageCommandeFrs(ctk.CTkFrame):
             font=self._font_label_small_strike, text_color=Colors.TEXT_MUTED
         )
         self.label_charge.pack(side="left", padx=(0, 4))
+        self.info_charge = ctk.CTkLabel(
+            charge_label_row, text="ℹ", cursor="hand2",
+            font=Fonts.bold(10), text_color=Colors.INFO
+        )
+        self.info_charge.pack(side="left")
+        self.info_charge.bind("<Enter>", self._show_charge_tooltip)
+        self.info_charge.bind("<Leave>", self._hide_charge_tooltip)
+        self.info_charge.bind("<Button-1>", self._show_charge_tooltip)
+        self.info_charge.pack_forget()
+        self._charge_tooltip = None
         self.entry_charge = ctk.CTkEntry(
             charge_wrap, width=90, height=26,
             fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
@@ -756,11 +767,60 @@ class PageCommandeFrs(ctk.CTkFrame):
             if not self.entry_charge.winfo_manager():
                 self.entry_charge.pack(anchor="w")
             self.entry_charge.configure(state="normal")
+            if not self.info_charge.winfo_manager():
+                self.info_charge.pack(side="left")
         else:
             self.entry_charge.configure(state="disabled")
             if self.entry_charge.winfo_manager():
                 self.entry_charge.pack_forget()
             self.entry_charge.delete(0, "end")
+            if self.info_charge.winfo_manager():
+                self.info_charge.pack_forget()
+
+    def _show_charge_tooltip(self, event=None):
+        if self._charge_tooltip and self._charge_tooltip.winfo_exists():
+            return
+        tip = ctk.CTkToplevel(self)
+        tip.overrideredirect(True)
+        tip.attributes("-topmost", True)
+        tip.configure(fg_color=Colors.BG_CARD)
+
+        texte = self._get_infos_charge_value() or ""
+        if not texte:
+            texte = " "
+        lbl = ctk.CTkLabel(
+            tip, text=texte,
+            font=Fonts.small(10), text_color=Colors.TEXT_PRIMARY,
+            fg_color=Colors.BG_CARD, padx=8, pady=4,
+            wraplength=320, justify="left"
+        )
+        lbl.pack()
+
+        x = (event.x_root + 8) if event else (self.winfo_rootx() + 20)
+        y = (event.y_root + 10) if event else (self.winfo_rooty() + 20)
+        tip.geometry(f"+{x}+{y}")
+        self._charge_tooltip = tip
+
+    def _hide_charge_tooltip(self, event=None):
+        if self._charge_tooltip and self._charge_tooltip.winfo_exists():
+            self._charge_tooltip.destroy()
+        self._charge_tooltip = None
+
+    def _get_infos_charge_value(self):
+        conn = self.connect_db()
+        if not conn:
+            return ""
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT valeur FROM tb_autre_infos WHERE intitule=%s", ("infos_charge",))
+            row = cur.fetchone()
+            self._infos_charge_value = row[0] if row and row[0] else ""
+        except Exception:
+            self._infos_charge_value = ""
+        finally:
+            cur.close()
+            conn.close()
+        return self._infos_charge_value
 
     def on_selection_ligne(self, event):
         if self.tree.selection():

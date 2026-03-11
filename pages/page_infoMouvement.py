@@ -27,6 +27,7 @@ from pages.page_transfert import PageTransfert
 from pages.page_sortie import PageSortie
 from pages.page_SuiviCommande import PageSuiviCommande
 from pages.page_transporteur import PageTransporteur
+from pages.page_infosCharges import PageInfosCharges
 
 # ============ CLASSE CHANGEMENT D'ARTICLES ============
 
@@ -1646,7 +1647,8 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             ("🔄 Transferts", "PageTransfert"),
             ("📤 Sortie/Consommation", "PageSortie"),
             ("🔁 Changements", "PageChangementArticle"),
-            ("🚚 Transporteurs", "PageTransporteur")
+            ("🚚 Transporteurs", "PageTransporteur"),
+            ("🧾 Infos Charges", "PageInfosCharges")
         ]
         
         for idx, (menu_name, page_class) in enumerate(menus, start=1):
@@ -1719,7 +1721,8 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             "🔄 Transferts": PageTransfert,
             "📤 Sortie/Consommation": PageSortie,
             "🔁 Changements": PageChangementArticle,
-            "🚚 Transporteurs": PageTransporteur
+            "🚚 Transporteurs": PageTransporteur,
+            "🧾 Infos Charges": PageInfosCharges
         }
         
         # Cacher la page actuelle
@@ -1745,6 +1748,8 @@ class PageInfoMouvementStock(ctk.CTkFrame):
                 elif page_class == PageChangementArticle:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 elif page_class == PageTransporteur:
+                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
+                elif page_class == PageInfosCharges:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 else:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
