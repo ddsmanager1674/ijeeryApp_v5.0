@@ -290,7 +290,7 @@ class HistoriquePrixWindow(ctk.CTkToplevel):
 
         self._tree = ttk.Treeview(
             tbl,
-            columns=("date", "ref", "fournisseur", "prix"),
+            columns=("date", "ref", "fournisseur", "prix", "charge"),
             show="headings",
             style="Hist.Treeview",
             yscrollcommand=vsb.set,
@@ -306,7 +306,8 @@ class HistoriquePrixWindow(ctk.CTkToplevel):
             ("date",        "Date livraison",          150, "center"),
             ("ref",         "Réf. Facture / Réception", 240, "w"),
             ("fournisseur", "Fournisseur",              210, "w"),
-            ("prix",        "Prix unitaire",            140, "e"),
+            ("prix",        "Prix d'achat",            140, "e"),
+            ("charge",      "Frais/Charge",             140, "e"),
         ]:
             self._tree.heading(col, text=label)
             self._tree.column(col, width=w, anchor=anchor, minwidth=80)
@@ -341,7 +342,8 @@ class HistoriquePrixWindow(ctk.CTkToplevel):
                     COALESCE(lf.factfrs,   '—') AS ref_facture,
                     COALESCE(lf.reflivfrs, '—') AS ref_reception,
                     COALESCE(f.nomFrs, 'Inconnu') AS fournisseur,
-                    cd.punitcmd
+                    cd.punitcmd,
+                    COALESCE(cd.montant_charge, 0) AS montant_charge
                 FROM tb_livraisonfrs lf
                 INNER JOIN tb_commande       com ON lf.idcom   = com.idcom
                 INNER JOIN tb_commandedetail cd  ON cd.idcom   = com.idcom
@@ -379,10 +381,17 @@ class HistoriquePrixWindow(ctk.CTkToplevel):
                             .replace('#', ','))
             except Exception:
                 prix_fmt = "0,00"
+            try:
+                charge_fmt = (f"{float(row[5]):,.2f}"
+                              .replace('.', '#').replace(',', '.')
+                              .replace('#', ','))
+            except Exception:
+                charge_fmt = "0,00"
             tag = "first" if idx == 0 else (
                 "even" if idx % 2 == 0 else "odd")
             self._tree.insert("", "end",
-                              values=(date_str, ref, row[3], prix_fmt),
+                              values=(date_str, ref, row[3],
+                                      prix_fmt, charge_fmt),
                               tags=(tag,))
         self._lbl_status.configure(
             text=(f"{len(rows)} entrée(s)  —  "
@@ -557,7 +566,7 @@ class PagePrixRevient(ctk.CTkFrame):
         tbl.grid_rowconfigure(0, weight=1)
         tbl.grid_columnconfigure(0, weight=1)
 
-        cols = ("code", "designation", "unite", "fournisseur", "prix")
+        cols = ("code", "designation", "unite", "fournisseur", "prix", "charge", "pr")
         self.tree = ttk.Treeview(tbl, columns=cols,
                                  show="headings",
                                  style="Rev.Treeview",
@@ -575,7 +584,9 @@ class PagePrixRevient(ctk.CTkFrame):
             "designation": ("Désignation",         310, "w"),
             "unite":       ("Unité",               120, "center"),
             "fournisseur": ("Fournisseur (dernier)", 220, "w"),
-            "prix":        ("Prix de revient",      150, "e"),
+            "prix":        ("Prix d'achat",      150, "e"),
+            "charge":      ("Frais/Charge",         150, "e"),
+            "pr":          ("Prix de revient",                   150, "e"),
         }
         for col, (label, w, anchor) in col_cfg.items():
             self.tree.heading(col, text=label)
@@ -692,11 +703,12 @@ class PagePrixRevient(ctk.CTkFrame):
                     u.designationunite,
                     COALESCE(f.nomFrs, 'Aucun fournisseur') AS fournisseur,
                     COALESCE(last_lf.punitcmd, 0)           AS dernier_prix,
+                    COALESCE(last_lf.montant_charge, 0)     AS dernier_charge,
                     u.idunite
                 FROM tb_unite u
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN LATERAL (
-                    SELECT cd.punitcmd, cd.idfrs
+                    SELECT cd.punitcmd, cd.montant_charge, cd.idfrs
                     FROM tb_livraisonfrs lf
                     INNER JOIN tb_commande       com ON lf.idcom   = com.idcom
                     INNER JOIN tb_commandedetail cd  ON cd.idcom   = com.idcom
@@ -782,23 +794,44 @@ class PagePrixRevient(ctk.CTkFrame):
                 unite       = row[2] or ""
                 fournisseur = row[3] or ""
                 prix        = row[4] if row[4] is not None else 0
-                idunite     = row[5]
+                charge      = row[5] if row[5] is not None else 0
+                idunite     = row[6]
 
                 try:
                     prix_fmt = (f"{float(prix):,.2f}"
                                 .replace('.', '#').replace(',', '.')
                                 .replace('#', ','))
-                    zero = float(prix) == 0
+                    prix_val = float(prix)
                 except Exception:
                     prix_fmt = "0,00"
-                    zero = True
+                    prix_val = 0.0
 
+                try:
+                    charge_fmt = (f"{float(charge):,.2f}"
+                                  .replace('.', '#').replace(',', '.')
+                                  .replace('#', ','))
+                    charge_val = float(charge)
+                except Exception:
+                    charge_fmt = "0,00"
+                    charge_val = 0.0
+
+                pr_val = prix_val + charge_val
+                try:
+                    pr_fmt = (f"{float(pr_val):,.2f}"
+                              .replace('.', '#').replace(',', '.')
+                              .replace('#', ','))
+                except Exception:
+                    pr_fmt = "0,00"
+                    pr_val = 0.0
+
+                zero = pr_val == 0
                 tag = ("even_zero" if zero else "even") if idx % 2 == 0 \
                     else ("odd_zero"  if zero else "odd")
 
                 iid = self.tree.insert(
                     "", "end",
-                    values=(code, designation, unite, fournisseur, prix_fmt),
+                    values=(code, designation, unite, fournisseur,
+                            prix_fmt, charge_fmt, pr_fmt),
                     tags=(tag,))
                 self.code_mapping[iid]    = code
                 self.idunite_mapping[iid] = idunite
