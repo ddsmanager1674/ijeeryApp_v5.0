@@ -834,6 +834,7 @@ class PageStock(ctk.CTkFrame):
         designation = str(valeurs[1]) if len(valeurs) > 1 else ""
         unite = str(valeurs[2]) if len(valeurs) > 2 else ""
         prix_achat = self.parser_nombre(valeurs[3]) if len(valeurs) > 3 else 0.0
+        frais_charge = self.parser_nombre(valeurs[4]) if len(valeurs) > 4 else 0.0
         prix_revient = self.parser_nombre(valeurs[5]) if len(valeurs) > 5 else prix_achat
         prix_vente = self.parser_nombre(valeurs[6]) if len(valeurs) > 6 else 0.0
         marge_unitaire = self.parser_nombre(valeurs[7]) if len(valeurs) > 7 else (prix_vente - prix_revient)
@@ -866,6 +867,15 @@ class PageStock(ctk.CTkFrame):
             hist_achat = cursor.fetchall()
 
             cursor.execute("""
+                SELECT id, COALESCE(montant_charge, 0)
+                FROM tb_commandedetail
+                WHERE idunite = %s AND montant_charge IS NOT NULL
+                ORDER BY id DESC
+                LIMIT 200
+            """, (idunite,))
+            hist_charge = cursor.fetchall()
+
+            cursor.execute("""
                 SELECT id, COALESCE(prix, 0), dateregistre
                 FROM tb_prix
                 WHERE idunite = %s AND deleted = 0
@@ -875,6 +885,7 @@ class PageStock(ctk.CTkFrame):
             hist_vente = cursor.fetchall()
 
             avg_achat = (sum(float(v[1] or 0) for v in hist_achat) / len(hist_achat)) if hist_achat else 0.0
+            avg_charge = (sum(float(v[1] or 0) for v in hist_charge) / len(hist_charge)) if hist_charge else 0.0
             avg_vente = (sum(float(v[1] or 0) for v in hist_vente) / len(hist_vente)) if hist_vente else 0.0
 
             self._ouvrir_detail_article_modal(
@@ -882,12 +893,16 @@ class PageStock(ctk.CTkFrame):
                 designation=designation,
                 unite=unite,
                 prix_achat=prix_achat,
+                frais_charge=frais_charge,
+                prix_revient=prix_revient,
                 prix_vente=prix_vente,
                 marge_unitaire=marge_unitaire,
                 marge_pct=marge_pct,
                 hist_achat=hist_achat,
+                hist_charge=hist_charge,
                 hist_vente=hist_vente,
                 avg_achat=avg_achat,
+                avg_charge=avg_charge,
                 avg_vente=avg_vente,
             )
         except Exception as e:
@@ -902,12 +917,16 @@ class PageStock(ctk.CTkFrame):
         designation,
         unite,
         prix_achat,
+        frais_charge,
+        prix_revient,
         prix_vente,
         marge_unitaire,
         marge_pct,
         hist_achat,
+        hist_charge,
         hist_vente,
         avg_achat,
+        avg_charge,
         avg_vente,
     ):
         win = ctk.CTkToplevel(self)
@@ -928,6 +947,8 @@ class PageStock(ctk.CTkFrame):
             text=(
                 f"Code: {code_article}   |   Désignation: {designation}   |   Unité: {unite}\n"
                 f"Prix d'achat: {self.formater_nombre(prix_achat)} Ar   |   "
+                f"Frais/Charges: {self.formater_nombre(frais_charge)} Ar   |   "
+                f"Prix de revient: {self.formater_nombre(prix_revient)} Ar\n"
                 f"Prix de vente: {self.formater_nombre(prix_vente)} Ar   |   "
                 f"Marge unitaire: {self.formater_nombre(marge_unitaire)} Ar ({self.formater_pourcentage(marge_pct)})"
             ),
@@ -941,6 +962,7 @@ class PageStock(ctk.CTkFrame):
         hist_wrap.pack(fill="both", expand=True, pady=(0, 8))
         hist_wrap.grid_columnconfigure(0, weight=1)
         hist_wrap.grid_columnconfigure(1, weight=1)
+        hist_wrap.grid_columnconfigure(2, weight=1)
         hist_wrap.grid_rowconfigure(0, weight=1)
 
         fr_achat = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
@@ -960,8 +982,25 @@ class PageStock(ctk.CTkFrame):
         for _id, val in hist_achat:
             tv_achat.insert("", "end", values=(_id, self.formater_nombre(val)))
 
+        fr_charge = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
+        fr_charge.grid(row=0, column=1, sticky="nsew", padx=(5, 5))
+        ctk.CTkLabel(
+            fr_charge,
+            text=f"Historique Frais/Charges (Moyenne: {self.formater_nombre(avg_charge)} Ar)",
+            font=self._f(10, "bold"),
+            text_color=C.TEXT_PRIMARY
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+        tv_charge = ttk.Treeview(fr_charge, columns=("id", "val"), show="headings", height=12, style="Stock.Treeview")
+        tv_charge.heading("id", text="N°")
+        tv_charge.heading("val", text="Frais/Charges")
+        tv_charge.column("id", width=80, anchor="center")
+        tv_charge.column("val", width=140, anchor="e")
+        tv_charge.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        for _id, val in hist_charge:
+            tv_charge.insert("", "end", values=(_id, self.formater_nombre(val)))
+
         fr_vente = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
-        fr_vente.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        fr_vente.grid(row=0, column=2, sticky="nsew", padx=(5, 0))
         ctk.CTkLabel(
             fr_vente,
             text=f"Historique Prix de vente (Moyenne: {self.formater_nombre(avg_vente)} Ar)",
@@ -992,6 +1031,11 @@ class PageStock(ctk.CTkFrame):
         ent_achat.insert(0, self.formater_nombre(prix_achat))
         ent_achat.pack(side="left", padx=(6, 10))
 
+        ctk.CTkLabel(row, text="Frais/Charges", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ent_charge = ctk.CTkEntry(row, width=110, height=28)
+        ent_charge.insert(0, self.formater_nombre(frais_charge))
+        ent_charge.pack(side="left", padx=(6, 10))
+
         ctk.CTkLabel(row, text="Prix de vente", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
         ent_vente = ctk.CTkEntry(row, width=110, height=28)
         ent_vente.insert(0, self.formater_nombre(prix_vente))
@@ -1007,10 +1051,12 @@ class PageStock(ctk.CTkFrame):
 
         def _simuler(*_):
             pa = self.parser_nombre(ent_achat.get())
+            fc = self.parser_nombre(ent_charge.get())
             pv = self.parser_nombre(ent_vente.get())
             st = self.parser_nombre(ent_stock.get())
-            mu = pv - pa
-            pct = ((mu / pa) * 100) if pa != 0 else 100.0
+            pr = pa + fc
+            mu = pv - pr
+            pct = ((mu / pr) * 100) if pr != 0 else 100.0
             mt = mu * st
             lbl_res.configure(
                 text=(
@@ -1019,7 +1065,7 @@ class PageStock(ctk.CTkFrame):
                 )
             )
 
-        for ent in (ent_achat, ent_vente, ent_stock):
+        for ent in (ent_achat, ent_charge, ent_vente, ent_stock):
             ent.bind("<KeyRelease>", _simuler)
         _simuler()
 
