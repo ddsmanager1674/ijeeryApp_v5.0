@@ -340,6 +340,19 @@ class ArticleSearchWindow(ctk.CTkToplevel):
         self._center()
         self._build()
         self._populate("")
+        self._bring_to_front(master)
+
+    def _bring_to_front(self, master):
+        try:
+            master.attributes("-topmost", False)
+        except Exception:
+            pass
+        self.transient(master)
+        self.deiconify()
+        self.lift(master)
+        self.attributes("-topmost", True)
+        self.focus_force()
+        self.after(200, lambda: self.attributes("-topmost", False))
 
     def _center(self):
         self.update_idletasks()
@@ -1191,12 +1204,13 @@ class PageInventaireJour(ctk.CTkFrame):
             alt_tag = "even" if idx % 2 == 0 else "odd"
             qte_stock = self._calc_stock_article(row[12], row[13], row[14])
             qte_stock_txt = f"{qte_stock:.2f}" if qte_stock is not None else "-"
+            qte_corrige_txt = self._fmt_num(row[7])
             # Le tag statut surcharge la couleur de fond + foreground de toute la ligne
             self.tree.insert("", "end", tags=(st_tag,), values=(
                 row[0], self._safe(row[1]),
                 self._safe(row[2]), self._fmt_dt(row[3]),
                 self._safe(row[4]), self._safe(row[5]),
-                self._safe(row[6]), self._safe(row[7]),
+                self._safe(row[6]), qte_corrige_txt,
                 qte_stock_txt,
                 self._safe(row[8]),
                 statut,
@@ -1475,6 +1489,16 @@ class PageInventaireJour(ctk.CTkFrame):
         if isinstance(value, datetime):
             return value.strftime("%Y-%m-%d %H:%M")
         return str(value)
+
+    def _fmt_num(self, value):
+        if value is None:
+            return "-"
+        try:
+            s = f"{float(value):,.2f}"
+            # Swap separators: thousands '.' and decimal ','
+            return s.replace(",", "X").replace(".", ",").replace("X", ".")
+        except Exception:
+            return self._safe(value)
 
     def _safe(self, value):
         return str(value) if value and str(value).strip() else "-"
