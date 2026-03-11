@@ -450,20 +450,49 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.entry_unite    = _field(r2, "Unité",          85, readonly=True)
         self.entry_punitcmd = _field(r2, "Prix unitaire", 105)
 
+        self._font_label_small = Fonts.small(9)
+        self._font_label_small_strike = Fonts.small(9)
+        self._font_label_small_strike.configure(overstrike=True)
+
         self.entry_qtcmd.bind('<KeyRelease>',    lambda e: self.calculer_total_ligne_preview())
         self.entry_punitcmd.bind('<KeyRelease>', lambda e: self.calculer_total_ligne_preview())
 
-        # Péremption optionnelle (checkbox + DateEntry inline)
+        # Frais/Charges (label + checkbox en haut, entry en bas)
+        charge_wrap = ctk.CTkFrame(r2, fg_color="transparent")
+        charge_wrap.pack(side="left", padx=(0, 6))
+        charge_label_row = ctk.CTkFrame(charge_wrap, fg_color="transparent")
+        charge_label_row.pack(anchor="w")
+
+        self.var_has_charge = ctk.BooleanVar(value=False)
+        self.check_charge = ctk.CTkCheckBox(
+            charge_label_row, text="", variable=self.var_has_charge,
+            command=self.toggle_frais_charge,
+            checkbox_width=16, checkbox_height=16,
+            checkmark_color=Colors.TEXT_ON_DARK,
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
+            width=18
+        )
+        self.check_charge.pack(side="left", padx=(0, 2))
+        self.label_charge = ctk.CTkLabel(
+            charge_label_row, text="Frais/Charges",
+            font=self._font_label_small_strike, text_color=Colors.TEXT_MUTED
+        )
+        self.label_charge.pack(side="left", padx=(0, 4))
+        self.entry_charge = ctk.CTkEntry(
+            charge_wrap, width=90, height=26,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            font=Fonts.body(10)
+        )
+
+        # Péremption optionnelle (label + checkbox en haut, date en bas)
         per_wrap = ctk.CTkFrame(r2, fg_color="transparent")
         per_wrap.pack(side="left", padx=(0, 6))
-        ctk.CTkLabel(per_wrap, text="Péremption (opt.)", font=Fonts.small(9),
-                     text_color=Colors.TEXT_MUTED).pack(anchor="w")
-        per_inner = ctk.CTkFrame(per_wrap, fg_color="transparent")
-        per_inner.pack(anchor="w")
+        per_label_row = ctk.CTkFrame(per_wrap, fg_color="transparent")
+        per_label_row.pack(anchor="w")
 
         self.var_has_peremption = ctk.BooleanVar(value=False)
         self.check_peremption = ctk.CTkCheckBox(
-            per_inner, text="", variable=self.var_has_peremption,
+            per_label_row, text="", variable=self.var_has_peremption,
             command=self.toggle_date_peremption,
             checkbox_width=16, checkbox_height=16,
             checkmark_color=Colors.TEXT_ON_DARK,
@@ -471,13 +500,19 @@ class PageCommandeFrs(ctk.CTkFrame):
             width=18
         )
         self.check_peremption.pack(side="left", padx=(0, 2))
+        self.label_peremption = ctk.CTkLabel(
+            per_label_row, text="Péremption (opt.)",
+            font=self._font_label_small_strike, text_color=Colors.TEXT_MUTED
+        )
+        self.label_peremption.pack(side="left", padx=(0, 4))
         self.entry_peremption = DateEntry(
-            per_inner, width=9, background=Colors.MIDNIGHT,
+            per_wrap, width=9, background=Colors.MIDNIGHT,
             foreground="white", borderwidth=1,
             date_pattern="dd/mm/yyyy", state="disabled",
             font=("Segoe UI", 9)
         )
-        self.entry_peremption.pack(side="left")
+        self.toggle_frais_charge(False)
+        self.toggle_date_peremption(False)
 
         # Total ligne preview (label badge, toujours visible)
         tot_wrap = ctk.CTkFrame(r2, fg_color="transparent")
@@ -694,9 +729,38 @@ class PageCommandeFrs(ctk.CTkFrame):
     # LOGIQUE MÉTIER (inchangée, sauf adaptations mineures)
     # =========================================================================
 
-    def toggle_date_peremption(self):
-        state = "normal" if self.var_has_peremption.get() else "disabled"
-        self.entry_peremption.configure(state=state)
+    def toggle_date_peremption(self, force_state=None):
+        if force_state is not None:
+            self.var_has_peremption.set(bool(force_state))
+        enabled = self.var_has_peremption.get()
+        self.label_peremption.configure(
+            font=self._font_label_small if enabled else self._font_label_small_strike
+        )
+        if enabled:
+            if not self.entry_peremption.winfo_manager():
+                self.entry_peremption.pack(anchor="w")
+            self.entry_peremption.configure(state="normal")
+        else:
+            self.entry_peremption.configure(state="disabled")
+            if self.entry_peremption.winfo_manager():
+                self.entry_peremption.pack_forget()
+
+    def toggle_frais_charge(self, force_state=None):
+        if force_state is not None:
+            self.var_has_charge.set(bool(force_state))
+        enabled = self.var_has_charge.get()
+        self.label_charge.configure(
+            font=self._font_label_small if enabled else self._font_label_small_strike
+        )
+        if enabled:
+            if not self.entry_charge.winfo_manager():
+                self.entry_charge.pack(anchor="w")
+            self.entry_charge.configure(state="normal")
+        else:
+            self.entry_charge.configure(state="disabled")
+            if self.entry_charge.winfo_manager():
+                self.entry_charge.pack_forget()
+            self.entry_charge.delete(0, "end")
 
     def on_selection_ligne(self, event):
         if self.tree.selection():
@@ -759,8 +823,7 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.entry_qtlivre.insert(0, self.formater_nombre(item_data['qtlivre']))
 
         if item_data.get('dateperemption'):
-            self.var_has_peremption.set(True)
-            self.entry_peremption.configure(state="normal")
+            self.toggle_date_peremption(True)
             try:
                 parts = item_data['dateperemption'].split('/')
                 if len(parts) == 3:
@@ -769,8 +832,15 @@ class PageCommandeFrs(ctk.CTkFrame):
             except:
                 pass
         else:
-            self.var_has_peremption.set(False)
-            self.entry_peremption.configure(state="disabled")
+            self.toggle_date_peremption(False)
+
+        montant_charge = item_data.get('montant_charge', 0) or 0
+        if montant_charge > 0:
+            self.toggle_frais_charge(True)
+            self.entry_charge.delete(0, "end")
+            self.entry_charge.insert(0, self.formater_nombre(montant_charge))
+        else:
+            self.toggle_frais_charge(False)
 
         self.article_selectionne = {
             'idarticle': item_data['idarticle'],
@@ -799,11 +869,13 @@ class PageCommandeFrs(ctk.CTkFrame):
                 messagebox.showwarning("Attention", "La quantité doit être > 0.")
                 return
             date_p = self.entry_peremption.get_date().strftime('%d/%m/%Y') if self.var_has_peremption.get() else ""
+            montant_charge = self.parser_nombre(self.entry_charge.get()) if self.var_has_charge.get() else 0
             total = qtcmd * punitcmd
             idx = self.index_ligne_selectionnee
             self.items_commande[idx].update({'qtcmd': qtcmd, 'punitcmd': punitcmd,
                                              'qtlivre': qtlivre, 'total': total,
-                                             'dateperemption': date_p or None})
+                                             'dateperemption': date_p or None,
+                                             'montant_charge': montant_charge})
             item_id = self.tree.get_children()[idx]
             self.tree.item(item_id, values=(
                 self.article_selectionne['nomart'], self.article_selectionne['unite'],
@@ -828,6 +900,8 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.entry_qtlivre.delete(0, "end")
         self.entry_qtlivre.insert(0, "0")
         self.label_total_ligne.configure(text="0,00")
+        self.toggle_frais_charge(False)
+        self.toggle_date_peremption(False)
         self.btn_ajouter.configure(state="normal")
         self.btn_modifier_ligne.configure(state="disabled", text="✏️  Modifier Ligne")
         self.btn_annuler_selection.configure(state="disabled")
@@ -1079,7 +1153,8 @@ class PageCommandeFrs(ctk.CTkFrame):
 
             cur.execute("""
                 SELECT d.id, d.idarticle, a.designation, u.designationunite, d.idunite,
-                       d.qtcmd, d.qtlivre, d.punitcmd, d.total, d.dateperemption, d.idfrs, f.nomfrs
+                       d.qtcmd, d.qtlivre, d.punitcmd, d.total, d.dateperemption, d.idfrs, f.nomfrs,
+                       d.montant_charge
                 FROM tb_commandedetail d
                 INNER JOIN tb_article a ON d.idarticle=a.idarticle
                 INNER JOIN tb_unite u ON d.idunite=u.idunite
@@ -1122,7 +1197,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                     self.entry_transporteur.configure(state="readonly")
 
             for d in details:
-                idcd, idar, desig, unite, idunite, qtcmd, qtlivre, punit, total_db, datep, idfrs_d, nomfrs_d = d
+                idcd, idar, desig, unite, idunite, qtcmd, qtlivre, punit, total_db, datep, idfrs_d, nomfrs_d, montant_charge = d
                 punit = punit or 0
                 total = total_db if total_db else (qtcmd * punit)
                 dp_str = ""
@@ -1133,7 +1208,8 @@ class PageCommandeFrs(ctk.CTkFrame):
                     'idfrs': idfrs_d if idfrs_d else commande[3],
                     'nomfrs': nomfrs_d if nomfrs_d else (commande[4] or ""),
                     'qtcmd': qtcmd, 'qtlivre': qtlivre, 'punitcmd': punit,
-                    'total': total, 'dateperemption': dp_str
+                    'total': total, 'dateperemption': dp_str,
+                    'montant_charge': montant_charge or 0
                 })
                 self.tree.insert("", "end", values=(
                     desig, unite,
@@ -1262,6 +1338,7 @@ class PageCommandeFrs(ctk.CTkFrame):
                 messagebox.showwarning("Attention", "La quantité doit être > 0.")
                 return
             date_p = self.entry_peremption.get_date().strftime('%d/%m/%Y') if self.var_has_peremption.get() else ""
+            montant_charge = self.parser_nombre(self.entry_charge.get()) if self.var_has_charge.get() else 0
             total = qtcmd * punitcmd
             frs_nom = self.entry_fournisseur.get()
 
@@ -1276,7 +1353,8 @@ class PageCommandeFrs(ctk.CTkFrame):
                 'idcomdetail': None, 'idarticle': self.article_selectionne['idarticle'],
                 'idunite': self.article_selectionne['idunite'], 'idfrs': self.fournisseur_id,
                 'nomfrs': frs_nom, 'qtcmd': qtcmd, 'punitcmd': punitcmd,
-                'qtlivre': qtlivre, 'dateperemption': date_p or None, 'total': total
+                'qtlivre': qtlivre, 'dateperemption': date_p or None, 'total': total,
+                'montant_charge': montant_charge
             })
 
             for e in (self.entry_article, self.entry_unite):
@@ -1285,8 +1363,8 @@ class PageCommandeFrs(ctk.CTkFrame):
             self.entry_punitcmd.delete(0, "end")
             self.entry_qtlivre.delete(0, "end")
             self.entry_qtlivre.insert(0, "0")
-            self.var_has_peremption.set(False)
-            self.entry_peremption.configure(state="disabled")
+            self.toggle_frais_charge(False)
+            self.toggle_date_peremption(False)
             self.article_selectionne = None
             self.label_total_ligne.configure(text="0,00")
             self.calculer_total()
@@ -1362,15 +1440,17 @@ class PageCommandeFrs(ctk.CTkFrame):
                     if item['idcomdetail']:
                         cur.execute("""
                             UPDATE tb_commandedetail SET idarticle=%s, idunite=%s, idfrs=%s,
-                            qtcmd=%s, qtlivre=%s, punitcmd=%s, total=%s, dateperemption=%s WHERE id=%s
+                            qtcmd=%s, qtlivre=%s, punitcmd=%s, total=%s, dateperemption=%s, montant_charge=%s WHERE id=%s
                         """, (item['idarticle'], item['idunite'], item.get('idfrs'),
-                              item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp, item['idcomdetail']))
+                              item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp,
+                              item.get('montant_charge', 0), item['idcomdetail']))
                     else:
                         cur.execute("""
-                            INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
-                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption, montant_charge)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         """, (self.idcom_charge, item['idarticle'], item['idunite'], item.get('idfrs'),
-                              item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp))
+                              item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp,
+                              item.get('montant_charge', 0)))
                 conn.commit()
                 ref_sauvee = self.entry_ref.get()
                 messagebox.showinfo("Succès", f"Commande {ref_sauvee} modifiée avec succès !")
@@ -1389,10 +1469,11 @@ class PageCommandeFrs(ctk.CTkFrame):
                     tl = item['qtcmd'] * item['punitcmd']
                     dp = self._format_date_db(item.get('dateperemption'))
                     cur.execute("""
-                        INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        INSERT INTO tb_commandedetail (idcom, idarticle, idunite, idfrs, qtcmd, qtlivre, punitcmd, total, dateperemption, montant_charge)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """, (idcom, item['idarticle'], item['idunite'], item.get('idfrs'),
-                          item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp))
+                          item['qtcmd'], item['qtlivre'], item['punitcmd'], tl, dp,
+                          item.get('montant_charge', 0)))
                 conn.commit()
                 messagebox.showinfo("Succès", "Commande enregistrée avec succès !")
 
@@ -1447,6 +1528,8 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.btn_modifier_ligne.configure(state="disabled", text="✏️  Modifier Ligne")
         self.btn_annuler_selection.configure(state="disabled")
         self.label_total_ligne.configure(text="0,00")
+        self.toggle_frais_charge(False)
+        self.toggle_date_peremption(False)
         # Réinitialiser transporteur
         self.var_transporteur.set(False)
         self.toggle_transporteur()
