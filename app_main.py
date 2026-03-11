@@ -36,6 +36,12 @@ _BASE = os.path.dirname(os.path.abspath(__file__))
 if _BASE not in sys.path:
     sys.path.insert(0, _BASE)
 
+# Active badge export sur tous les Treeview
+try:
+    import export_utils  # noqa: F401
+except Exception:
+    pass
+
 # ── Thème ─────────────────────────────────────────────────────────────────────
 try:
     from app_theme import Colors, Fonts, Theme

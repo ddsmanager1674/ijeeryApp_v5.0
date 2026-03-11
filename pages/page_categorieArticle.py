@@ -287,6 +287,8 @@ class PageCategorieArticle(ctk.CTkFrame):
         self.entry_designationcat.delete(0, tk.END)
         self.treeview.selection_remove(self.treeview.selection())
 
+        # Badge d'export ajoute automatiquement via export_utils.enable_treeview_export_badge()
+
 
 # ── Test standalone ───────────────────────────────────────────────────────────
 if __name__ == "__main__":

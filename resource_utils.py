@@ -7,6 +7,12 @@ Résout le problème de chemins relatifs en EXE
 import os
 import sys
 
+try:
+    # Active le badge d'export pour tous les Treeview.
+    import export_utils  # noqa: F401
+except Exception:
+    # Ne bloque pas le chargement des utilitaires en cas d'erreur.
+    pass
 
 def get_resource_path(relative_path):
     """

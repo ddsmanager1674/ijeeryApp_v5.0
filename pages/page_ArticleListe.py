@@ -299,6 +299,8 @@ class page_listeArticle(customtkinter.CTkFrame):
         self.tree.bind('<Double-Button-1>', self.on_double_click)
         self.tree.bind('<ButtonRelease-1>', self.on_single_click)
 
+        # Badge d'export ajoute automatiquement via export_utils.enable_treeview_export_badge()
+
     # ── Footer ────────────────────────────────────────────────────────────────
     def _build_footer(self):
         footer = customtkinter.CTkFrame(self, fg_color="transparent")
