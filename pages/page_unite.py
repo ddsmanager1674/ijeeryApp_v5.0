@@ -1,4 +1,5 @@
 import customtkinter as ctk
+from format_utils import format_entier
 from tkinter import messagebox, ttk
 import psycopg2
 import json
@@ -283,7 +284,7 @@ class PageUnite(ctk.CTkFrame):
                 self.entry_quantite.delete(0, 'end')
                 self.entry_poids.delete(0, 'end')
                 self.entry_designation.insert(0, values[1])
-                self.entry_quantite.insert(0, values[3])
+                self.entry_quantite.insert(0, format_entier(values[3]))
                 self.entry_poids.insert(0, values[4])
 
     def _generer_code_article_et_niveau(self, id_article, conn):

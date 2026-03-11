@@ -1,4 +1,5 @@
 import customtkinter
+from format_utils import format_entier
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import psycopg2
@@ -384,7 +385,11 @@ class page_listeArticle(customtkinter.CTkFrame):
     def _insert_rows_with_alternating_colors(self, rows):
         for index, row in enumerate(rows):
             tag = "even" if index % 2 == 0 else "odd"
-            self.tree.insert('', 'end', values=row, tags=(tag,))
+            # Format Quantite (4ème colonne)
+            formatted_row = list(row)
+            if len(formatted_row) > 4:
+                formatted_row[4] = format_entier(formatted_row[4])
+            self.tree.insert('', 'end', values=formatted_row, tags=(tag,))
 
     def on_single_click(self, event):
         selection = self.tree.selection()
