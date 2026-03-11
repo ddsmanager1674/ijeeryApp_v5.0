@@ -290,6 +290,8 @@ class PageStock(ctk.CTkFrame):
             "Désignation",
             "Unité",
             "Prix d'achat",
+            "Frais/Charges",
+            "Prix de revient",
             "Prix de vente",
             "Marge Unitaire",
             "Marge (%)"
@@ -331,7 +333,8 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=350, anchor="w",      minwidth=200)
             elif col == "Code":
                 self.tree.column(col, width=150, anchor="center")
-            elif col in ("Prix d'achat", "Prix de vente", "Marge Unitaire", "Marge (%)", "Marge Total"):
+            elif col in ("Prix d'achat", "Frais/Charges", "Prix de revient",
+                         "Prix de vente", "Marge Unitaire", "Marge (%)", "Marge Total"):
                 self.tree.column(col, width=120, anchor="e")
             elif col == "Total":
                 self.tree.column(col, width=110, anchor="center", minwidth=90, stretch=True)
@@ -387,6 +390,7 @@ class PageStock(ctk.CTkFrame):
                     a.designation,
                     u.designationunite,
                     COALESCE(pc.prix_achat, 0) AS prix_achat,
+                    COALESCE(fc.frais_charge, 0) AS frais_charge,
                     COALESCE(dp.prix, 0) AS prix
                 FROM tb_unite u
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
@@ -396,6 +400,12 @@ class PageStock(ctk.CTkFrame):
                     WHERE punitcmd IS NOT NULL
                     GROUP BY idunite
                 ) pc ON pc.idunite = u.idunite
+                LEFT JOIN (
+                    SELECT idunite, AVG(montant_charge) AS frais_charge
+                    FROM tb_commandedetail
+                    WHERE montant_charge IS NOT NULL
+                    GROUP BY idunite
+                ) fc ON fc.idunite = u.idunite
                 LEFT JOIN (
                     SELECT idunite, AVG(prix) AS prix
                     FROM tb_prix
@@ -407,16 +417,20 @@ class PageStock(ctk.CTkFrame):
             """)
             base_rows = cursor.fetchall()
             self.all_data = []
-            for code, designation, unite, prix_achat, prix in base_rows:
+            for code, designation, unite, prix_achat, frais_charge, prix in base_rows:
                 prix_achat_val = float(prix_achat or 0)
+                frais_charge_val = float(frais_charge or 0)
+                prix_revient_val = prix_achat_val + frais_charge_val
                 prix_vente_val = float(prix or 0)
-                marge_benef = prix_vente_val - prix_achat_val
-                marge_pct = ((marge_benef / prix_achat_val) * 100) if prix_achat_val != 0 else 100.0
+                marge_benef = prix_vente_val - prix_revient_val
+                marge_pct = ((marge_benef / prix_revient_val) * 100) if prix_revient_val != 0 else 100.0
                 valeurs = [
                     code,
                     designation,
                     unite,
                     self.formater_nombre(prix_achat_val),
+                    self.formater_nombre(frais_charge_val),
+                    self.formater_nombre(prix_revient_val),
                     self.formater_nombre(prix_vente_val),
                     self.formater_nombre(marge_benef),
                     self.formater_pourcentage(marge_pct)
@@ -523,9 +537,16 @@ class PageStock(ctk.CTkFrame):
                 FROM tb_commandedetail
                 WHERE punitcmd IS NOT NULL
                 GROUP BY idunite
+            ),
+            frais_charge_unite AS (
+                SELECT idunite, AVG(montant_charge) AS frais_charge
+                FROM tb_commandedetail
+                WHERE montant_charge IS NOT NULL
+                GROUP BY idunite
             )
             SELECT u.codearticle, a.designation, u.designationunite,
                 COALESCE(pau.prix_achat, 0) AS prix_achat,
+                COALESCE(fcu.frais_charge, 0) AS frais_charge,
                 COALESCE(dp.prix, 0) AS prix,
                 u.idarticle, u.idunite, m.idmag,
                 COALESCE(sb.solde_base,0) / NULLIF(COALESCE(uc.coeff_hierarchique,1),0) as stock
@@ -536,13 +557,14 @@ class PageStock(ctk.CTkFrame):
             LEFT JOIN unite_coeff uc ON uc.idarticle=u.idarticle AND uc.idunite=u.idunite
             LEFT JOIN dernier_prix dp ON dp.idunite = u.idunite
             LEFT JOIN prix_achat_unite pau ON pau.idunite = u.idunite
+            LEFT JOIN frais_charge_unite fcu ON fcu.idunite = u.idunite
             WHERE a.deleted=0 AND m.deleted=0
             ORDER BY a.designation ASC, u.codearticle ASC
             """
             cursor.execute(query_optimisee)
             resultats = cursor.fetchall()
             articles_dict = {}
-            for code, desig, unite, prix_achat, prix, idarticle, idunite, idmag, stock in resultats:
+            for code, desig, unite, prix_achat, frais_charge, prix, idarticle, idunite, idmag, stock in resultats:
                 key = (code, idunite)
                 if key not in articles_dict:
                     articles_dict[key] = {
@@ -550,6 +572,7 @@ class PageStock(ctk.CTkFrame):
                         'designation': desig,
                         'unite': unite,
                         'prix_achat': prix_achat,
+                        'frais_charge': frais_charge,
                         'prix': prix,
                         'stocks': {},
                         'total': 0
@@ -562,14 +585,18 @@ class PageStock(ctk.CTkFrame):
             all_data = []
             for _idx, (_key, data) in enumerate(articles_dict.items()):
                 prix_achat_val = float(data['prix_achat'] or 0)
+                frais_charge_val = float(data['frais_charge'] or 0)
+                prix_revient_val = prix_achat_val + frais_charge_val
                 prix_vente_val = float(data['prix'] or 0)
-                marge_benef = prix_vente_val - prix_achat_val
-                marge_pct = ((marge_benef / prix_achat_val) * 100) if prix_achat_val != 0 else 100.0
+                marge_benef = prix_vente_val - prix_revient_val
+                marge_pct = ((marge_benef / prix_revient_val) * 100) if prix_revient_val != 0 else 100.0
                 valeurs = [
                     data['code'],
                     data['designation'],
                     data['unite'],
                     self.formater_nombre(prix_achat_val),
+                    self.formater_nombre(frais_charge_val),
+                    self.formater_nombre(prix_revient_val),
                     self.formater_nombre(prix_vente_val),
                     self.formater_nombre(marge_benef),
                     self.formater_pourcentage(marge_pct)
@@ -807,9 +834,10 @@ class PageStock(ctk.CTkFrame):
         designation = str(valeurs[1]) if len(valeurs) > 1 else ""
         unite = str(valeurs[2]) if len(valeurs) > 2 else ""
         prix_achat = self.parser_nombre(valeurs[3]) if len(valeurs) > 3 else 0.0
-        prix_vente = self.parser_nombre(valeurs[4]) if len(valeurs) > 4 else 0.0
-        marge_unitaire = self.parser_nombre(valeurs[5]) if len(valeurs) > 5 else (prix_vente - prix_achat)
-        marge_pct = self.parser_nombre(valeurs[6]) if len(valeurs) > 6 else 0.0
+        prix_revient = self.parser_nombre(valeurs[5]) if len(valeurs) > 5 else prix_achat
+        prix_vente = self.parser_nombre(valeurs[6]) if len(valeurs) > 6 else 0.0
+        marge_unitaire = self.parser_nombre(valeurs[7]) if len(valeurs) > 7 else (prix_vente - prix_revient)
+        marge_pct = self.parser_nombre(valeurs[8]) if len(valeurs) > 8 else 0.0
 
         conn = self.connect_db()
         if not conn:
@@ -1021,7 +1049,10 @@ class PageStock(ctk.CTkFrame):
             return
         filtered_data = [
             (valeurs, total) for valeurs, total in self.all_data
-            if search_term in f"{valeurs[0]} {valeurs[1]} {valeurs[2]} {valeurs[3]} {valeurs[4]} {valeurs[5]} {valeurs[6]}".lower()
+            if search_term in (
+                f"{valeurs[0]} {valeurs[1]} {valeurs[2]} {valeurs[3]} "
+                f"{valeurs[4]} {valeurs[5]} {valeurs[6]} {valeurs[7]} {valeurs[8]}"
+            ).lower()
         ]
         filtered_data = [
             (valeurs, total) for valeurs, total in filtered_data
@@ -1037,7 +1068,7 @@ class PageStock(ctk.CTkFrame):
             self.label_total_articles.configure(text=f"Total articles : {len(filtered_data)}")
             self._maj_label_marge_beneficiaire(somme_marge)
         else:
-            empty = ["", "Aucun résultat trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
+            empty = ["", "Aucun résultat trouvé", "", "", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 9)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
             self._maj_label_marge_beneficiaire(0.0)
@@ -1072,7 +1103,7 @@ class PageStock(ctk.CTkFrame):
             self.label_total_articles.configure(text=f"Total articles : {visibles}")
             self._maj_label_marge_beneficiaire(somme_marge)
         else:
-            empty = ["", "Aucun article trouvé", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 7)
+            empty = ["", "Aucun article trouvé", "", "", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 9)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
             self._maj_label_marge_beneficiaire(0.0)
