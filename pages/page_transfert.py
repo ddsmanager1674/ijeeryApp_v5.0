@@ -1026,7 +1026,7 @@ class PageTransfert(ctk.CTkFrame):
         })
 
         # Vider la description (par ligne) et réinitialiser les champs article
-        self.entry_description.delete(0, "end")
+        #self.entry_description.delete(0, "end")
         self.reinitialiser_champs_article()
 
     def reinitialiser_champs_article(self):

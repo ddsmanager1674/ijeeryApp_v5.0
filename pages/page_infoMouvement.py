@@ -1697,18 +1697,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
     def show_page(self, menu_name):
         """Afficher la page correspondant au menu sélectionné"""
         
-        if menu_name == "📤 Sortie/Consommation":
-            # Utilisation du dialogue personnalisé avec mot de passe caché
-            dialog = PasswordDialog("Accès Sécurisé", "Entrez le code d'autorisation :")
-            code = dialog.result
-        
-            if code:
-                if not self.verifier_code_autorisation(code):
-                    messagebox.showerror("Accès Refusé", "Code d'autorisation invalide.")
-                    return
-            else:
-                return # Annulation ou champ vide
-        
+              
         # Cacher le label initial
         if self.initial_label:
             self.initial_label.place_forget()

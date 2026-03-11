@@ -1249,7 +1249,7 @@ class PageSortie(ctk.CTkFrame):
             entry.configure(state=state)
 
         self.entry_qtsortie.delete(0, "end")
-        self.entry_motif.delete(0, "end")
+        #self.entry_motif.delete(0, "end")
 
         self.btn_ajouter.configure(
             text="+ Ajouter",
