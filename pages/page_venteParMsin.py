@@ -466,11 +466,19 @@ class PageVenteParMsin(ctk.CTkFrame):
     # ──────────────────────────────────────────────────────────────────────────
 
     def formater_nombre(self, n) -> str:
-        """1 234 567,89  → format d'affichage IHM (avec décimales)."""
+        """1.234,56 → format d'affichage IHM (avec décimales, '.' milliers, ',' décimal)."""
         try:
-            return "{:,.2f}".format(float(n)).replace(',', '_T_').replace('.', ',').replace('_T_', '.')
+            n = float(n)
+            entier = int(n)
+            decimale = abs(n - entier)
+            if decimale < 1e-10:
+                # Pas de décimale, format entier
+                return "{:,}".format(entier).replace(',', '.')
+            else:
+                # Avec décimale, 2 chiffres
+                return "{:,.2f}".format(n).replace(',', '.').replace('.', ',', 1)
         except Exception:
-            return "0,00"
+            return "0"
 
     def formater_nombre_pdf(self, n) -> str:
         """1 234 567  → format entier sans décimales pour les PDF."""
@@ -482,7 +490,9 @@ class PageVenteParMsin(ctk.CTkFrame):
     def parser_nombre(self, texte: str) -> float:
         """Inverse de formater_nombre : '1.234,56' → 1234.56."""
         try:
-            return float(str(texte).replace('.', '').replace(',', '.'))
+            # Enlève les points (milliers), remplace la virgule par point (décimal)
+            txt = str(texte).replace(' ', '').replace('.', '').replace(',', '.')
+            return float(txt)
         except Exception:
             return 0.0
 
