@@ -101,7 +101,7 @@ def _get_conn():
 def _fmt(v):
     """Formate un montant numérique → '1 250 000 Ar'."""
     try:
-        return f"{float(v):,.0f} Ar".replace(",", " ")
+        return f"{float(v):,.0f} Ar".replace(",", ".")
     except Exception:
         return "0 Ar"
 

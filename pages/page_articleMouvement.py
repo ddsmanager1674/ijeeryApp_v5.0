@@ -74,6 +74,7 @@ _BATCH_SIZE = 50
 class FenetreRechercheArticle(ctk.CTkToplevel):
     def __init__(self, parent, callback):
         super().__init__(parent)
+        
         self.callback = callback
         self.title("Recherche d'Article")
         self.geometry("820x520")
@@ -229,6 +230,16 @@ class PageArticleMouvement(ctk.CTkFrame):
     def __init__(self, parent, initial_idarticle=None, db_conn=None,
                  session_data=None, iduser=None):
         super().__init__(parent, fg_color=C.BG_PAGE)
+
+        # Fallback session depuis fichier si non fourni
+        if session_data is None:
+            try:
+                with open(get_session_path(), encoding="utf-8") as f:
+                    session_data = json.load(f)
+            except Exception:
+                session_data = {"menus": []}
+
+        self._session_data = session_data
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -424,10 +435,13 @@ class PageArticleMouvement(ctk.CTkFrame):
         self.tree.tag_configure("even", background=C.BG_CARD)
         self.tree.tag_configure("odd",  background="#F0F4F8")
 
+        stock_visible = "Stock Article" in {m[0] for m in self._session_data.get("menus", [])}
+
         widths = {"Date": 140, "Reference": 110, "Designation": 220,
-                  "Type": 130, "Entree": 90, "Sortie": 90, "Stock": 110,
-                  "Magasin": 110, "Description": 240, "Utilisateur": 100,
-                  "idArticle": 0, "idUnite": 0, "idMagasin": 0}
+          "Type": 130, "Entree": 90, "Sortie": 90,
+          "Stock": 110 if stock_visible else 0,
+          "Magasin": 110, "Description": 240, "Utilisateur": 100,
+          "idArticle": 0, "idUnite": 0, "idMagasin": 0}
 
         for col in cols:
             self.tree.heading(col, text=col)
