@@ -798,7 +798,7 @@ class PageClient(ctk.CTkFrame):
             tag = "even" if idx % 2 == 0 else "odd"
             tree_detail.insert("", "end", tags=(tag,), values=(
                 code or "-", designation or "-", unite or "-",
-                f"{qte or 0:,.2f}", f"{self._formater_nombre(float(pu or 0))}",
+                f"{self._formater_nombre(qte or 0)}", f"{self._formater_nombre(float(pu or 0))}",
                 f"{self._formater_nombre(float(remise or 0))}", f"{self._formater_nombre(float(montant_ligne or 0))}",
             ))
 
@@ -940,7 +940,7 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
                 """, (date_pmt, montant_paiement, observation, 1, idclient, idmode_sel, None, 1))
                 self.conn.commit()
                 
-                messagebox.showinfo("Succès", f"Paiement de {montant_paiement:,.2f} Ar enregistré avec succès!")
+                messagebox.showinfo("Succès", f"Paiement de {self._formater_nombre(montant_paiement)} Ar enregistré avec succès!")
                 
                 ticket_filename = os.path.join(os.path.dirname(__file__), '../temp_pdf_preview', f'ticket_payment_{idclient}_{date_pmt.strftime("%Y%m%d%H%M%S")}.txt')
                 os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
@@ -1000,9 +1000,9 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
                             credit_id_temp, type_credit_temp,
                             date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
                             ref,
-                            f"{montant_initial or 0:,.2f}",
-                            f"{montant_paye_temp:,.2f}",
-                            f"{solde_restant_temp:,.2f}",
+                            f"{self._formater_nombre(montant_initial or 0)}",
+                            f"{self._formater_nombre(montant_paye_temp)}",
+                            f"{self._formater_nombre(solde_restant_temp)}",
                             statut
                         ), tags=(tag,))
                 

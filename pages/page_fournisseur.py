@@ -613,7 +613,7 @@ class PageFournisseur(ctk.CTkFrame):
                 tree_pmt.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
                     pmt_id,
                     date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
-                    f"{montant_pmt or 0:,.2f}",
+                    f"{self._formater_nombre(montant_pmt or 0):,.0f}",
                     mode_paiement or "N/A",
                     observation or "",
                     utilisateur or "N/A"
@@ -744,14 +744,14 @@ class PageFournisseur(ctk.CTkFrame):
             tree_dettes.insert('', 'end', iid=key, values=(
                 dette_id, type_dette, bon_rec or "", num_fact or "",
                 date_dette.strftime("%d/%m/%Y %H:%M") if date_dette else "N/A",
-                f"{float(montant_initial or 0):,.2f}",
-                f"{montant_paye_ligne:,.2f}",
-                f"{solde_restant:,.2f}",
+                f"{self._formater_nombre(float(montant_initial or 0))}",
+                f"{self._formater_nombre(montant_paye_ligne)}",
+                f"{self._formater_nombre(solde_restant)}",
                 statut
             ), tags=(tag,))
 
         if label_montant_restant is not None:
-            label_montant_restant.configure(text=f"{total_restant:,.2f} Ar")
+            label_montant_restant.configure(text=f"{self._formater_nombre(total_restant)} Ar")
 
         return total_initial, total_paye_global, total_restant
 
@@ -882,12 +882,12 @@ class PageFournisseur(ctk.CTkFrame):
             tag = "even" if idx % 2 == 0 else "odd"
             tree_detail.insert("", "end", tags=(tag,), values=(
                 designation or "-", unite or "-",
-                f"{qte or 0:,.2f}", f"{pu or 0:,.2f}", f"{montant_ligne or 0:,.2f}",
+                f"{self._formater_nombre(qte or 0)}", f"{self._formater_nombre(pu or 0)}", f"{self._formater_nombre(montant_ligne or 0)}",
             ))
 
         total_frame = ctk.CTkFrame(win, fg_color="#f3e5f5")
         total_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 4))
-        ctk.CTkLabel(total_frame, text=f"Montant Total :  {montant_total:,.2f} Ar",
+        ctk.CTkLabel(total_frame, text=f"Montant Total :  {self._formater_nombre(montant_total)} Ar",
                      font=_F(_FONT_SIZE_LG, "bold"), text_color="#6c3483"
                      ).pack(side="right", padx=20, pady=8)
 
@@ -941,7 +941,7 @@ class PageFournisseur(ctk.CTkFrame):
             ("Date Échéance :", date_ech.strftime("%d/%m/%Y") if date_ech else "N/A"),
             ("Fournisseur :", nomfrs or "N/A"),
             ("Contact :", contactfrs or "N/A"),
-            ("Montant :", f"{montant or 0:,.2f} Ar"),
+            ("Montant :", f"{self._formater_nombre(montant or 0)} Ar"),
         ]
         for label, value in infos:
             row_f = ctk.CTkFrame(frame, fg_color="transparent")
@@ -991,16 +991,16 @@ class PageFournisseur(ctk.CTkFrame):
 
         info_text = (
             f"Récapitulatif des Dettes Fournisseur (ID: {idfrs})\n\n"
-            f"Montant Total des Dettes: {dette_total_initial:,.2f} Ar\n"
-            f"Montant Total Déjà Payé: {dette_total_paye:,.2f} Ar\n"
-            f"Solde Total Restant: {dette_total_restant:,.2f} Ar"
+            f"Montant Total des Dettes: {self._formater_nombre(dette_total_initial)} Ar\n"
+            f"Montant Total Déjà Payé: {self._formater_nombre(dette_total_paye)} Ar\n"
+            f"Solde Total Restant: {self._formater_nombre(dette_total_restant)} Ar"
         )
 
         ctk.CTkLabel(main_frame, text=info_text, justify="left", anchor="w",
                      font=_F(_FONT_SIZE_MD, "bold")).grid(
             row=0, column=0, sticky="ew", padx=8, pady=(8, 10))
 
-        ctk.CTkLabel(main_frame, text=f"Montant Global à Payer (max: {dette_total_restant:,.2f} Ar):",
+        ctk.CTkLabel(main_frame, text=f"Montant Global à Payer (max: {self._formater_nombre(dette_total_restant)} Ar):",
                      font=_F(_FONT_SIZE_MD, "bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
         entry_montant = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -1043,7 +1043,7 @@ class PageFournisseur(ctk.CTkFrame):
                     return
                 if montant_global > dette_total_restant:
                     messagebox.showwarning("Attention",
-                                           f"Le montant dépasse le solde total ({dette_total_restant:,.2f} Ar).")
+                                           f"Le montant dépasse le solde total ({self._formater_nombre(dette_total_restant)} Ar).")
                     return
 
                 selected_mode = mode_combo.get() if mode_names else None
@@ -1065,7 +1065,7 @@ class PageFournisseur(ctk.CTkFrame):
                       None, idmode_sel, None, ref_ticket, None, iduser))
                 self.conn.commit()
 
-                messagebox.showinfo("Succès", f"Paiement de {montant_global:,.2f} Ar enregistré avec succès!")
+                messagebox.showinfo("Succès", f"Paiement de {self._formater_nombre(montant_global)} Ar enregistré avec succès!")
 
                 societe_data = self._get_societe_info()
                 societe_tuple = (
@@ -1174,7 +1174,7 @@ class PageFournisseur(ctk.CTkFrame):
                 """, (idfrs, datetime.now(), num_fact, montant))
                 self.conn.commit()
 
-                messagebox.showinfo("Succès", f"Dette de {montant:,.2f} Ar enregistrée avec succès!")
+                messagebox.showinfo("Succès", f"Dette de {self._formater_nombre(montant)} Ar enregistrée avec succès!")
 
                 username = self._get_username_by_id(self._get_connected_user_id())
                 societe_data = self._get_societe_info()
@@ -1400,7 +1400,7 @@ class PageFournisseur(ctk.CTkFrame):
 
             c.setFont("Helvetica-Bold", 10)
             c.drawString(5*mm, y, "MONTANT DETTE :")
-            c.drawRightString(75*mm, y, f"{montant:,.2f} Ar".replace(',', ' ').replace('.', ','))
+            c.drawRightString(75*mm, y, f"{self._formater_nombre(montant)} Ar")
             y -= 8*mm
             if num2words:
                 c.setFont("Helvetica-Oblique", 6)
@@ -1433,7 +1433,7 @@ class PageFournisseur(ctk.CTkFrame):
 
     def _formater_nombre(self, nombre):
         if isinstance(nombre, (int, float)):
-            return f"{nombre:,.2f}".replace(",", " ").replace(".", ",")
+            return f"{nombre:,.0f}".replace(".", ",").replace(",", ".")
         return str(nombre)
 
     def _get_societe_info(self):
