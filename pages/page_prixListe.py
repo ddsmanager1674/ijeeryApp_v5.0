@@ -160,7 +160,7 @@ class PagePrixListe(ctk.CTkFrame):
     def _fmt_prix(prix):
         """Formate un prix en notation française : 1 234,56"""
         try:
-            return (f"{float(prix):,.2f}"
+            return (f"{float(prix):,.0f}"
                     .replace('.', '#')
                     .replace(',', '.')
                     .replace('#', ','))

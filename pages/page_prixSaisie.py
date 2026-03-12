@@ -14,6 +14,7 @@
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
+from format_utils import format_nombre
 from datetime import datetime
 import json
 from resource_utils import get_config_path, get_session_path, safe_file_read
@@ -209,7 +210,7 @@ class PagePrixSaisie(ctk.CTkFrame):
 
         self.entry_prix = ctk.CTkEntry(
             card,
-            placeholder_text="0.00",
+            placeholder_text="0",
             width=180, height=34,
             fg_color=C.BG_INPUT, border_color=C.BORDER,
             border_width=1,
@@ -452,9 +453,8 @@ class PagePrixSaisie(ctk.CTkFrame):
                 ORDER BY p.dateregistre DESC
             """, (idarticle, idunite))
             for i, row in enumerate(cur.fetchall()):
-                date_str = (row[1].strftime("%d/%m/%Y %H:%M:%S")
-                            if row[1] else "")
-                prix_str = f"{row[2]:.2f}" if row[2] else "0.00"
+                date_str = (row[1].strftime("%d/%m/%Y %H:%M:%S") if row[1] else "")
+                prix_str = format_nombre(row[2]) if row[2] else format_nombre(0)
                 user_str = row[3] or "Système"
                 tag = "even" if i % 2 == 0 else "odd"
                 self.tree.insert("", "end",

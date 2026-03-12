@@ -376,13 +376,13 @@ class HistoriquePrixWindow(ctk.CTkToplevel):
                         if row[0] else "—")
             ref = f"{row[1]}  /  {row[2]}"
             try:
-                prix_fmt = (f"{float(row[4]):,.2f}"
+                prix_fmt = (f"{float(row[4]):,.0f}"
                             .replace('.', '#').replace(',', '.')
                             .replace('#', ','))
             except Exception:
                 prix_fmt = "0,00"
             try:
-                charge_fmt = (f"{float(row[5]):,.2f}"
+                charge_fmt = (f"{float(row[5]):,.0f}"
                               .replace('.', '#').replace(',', '.')
                               .replace('#', ','))
             except Exception:
@@ -798,7 +798,7 @@ class PagePrixRevient(ctk.CTkFrame):
                 idunite     = row[6]
 
                 try:
-                    prix_fmt = (f"{float(prix):,.2f}"
+                    prix_fmt = (f"{float(prix):,.0f}"
                                 .replace('.', '#').replace(',', '.')
                                 .replace('#', ','))
                     prix_val = float(prix)
@@ -807,7 +807,7 @@ class PagePrixRevient(ctk.CTkFrame):
                     prix_val = 0.0
 
                 try:
-                    charge_fmt = (f"{float(charge):,.2f}"
+                    charge_fmt = (f"{float(charge):,.0f}"
                                   .replace('.', '#').replace(',', '.')
                                   .replace('#', ','))
                     charge_val = float(charge)
@@ -817,7 +817,7 @@ class PagePrixRevient(ctk.CTkFrame):
 
                 pr_val = prix_val + charge_val
                 try:
-                    pr_fmt = (f"{float(pr_val):,.2f}"
+                    pr_fmt = (f"{float(pr_val):,.0f}"
                               .replace('.', '#').replace(',', '.')
                               .replace('#', ','))
                 except Exception:
