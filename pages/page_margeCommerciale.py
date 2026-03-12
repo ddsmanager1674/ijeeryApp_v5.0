@@ -283,9 +283,16 @@ class PageStock(ctk.CTkFrame):
             return None
 
     def formater_nombre(self, nombre):
-        """Formate les nombres pour l'affichage (ex: 1.250,00)"""
+        """Formate les nombres pour l'affichage (ex: 1.250,00 ou 1.250)"""
         try:
-            return f"{float(nombre):,.2f}".replace(',', ' ').replace('.', ',').replace(' ', '.')
+            v = float(nombre)
+            if v % 1 == 0:
+                n = f"{int(v):,}"
+                return n.replace(",", "X").replace(".", ",").replace("X", ".")
+            else:
+                n = f"{v:,.2f}"
+                n = n.replace(",", "X").replace(".", ",").replace("X", ".")
+                return n
         except:
             return "0,00"
 
