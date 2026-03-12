@@ -28,6 +28,7 @@ import traceback
 import os
 import sys
 import textwrap
+from decimal import Decimal, InvalidOperation
 
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
@@ -425,14 +426,22 @@ class PageAvoir(ctk.CTkFrame):
     def formater_nombre(self, nombre) -> str:
         """Formate un nombre avec séparateur de milliers (1.000.000,00)."""
         try:
-            return (
-                "{:,.2f}".format(float(nombre))
-                .replace(',', '_TEMP_')
-                .replace('.', ',')
-                .replace('_TEMP_', '.')
-            )
-        except Exception:
+            valeur = Decimal(str(nombre))
+        except (InvalidOperation, TypeError):
             return "0,00"
+
+        valeur = valeur.quantize(Decimal("0.01"))
+        if valeur == valeur.to_integral_value():
+            fmt = "{:,.0f}"
+        else:
+            fmt = "{:,.2f}"
+
+        return (
+            fmt.format(valeur)
+            .replace(',', '_TEMP_')
+            .replace('.', ',')
+            .replace('_TEMP_', '.')
+        )
 
     def parser_nombre(self, texte) -> float:
         """Convertit un nombre formaté (1.000.000,00) en float."""

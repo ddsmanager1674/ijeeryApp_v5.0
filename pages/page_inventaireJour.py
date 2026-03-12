@@ -466,7 +466,7 @@ class ArticleSearchWindow(ctk.CTkToplevel):
 class ModalInventaire(ctk.CTkToplevel):
     def __init__(self, master, on_save, db_get_cursor, db_commit,
                  article_map, magasin_map, current_user_id,
-                 mode="ajout", row_values=None, default_magasin_label=None):
+                 mode="ajout", row_values=None, default_magasin_label=None, readonly=False):
         super().__init__(master)
         self._on_save        = on_save
         self._get_cursor     = db_get_cursor
@@ -479,6 +479,7 @@ class ModalInventaire(ctk.CTkToplevel):
         self.unite_map       = {}
         self._selected_article_id: int | None = None
         self._default_magasin_label = default_magasin_label
+        self.readonly        = readonly
 
         self.inv_id = row_values[0] if row_values else None
 
@@ -493,8 +494,11 @@ class ModalInventaire(ctk.CTkToplevel):
         self._center()
         self._build_ui()
 
-        if mode == "modification" and row_values:
+        if self.mode == "modification" and row_values:
             self._prefill()
+
+        if self.readonly:
+            self._apply_readonly_state()
 
     def _center(self):
         self.update_idletasks()
@@ -550,13 +554,14 @@ class ModalInventaire(ctk.CTkToplevel):
         )
         self.entry_article.grid(row=0, column=0, sticky="ew")
 
-        ctk.CTkButton(
+        self.btn_article_search = ctk.CTkButton(
             art_row, text="🔍", width=30, height=28,
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
             text_color=Colors.TEXT_ON_DARK,
             font=Fonts.body(11), corner_radius=6,
             command=self._open_article_search,
-        ).grid(row=0, column=1, padx=(4, 0))
+        )
+        self.btn_article_search.grid(row=0, column=1, padx=(4, 0))
 
         # ── Ligne 1 : Unité * ─────────────────────────────────────────────
         lbl(1, "Unité", required=True)
@@ -610,25 +615,50 @@ class ModalInventaire(ctk.CTkToplevel):
                       ).pack(side="left", padx=(0, 6))
 
         if self.mode == "modification":
-            ctk.CTkButton(btn_row, text="🚫  Annuler inv.", width=120, height=28,
-                          fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
-                          font=Fonts.bold(11), corner_radius=6,
-                          command=lambda: self._save(status_override="Annulé")
-                          ).pack(side="left", padx=(0, 6))
+            self.btn_cancel_inv = ctk.CTkButton(btn_row, text="🚫  Annuler inv.", width=120, height=28,
+                                                 fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
+                                                 font=Fonts.bold(11), corner_radius=6,
+                                                 command=lambda: self._save(status_override="Annulé")
+                                                 )
+            self.btn_cancel_inv.pack(side="left", padx=(0, 6))
 
-        ctk.CTkButton(btn_row, text="💾  Enregistrer", width=120, height=28,
-                      fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
-                      text_color=Colors.TEXT_ON_DARK,
-                      font=Fonts.bold(11), corner_radius=6,
-                      command=self._save
-                      ).pack(side="left")
+        self.btn_save = ctk.CTkButton(btn_row, text="💾  Enregistrer", width=120, height=28,
+                                      fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
+                                      text_color=Colors.TEXT_ON_DARK,
+                                      font=Fonts.bold(11), corner_radius=6,
+                                      command=self._save
+                                      )
+        self.btn_save.pack(side="left")
 
+    def _apply_readonly_state(self):
+        widgets = [
+            self.entry_article,
+            self.btn_article_search,
+            self.combo_unite,
+            self.combo_magasin,
+            self.entry_qte,
+        ]
+        for widget in widgets:
+            try:
+                widget.configure(state="disabled")
+            except Exception:
+                pass
+
+        self.textbox_obs.configure(state="disabled")
+        self.btn_save.configure(state="disabled")
+        btn_cancel = getattr(self, "btn_cancel_inv", None)
+        if btn_cancel:
+            btn_cancel.configure(state="disabled")
     # ── Recherche article ─────────────────────────────────────────────────────
 
     def _open_article_search(self):
+        if self.readonly:
+            return
         ArticleSearchWindow(self, self.article_map, self._on_article_selected)
 
     def _on_article_selected(self, label: str, art_id: int):
+        if self.readonly:
+            return
         self._selected_article_id = art_id
         self.entry_article.configure(state="normal")
         self.entry_article.delete(0, "end")
@@ -678,6 +708,13 @@ class ModalInventaire(ctk.CTkToplevel):
             self.textbox_obs.insert("1.0", rv[9])
 
     def _save(self, status_override=None):
+        if self.readonly:
+            messagebox.showinfo(
+                "Lecture seule",
+                "Cet inventaire est déjà vérifié et ne peut plus être modifié.",
+                parent=self
+            )
+            return
         art_label = self.entry_article.get().strip()
         unite     = self.combo_unite.get().strip()
         mag       = self.combo_magasin.get().strip()
@@ -1203,7 +1240,7 @@ class PageInventaireJour(ctk.CTkFrame):
             st_tag  = STATUT_TAG_MAP.get(statut, "st_wait")
             alt_tag = "even" if idx % 2 == 0 else "odd"
             qte_stock = self._calc_stock_article(row[12], row[13], row[14])
-            qte_stock_txt = f"{qte_stock:.2f}" if qte_stock is not None else "-"
+            qte_stock_txt = self._fmt_num(qte_stock) if qte_stock is not None else "-"
             qte_corrige_txt = self._fmt_num(row[7])
             # Le tag statut surcharge la couleur de fond + foreground de toute la ligne
             self.tree.insert("", "end", tags=(st_tag,), values=(
@@ -1247,6 +1284,12 @@ class PageInventaireJour(ctk.CTkFrame):
                 on_refresh=self.load_inventaires,
             )
             return
+        statut = rv[10] if len(rv) > 10 else ""
+        if isinstance(statut, str):
+            statut = statut.strip()
+        else:
+            statut = ""
+        readonly = statut == "Vérifié"
         ModalInventaire(
             self, on_save=self.load_inventaires,
             db_get_cursor=db_manager.get_cursor,
@@ -1254,7 +1297,8 @@ class PageInventaireJour(ctk.CTkFrame):
             article_map=self.article_map,
             magasin_map=self.magasin_map,
             current_user_id=self.current_user_id,
-            mode="modification", row_values=rv
+            mode="modification", row_values=rv,
+            readonly=readonly
         )
 
     def _reset_filters(self):

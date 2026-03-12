@@ -17,34 +17,33 @@
 # IMPORTS STANDARDS
 # ──────────────────────────────────────────────────────────────────────────────
 import os
-                    f"Quantité saisie ({format_nombre(qtvente)}) dépasse "
-                    f"le stock ({format_nombre(self.stock_temporaire_selection)}).",
+import sys
+import json
 import traceback
-        self.entry_prixunit.insert(0, format_nombre(article_data.get('prixunit', 0)))
+import textwrap
 from datetime import datetime
-                            f"Montant vente : {format_nombre(total_vente)} Ar\n"
-                            f"Crédit autorisé : {format_nombre(row[0])} Ar\n"
-                            f"Dépassement : {format_nombre(total_vente - row[0])} Ar\n\n"
+from typing import Optional, Dict, Any, List
+
 # ──────────────────────────────────────────────────────────────────────────────
-                    print(f"✅ Facture {ref_mag} — {nom_mag} — {format_nombre(total_mag)} Ar")
+# IMPORTS TIERS
 # ──────────────────────────────────────────────────────────────────────────────
-                lines = "\n".join(f"• {f['ref']} ({f['magasin']}): {format_nombre(f['total'])} Ar"
+import customtkinter as ctk
 from tkinter import ttk
-                    f"\n\nTotal : {format_nombre(total_general)} Ar", 'info')
+import psycopg2
 
-                body += [['', '', 'TOTAL Ar :', format_montant(total_m, 0), ''],
-                         ['', '', 'Fmg :',      format_montant(total_m*5, 0), '']]
+# PDF via ReportLab
+from reportlab.lib.pagesizes import A5
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-                              format_montant(d.get('prixunit',0), 0),
-                              format_montant(mt, 0)])
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
-            ld = Table([[f"{int(d.get('qte',0))} {d.get('unite','')} × {format_montant(d.get('prixunit',0), 0)}",
-                         f"= {format_montant(d.get('montant_ttc',0), 0)}"]],
 # ──────────────────────────────────────────────────────────────────────────────
-        tot_data = [['TOTAL HT:', format_montant(total_ht, 0)]]
-            tot_data.append(['REMISE:', f"-{format_montant(total_rem, 0)}"])
+# IMPORTS LOCAUX
+# ──────────────────────────────────────────────────────────────────────────────
+from app_theme import Colors, Fonts, styled, Theme
+from resource_utils import get_config_path, safe_file_read
 from pages.page_avoir import PageAvoir
-            Paragraph(f"<b>{format_montant(total_ttc, 0)} Ar</b>", sm),
+from pages.page_proforma import PageCommandeCli
 
 
 # ==============================================================================
@@ -462,7 +461,40 @@ class PageVenteParMsin(ctk.CTkFrame):
     def load_settings(self):
         return self._load_settings()
 
-    # Les fonctions de formatage et parsing sont maintenant centralisées dans format_utils.
+    # ──────────────────────────────────────────────────────────────────────────
+    # SECTION 3 — FORMATAGE NOMBRES
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def formater_nombre(self, n) -> str:
+        """1.234,56 → format d'affichage IHM (avec décimales, '.' milliers, ',' décimal)."""
+        try:
+            n = float(n)
+            entier = int(n)
+            decimale = abs(n - entier)
+            if decimale < 1e-10:
+                # Pas de décimale, format entier
+                return "{:,}".format(entier).replace(',', '.')
+            else:
+                # Avec décimale, 2 chiffres
+                return "{:,.2f}".format(n).replace(',', '.').replace('.', ',', 1)
+        except Exception:
+            return "0"
+
+    def formater_nombre_pdf(self, n) -> str:
+        """1 234 567  → format entier sans décimales pour les PDF."""
+        try:
+            return "{:,.0f}".format(float(n)).replace(',', '.')
+        except Exception:
+            return "0"
+
+    def parser_nombre(self, texte: str) -> float:
+        """Inverse de formater_nombre : '1.234,56' → 1234.56."""
+        try:
+            # Enlève les points (milliers), remplace la virgule par point (décimal)
+            txt = str(texte).replace(' ', '').replace('.', '').replace(',', '.')
+            return float(txt)
+        except Exception:
+            return 0.0
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 4 — CONSTRUCTION DE L'INTERFACE (setup_ui)
@@ -1124,10 +1156,10 @@ class PageVenteParMsin(ctk.CTkFrame):
             detail.get('nom_article', ''),
             detail.get('designationmag', ''),
             detail.get('nom_unite', ''),
-            format_nombre(remise),
-            format_nombre(prixunit),
-            format_nombre(qtvente),
-            format_nombre(montant_net),
+            self.formater_nombre(remise),
+            self.formater_nombre(prixunit),
+            self.formater_nombre(qtvente),
+            self.formater_nombre(montant_net),
         )
 
     def charger_details_treeview(self):
@@ -1147,9 +1179,9 @@ class PageVenteParMsin(ctk.CTkFrame):
     def calculer_totaux(self):
         """Recalcule et affiche le total général, FMG (×5) et le total en lettres."""
         total = sum(float(d.get('montant_ttc', d.get('montant', 0)))
-                for d in self.detail_vente)
-        self.label_total_general.configure(text=format_nombre(total))
-        self.label_montant_fmg.configure(text=format_nombre(total * 5))
+                    for d in self.detail_vente)
+        self.label_total_general.configure(text=self.formater_nombre(total))
+        self.label_montant_fmg.configure(text=self.formater_nombre(total * 5))
         self.label_total_lettres.configure(text=nombre_en_lettres_fr(total))
 
     def valider_detail(self):
@@ -1177,9 +1209,9 @@ class PageVenteParMsin(ctk.CTkFrame):
             return
 
         try:
-            qtvente  = parse_nombre(self.entry_qtvente.get())
-            prixunit = parse_nombre(self.entry_prixunit.get())
-            remise   = parse_nombre(self.entry_remise.get() or "0")
+            qtvente  = self.parser_nombre(self.entry_qtvente.get())
+            prixunit = self.parser_nombre(self.entry_prixunit.get())
+            remise   = self.parser_nombre(self.entry_remise.get() or "0")
         except ValueError:
             MessageDialog("Erreur", "Quantité, prix ou remise invalide.", 'error')
             return
@@ -1270,11 +1302,11 @@ class PageVenteParMsin(ctk.CTkFrame):
         self.entry_remise.insert(0, str(detail.get('remise', 0)))
 
         self.entry_qtvente.delete(0, "end")
-        self.entry_qtvente.insert(0, format_nombre(detail['qtvente']))
+        self.entry_qtvente.insert(0, self.formater_nombre(detail['qtvente']))
 
         self.entry_prixunit.configure(state="normal")
         self.entry_prixunit.delete(0, "end")
-        self.entry_prixunit.insert(0, format_nombre(detail['prixunit']))
+        self.entry_prixunit.insert(0, self.formater_nombre(detail['prixunit']))
         self.entry_prixunit.configure(state="readonly")
 
         self.combo_magasin.set(detail['designationmag'])
