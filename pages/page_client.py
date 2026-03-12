@@ -665,7 +665,7 @@ class PageClient(ctk.CTkFrame):
                 tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
                     pmt_id,
                     date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
-                    f"{montant_pmt or 0:,.2f}",
+                    f"{self._formater_nombre(float(montant_pmt or 0))}",
                     observation or "",
                     utilisateur or "N/A"
                 ), tags=(tag,))
@@ -756,7 +756,7 @@ class PageClient(ctk.CTkFrame):
             ("Date Vente :", date_vente.strftime("%d/%m/%Y %H:%M") if date_vente else "N/A"),
             ("Magasin :", magasin),
             ("Opérateur :", operateur),
-            ("Montant Total :", f"{total or 0:,.2f} Ar"),
+            ("Montant Total :", f"{self._formater_nombre(float(total or 0))} Ar"),
         ]
         for col_idx, (label, value) in enumerate(infos):
             ctk.CTkLabel(info_frame, text=label,
@@ -798,13 +798,13 @@ class PageClient(ctk.CTkFrame):
             tag = "even" if idx % 2 == 0 else "odd"
             tree_detail.insert("", "end", tags=(tag,), values=(
                 code or "-", designation or "-", unite or "-",
-                f"{qte or 0:,.2f}", f"{pu or 0:,.2f}",
-                f"{remise or 0:,.1f}", f"{montant_ligne or 0:,.2f}",
+                f"{qte or 0:,.2f}", f"{self._formater_nombre(float(pu or 0))}",
+                f"{self._formater_nombre(float(remise or 0))}", f"{self._formater_nombre(float(montant_ligne or 0))}",
             ))
 
         total_frame = ctk.CTkFrame(win, fg_color="#eaf0fb")
         total_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(2, 12))
-        ctk.CTkLabel(total_frame, text=f"Montant Total :  {total or 0:,.2f} Ar",
+        ctk.CTkLabel(total_frame, text=f"Montant Total :  {self._formater_nombre(float(total or 0))} Ar",
                      font=_F(_FONT_SIZE_LG, "bold"), text_color="#1a5276"
                      ).pack(side="right", padx=20, pady=8)
 
@@ -858,7 +858,7 @@ class PageClient(ctk.CTkFrame):
             ("Date Enregistrement :", date_reg.strftime("%d/%m/%Y %H:%M") if date_reg else "N/A"),
             ("Client :", nomcli or "N/A"),
             ("Contact :", contactcli or "N/A"),
-            ("Montant :", f"{montant or 0:,.2f} Ar"),
+            ("Montant :", f"{self._formater_nombre(float(montant or 0))} Ar"),
         ]
         for label, value in infos:
             row_f = ctk.CTkFrame(frame, fg_color="transparent")
@@ -882,14 +882,14 @@ class PageClient(ctk.CTkFrame):
         info_text = f"""Crédit ID: {credit_id}
 Type: {type_credit}
 
-Montant Total: {montant_total:,.2f} Ar
-Montant Déjà Payé: {montant_paye:,.2f} Ar
-Solde Restant: {solde_restant:,.2f} Ar"""
+Montant Total: {self._formater_nombre(float(montant_total or 0))} Ar
+Montant Déjà Payé: {self._formater_nombre(float(montant_paye or 0))} Ar
+Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
         
         ctk.CTkLabel(payment_window, text=info_text, justify="left", 
                     font=_F(_FONT_SIZE_MD)).pack(padx=10, pady=10)
         
-        ctk.CTkLabel(payment_window, text=f"Montant à Payer (max: {solde_restant:,.2f} Ar):",
+        ctk.CTkLabel(payment_window, text=f"Montant à Payer (max: {self._formater_nombre(float(solde_restant or 0))} Ar):",
                     font=_F(_FONT_SIZE_MD, "bold")).pack(padx=10, pady=5)
         entry_montant = ctk.CTkEntry(payment_window, width=350, font=_F(_FONT_SIZE_MD))
         entry_montant.pack(padx=10, pady=5)
@@ -926,7 +926,7 @@ Solde Restant: {solde_restant:,.2f} Ar"""
                     return
                 
                 if montant_paiement > solde_restant:
-                    messagebox.showwarning("Attention", f"Le montant dépasse le solde restant ({solde_restant:,.2f} Ar).")
+                    messagebox.showwarning("Attention", f"Le montant dépasse le solde restant ({self._formater_nombre(float(solde_restant or 0))} Ar).")
                     return
                 
                 selected_mode = mode_combo.get() if mode_names else None
@@ -1059,9 +1059,9 @@ Solde Restant: {solde_restant:,.2f} Ar"""
         
         info_text = f"""Récapitulatif du Crédit Client (ID: {idclient})
 
-Montant Total des Crédits: {credit_total_initial:,.2f} Ar
-Montant Total Déjà Payé: {credit_total_paye:,.2f} Ar
-Solde Total Restant: {credit_total_restant:,.2f} Ar"""
+Montant Total des Crédits: {self._formater_nombre(credit_total_initial)} Ar
+Montant Total Déjà Payé: {self._formater_nombre(credit_total_paye)} Ar
+Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         
         ctk.CTkLabel(
             main_frame, text=info_text, justify="left", anchor="w",
@@ -1070,7 +1070,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
         
         ctk.CTkLabel(
             main_frame,
-            text=f"Montant Global à Payer (max: {credit_total_restant:,.2f} Ar):",
+            text=f"Montant Global à Payer (max: {self._formater_nombre(credit_total_restant)} Ar):",
             font=_F(_FONT_SIZE_MD, "bold")
         ).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
         entry_montant = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
@@ -1120,7 +1120,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                     return
                 
                 if montant_global > credit_total_restant:
-                    messagebox.showwarning("Attention", f"Le montant dépasse le solde total ({credit_total_restant:,.2f} Ar).")
+                    messagebox.showwarning("Attention", f"Le montant dépasse le solde total ({self._formater_nombre(credit_total_restant)} Ar).")
                     return
                 
                 selected_mode_global = mode_combo_global.get() if mode_names else None
@@ -1137,7 +1137,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 
                 self.conn.commit()
                 
-                messagebox.showinfo("Succès", f"Paiement global de {montant_global:,.2f} Ar enregistré avec succès!")
+                messagebox.showinfo("Succès", f"Paiement global de {self._formater_nombre(float(montant_global))} Ar enregistré avec succès!")
 
                 societe_data = self._get_societe_info()
                 societe_tuple = (
@@ -1183,7 +1183,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
 
     def _formater_nombre(self, nombre):
         if isinstance(nombre, (int, float)):
-            return f"{nombre:,.2f}".replace(",", " ").replace(".", ",")
+            return f"{nombre:,.0f}".replace(".", ",").replace(",", ".")
         return str(nombre)
 
     def _extract_days_from_label(self, label):
@@ -1292,14 +1292,14 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 credit_id, type_credit,
                 date_credit.strftime("%d/%m/%Y %H:%M") if date_credit else "N/A",
                 ref,
-                f"{float(montant_initial or 0):,.2f}",
-                f"{montant_paye_ligne:,.2f}",
-                f"{solde_restant:,.2f}",
+                f"{self._formater_nombre(float(montant_initial or 0))}",
+                f"{self._formater_nombre(montant_paye_ligne)}",
+                f"{self._formater_nombre(solde_restant)}",
                 statut
             ), tags=(tag,))
 
         if label_montant_restant is not None:
-            label_montant_restant.configure(text=f"{total_restant:,.2f} Ar")
+            label_montant_restant.configure(text=f"{self._formater_nombre(float(total_restant or 0))} Ar")
 
         return total_initial, total_paye_global, total_restant
 
@@ -1489,7 +1489,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 y -= 8 * mm
             c.setFont("Helvetica-Bold", 10)
             c.drawString(5 * mm, y, "MONTANT CREANCE :")
-            c.drawRightString(75 * mm, y, f"{montant:,.2f} Ar".replace(',', ' ').replace('.', ','))
+            c.drawRightString(75 * mm, y, f"{self._formater_nombre(montant)} Ar")
             y -= 8 * mm
             if num2words:
                 c.setFont("Helvetica-Oblique", 6)
@@ -1846,7 +1846,7 @@ Solde Total Restant: {credit_total_restant:,.2f} Ar"""
                 """, (idclient, datetime.now(), num_fact, montant))
                 self.conn.commit()
                 
-                messagebox.showinfo("Succès", f"Créance de {montant:,.2f} Ar enregistrée avec succès!")
+                messagebox.showinfo("Succès", f"Créance de {self._formater_nombre(montant)} Ar enregistrée avec succès!")
                 
                 username = self._get_username_by_id(1)
                 societe_data = self._get_societe_info()
