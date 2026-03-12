@@ -41,7 +41,7 @@
             "PageAVQ"
         ],
         [
-            "Avance Spécial",
+            "Avance Spéciale",
             "FenetreAvanceSpec"
         ],
         [
@@ -93,19 +93,23 @@
             "DatabaseConfig"
         ],
         [
-            "Décaissemen",
+            "Decaissement",
             "PageDecaissement"
         ],
         [
-            "Décaissement Banqu",
+            "DecaissementBq",
             "PageDecaissementBq"
+        ],
+        [
+            "Déliberation EB",
+            "PageBaseListe"
         ],
         [
             "Encaissement",
             "PageEncaissement"
         ],
         [
-            "Encaissement Banque",
+            "EncaissementBq",
             "PageEncaissementBq"
         ],
         [
@@ -113,8 +117,12 @@
             "PageSalaireEtatSB"
         ],
         [
-            "Etat de Salaire Horaire",
-            "PageEtatSalaireHoraire"
+            "Etudiant EB",
+            "PageBaseListe"
+        ],
+        [
+            "Evenements",
+            "PageEvenement"
         ],
         [
             "Facturation",
@@ -137,32 +145,20 @@
             "PageFrsDette"
         ],
         [
+            "Gérer Personnels",
+            "PagePersonnelCRUD"
+        ],
+        [
             "Information Article",
             "PageInfoArticle"
         ],
         [
-            "Init",
+            "Init DB",
             "DBInitializerApp"
         ],
         [
-            "Liste Facture",
-            "PageFactureListe"
-        ],
-        [
-            "Liste mouvements",
-            "PageListeMouvement"
-        ],
-        [
-            "Liste Personnel",
-            "AppMain"
-        ],
-        [
-            "Livraison Client",
-            "PageLivraisonClient"
-        ],
-        [
-            "Magasin",
-            "PageMagasin"
+            "Matiere EB",
+            "PageBaseListe"
         ],
         [
             "Menu",
@@ -175,6 +171,10 @@
         [
             "Mouvement Stock",
             "PageInfoMouvementStock"
+        ],
+        [
+            "Notes EB",
+            "PageBaseListe"
         ],
         [
             "Nouveau SB",
@@ -197,6 +197,14 @@
             "PageGestionPeremption"
         ],
         [
+            "Présence",
+            "PagePresence"
+        ],
+        [
+            "Présence Personnel",
+            "PagePresencePersonnel"
+        ],
+        [
             "Prix d'article",
             "PagePrixListe"
         ],
@@ -217,8 +225,16 @@
             "PageCommandeCli"
         ],
         [
+            "Résultat EB",
+            "PageBaseListe"
+        ],
+        [
             "Salaire Base",
             "PageSalaireBase"
+        ],
+        [
+            "Salaire Horaire",
+            "PageEtatSalaireHoraire"
         ],
         [
             "Sauvegarde",
@@ -243,6 +259,10 @@
         [
             "Suivi Commande",
             "PageSuiviCommande"
+        ],
+        [
+            "Suivi de présence",
+            "PageSuiviPresence"
         ],
         [
             "TABLEAU DE BORD",

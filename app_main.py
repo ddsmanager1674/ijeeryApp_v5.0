@@ -355,9 +355,11 @@ class MenuAccordion(ctk.CTkFrame):
             return
         color = self._cfg.get("color", "#034787")
         hover = self._cfg.get("hover", "#0565c9")
-        # Légèrement assombri pour différencier
+        authorized = self._sidebar.authorized  # ← ajout
         for item in self._cfg.get("subs", []):
             lbl, auth, mod_path, cls_name, kwargs_key = item
+            if auth not in authorized:          # ← ajout
+                continue                        # ← ajout
             btn = SubMenuButton(
                 self._sub_frame,
                 text="  " + lbl,
