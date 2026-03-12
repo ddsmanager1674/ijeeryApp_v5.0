@@ -33,16 +33,25 @@ def format_nombre(val, decimales=2):
     except Exception:
         decimales = 2
 
-    if decimales <= 0:
-        n = int(round(n))
-        return f"{n:,}".replace(",", ".")
-
-    # 1,234.56 -> 1.234,56
-    formatted = f"{n:,.{decimales}f}"
-    formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
-    return formatted
+    entier = int(n)
+    decimale = abs(n - entier)
+    if decimale < 1e-10:
+        # Pas de décimale, format entier
+        return f"{entier:,}".replace(",", ".")
+    else:
+        formatted = f"{n:,.2f}"
+        formatted = formatted.replace(",", ".").replace(".", ",", 1)
+        return formatted
 
 
 def format_montant(val, decimales=2):
     """Alias pour format_nombre."""
     return format_nombre(val, decimales=decimales)
+
+def parse_nombre(texte: str) -> float:
+    """Inverse de format_nombre : '1.234,56' -> 1234.56"""
+    try:
+        txt = str(texte).replace(' ', '').replace('.', '').replace(',', '.')
+        return float(txt)
+    except Exception:
+        return 0.0

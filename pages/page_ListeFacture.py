@@ -201,7 +201,7 @@ class PageDetailFacture(ctk.CTkToplevel):
     def formater_montant(self, valeur):
         """Transforme un nombre en format 1.000,00 Ar"""
         try:
-            n = f"{float(valeur):,.2f}"
+            n = f"{float(valeur):,.0f}"
             return n.replace(",", "X").replace(".", ",").replace("X", ".")
         except:
             return "0,00"
@@ -233,9 +233,9 @@ class PageDetailFacture(ctk.CTkToplevel):
             for idx, r in enumerate(cursor.fetchall()):
                 tag = "even" if idx % 2 == 0 else "odd"
                 self.tree.insert("", "end", values=(
-                    r[0], r[1], r[2],
-                    f"{float(r[3]):,.0f}",
-                    f"{float(r[4]):,.0f}"
+                    r[0], r[1], self.formater_montant(float(r[2])),
+                    f"{self.formater_montant(float(r[3]))}",
+                    f"{self.formater_montant(float(r[4]))}"
                 ), tags=(tag,))
             conn.close()
         except Exception as e:
@@ -788,10 +788,18 @@ class PageListeFacture(ctk.CTkFrame):
             return None
 
     def formater_montant(self, valeur):
-        """Transforme un nombre en format 1.000,00"""
+        """Transforme un nombre en format 1.000,00 ou 1.000 selon décimal"""
         try:
-            n = f"{float(valeur):,.2f}"
-            return n.replace(",", "X").replace(".", ",").replace("X", ".")
+            v = float(valeur)
+            if v % 1 == 0:
+                # Entier, pas de décimale
+                n = f"{int(v):,}"
+                return n.replace(",", "X").replace(".", ",").replace("X", ".")
+            else:
+                # Décimal, deux chiffres après la virgule
+                n = f"{v:,.2f}"
+                n = n.replace(",", "X").replace(".", ",").replace("X", ".")
+                return n
         except:
             return "0,00"
 
