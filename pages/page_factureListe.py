@@ -266,21 +266,13 @@ class PageFactureListe(ctk.CTkFrame):
 
     def format_currency(self, value):
         """
-        Formate un float en chaîne avec séparateur de milliers (espace)
-        et virgule décimale (style français).
-        Ex: 1234567.89 → 1 234 567,89
-        *** LOGIQUE MÉTIER — NE PAS MODIFIER ***
+        Formate un float en chaîne avec séparateur de milliers '.' et virgule décimale ','.
+        Ex: 1234567.89 → 1.234.567,89
+        Si le nombre est entier, affiche sans décimale.
         """
         try:
-            sign           = "-" if value < 0 else ""
-            absolute_value = abs(value)
-            integer_part, decimal_part = f"{round(absolute_value, 2):.2f}".split('.')
-            formatted_integer = ""
-            for i, digit in enumerate(reversed(integer_part)):
-                if i > 0 and i % 3 == 0:
-                    formatted_integer = ' ' + formatted_integer
-                formatted_integer = digit + formatted_integer
-            return f"{sign}{formatted_integer},{decimal_part}"
+            from format_utils import format_nombre
+            return format_nombre(value)
         except Exception:
             return "0,00"
 

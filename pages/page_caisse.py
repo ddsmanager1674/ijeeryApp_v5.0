@@ -540,7 +540,7 @@ class PageCaisse(ctk.CTkFrame):
             return None
 
     def format_montant(self, v):
-        return f"{v:,.2f}".replace(",", " ").replace(".", ",").replace(" ", ".")
+        return f"{v:,.0f}".replace(",", " ").replace(".", ",").replace(" ", ".")
 
     def format_montant_court(self, v):
         return self.format_montant(v)
