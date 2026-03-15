@@ -341,9 +341,15 @@ class PageSortie(ctk.CTkFrame):
         self.tree_container.grid_rowconfigure(1, weight=1)
 
         # Barre d'outils du tableau (toggle prix pour CI)
-        toolbar = ctk.CTkFrame(self.tree_container, fg_color="transparent")
+        # NOTE: CTkFrame defaults to a fairly large height (≈200), which creates a
+        #       big gap above le tableau. We force a compact toolbar height.
+        toolbar = ctk.CTkFrame(self.tree_container, fg_color="transparent", height=40)
         toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=(4, 0))
+        toolbar.grid_propagate(False)
         toolbar.grid_columnconfigure(0, weight=1)
+
+        # Ensure the toolbar row remains compact when the page grows.
+        self.tree_container.grid_rowconfigure(0, minsize=40)
 
         self.btn_toggle_prix = ctk.CTkButton(
             toolbar, text="👁 Afficher Prix / Montant",
