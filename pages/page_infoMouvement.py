@@ -215,14 +215,14 @@ class PageChangementArticle(ctk.CTkFrame):
         panel.grid_rowconfigure(2, weight=1)   # Treeview expansible
 
         # ── Sous-bandeau titre + magasin ─────────────────────────────────────
-        hdr = ctk.CTkFrame(panel, fg_color=Colors.WARNING, corner_radius=0, height=38)
+        hdr = ctk.CTkFrame(panel, fg_color=Colors.TEXT_ON_DARK, corner_radius=0, height=38)
         hdr.grid(row=0, column=0, sticky="ew")
         hdr.grid_propagate(False)
         hdr.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
             hdr, text="📤  ARTICLES À CHANGER  —  SORTIE",
-            font=Fonts.bold(12), text_color=Colors.TEXT_ON_DARK,
+            font=Fonts.bold(12), text_color=Colors.WARNING,
         ).grid(row=0, column=0, padx=10, pady=0, sticky="w")
 
         mag_frame = ctk.CTkFrame(hdr, fg_color="transparent")
@@ -327,11 +327,10 @@ class PageChangementArticle(ctk.CTkFrame):
 
         # ── Bouton Supprimer sortie ───────────────────────────────────────────
         ctk.CTkButton(
-            panel, text="🗑  Supprimer Ligne sélectionnée", height=32,
-            font=Fonts.bold(11),
+            panel, text="🗑", width=40, height=32,
             fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
-            corner_radius=0, command=self.supprimer_article_sortie,
-        ).grid(row=3, column=0, sticky="ew", padx=0, pady=(1, 0))
+            corner_radius=6, command=self.supprimer_article_sortie,
+        ).grid(row=3, column=0, sticky="e", padx=(0, 6), pady=(1, 0))
 
     # ── Row 2 — Panel ENTRÉE ──────────────────────────────────────────────────
 
@@ -349,14 +348,14 @@ class PageChangementArticle(ctk.CTkFrame):
         panel.grid_rowconfigure(2, weight=1)
 
         # ── Sous-bandeau titre + magasin ─────────────────────────────────────
-        hdr = ctk.CTkFrame(panel, fg_color=Colors.PRIMARY, corner_radius=0, height=38)
+        hdr = ctk.CTkFrame(panel, fg_color=Colors.TEXT_ON_DARK, corner_radius=0, height=38)
         hdr.grid(row=0, column=0, sticky="ew")
         hdr.grid_propagate(False)
         hdr.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
             hdr, text="📥  ARTICLES REÇUS  —  ENTRÉE",
-            font=Fonts.bold(12), text_color=Colors.TEXT_ON_DARK,
+            font=Fonts.bold(12), text_color=Colors.PRIMARY,
         ).grid(row=0, column=0, padx=10, pady=0, sticky="w")
 
         mag_frame = ctk.CTkFrame(hdr, fg_color="transparent")
@@ -455,11 +454,10 @@ class PageChangementArticle(ctk.CTkFrame):
 
         # ── Bouton Supprimer entrée ───────────────────────────────────────────
         ctk.CTkButton(
-            panel, text="🗑  Supprimer Ligne sélectionnée", height=32,
-            font=Fonts.bold(11),
+            panel, text="🗑", width=40, height=32,
             fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
-            corner_radius=0, command=self.supprimer_article_entree,
-        ).grid(row=3, column=0, sticky="ew", padx=0, pady=(1, 0))
+            corner_radius=6, command=self.supprimer_article_entree,
+        ).grid(row=3, column=0, sticky="e", padx=(0, 6), pady=(1, 0))
 
     # ── Row 3 — Note ─────────────────────────────────────────────────────────
 
@@ -485,24 +483,17 @@ class PageChangementArticle(ctk.CTkFrame):
     # ── Row 4 — Barre d'actions ───────────────────────────────────────────────
 
     def _build_actions_band(self):
-        """Frame BG_PAGE (Row 4) : 🖨 Imprimer | 💾 Enregistrer (alignés à droite)."""
+        """Frame BG_PAGE (Row 4) : � Enregistrer (aligné à droite)."""
         bar = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE, corner_radius=0)
         bar.grid(row=4, column=0, sticky="ew", padx=0, pady=(2, 0))
         bar.grid_columnconfigure(0, weight=1)  # espace élastique à gauche
-
-        ctk.CTkButton(
-            bar, text="🖨  Imprimer", height=36,
-            font=Fonts.bold(12),
-            fg_color=Colors.PREMIUM, hover_color=Colors.PREMIUM_DARK,
-            corner_radius=8, command=self.imprimer_changement,
-        ).grid(row=0, column=1, padx=(0, 6), pady=6)
 
         ctk.CTkButton(
             bar, text="💾  Enregistrer le Changement", height=36,
             font=Fonts.bold(13),
             fg_color=Colors.SUCCESS_DARK, hover_color=Colors.INFO_DARK,
             corner_radius=8, command=self.enregistrer_changement,
-        ).grid(row=0, column=2, padx=(0, 8), pady=6)
+        ).grid(row=0, column=1, padx=(0, 8), pady=6)
 
     # ── Helpers visuels Treeview ──────────────────────────────────────────────
 

@@ -844,12 +844,13 @@ class ModalVerification(ctk.CTkToplevel):
         self.obs.configure(state="disabled")
 
         self.var_verif = ctk.BooleanVar(value=(self.row_values[10] == "Vérifié"))
-        ctk.CTkCheckBox(
-            body, text="Marquer comme vérifié",
-            variable=self.var_verif, command=self._toggle_verif,
-            fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
-            text_color=Colors.TEXT_PRIMARY, font=Fonts.bold(11)
-        ).grid(row=6, column=1, pady=(8, 0), sticky="w")
+        if self.row_values[10] != "Annulé":
+            ctk.CTkCheckBox(
+                body, text="Marquer comme vérifié",
+                variable=self.var_verif, command=self._toggle_verif,
+                fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
+                text_color=Colors.TEXT_PRIMARY, font=Fonts.bold(11)
+            ).grid(row=6, column=1, pady=(8, 0), sticky="w")
 
         ctk.CTkButton(
             body, text="Fermer", width=100, height=28,
@@ -959,15 +960,14 @@ class PageInventaireJour(ctk.CTkFrame):
     def _build_filters(self):
         fb = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=8)
         fb.grid(row=1, column=0, padx=8, pady=(6, 3), sticky="ew")
+        fb.grid_columnconfigure(1, weight=1)
 
-        def lbl(text, r, c, padl=10):
-            ctk.CTkLabel(fb, text=text, font=Fonts.label(10),
-                         text_color=Colors.TEXT_SECONDARY
-                         ).grid(row=r, column=c,
-                                padx=(padl, 4), pady=5, sticky="w")
+        def lbl(parent, text):
+            return ctk.CTkLabel(parent, text=text, font=Fonts.label(10),
+                                text_color=Colors.TEXT_SECONDARY)
 
-        def mk_combo(values, w=130):
-            return ctk.CTkComboBox(fb, values=values, state="readonly",
+        def mk_combo(parent, values, w=130):
+            return ctk.CTkComboBox(parent, values=values, state="readonly",
                                    height=28, width=w,
                                    fg_color=Colors.BG_INPUT,
                                    border_color=Colors.BORDER,
@@ -975,49 +975,38 @@ class PageInventaireJour(ctk.CTkFrame):
                                    font=Fonts.body(11))
 
         # ── Ligne 0 ───────────────────────────────────────────────────────
-        lbl("Début :", 0, 0)
-        self.date_from = DateEntry(fb, width=140)
-        self.date_from.grid(row=0, column=1, padx=(0, 10), pady=5)
+        left_frame = ctk.CTkFrame(fb, fg_color="transparent")
+        left_frame.grid(row=0, column=0, sticky="w", padx=10, pady=5)
 
-        lbl("Fin :", 0, 2, 0)
-        self.date_to = DateEntry(fb, width=140)
-        self.date_to.grid(row=0, column=3, padx=(0, 10), pady=5)
+        lbl(left_frame, "Début :").pack(side="left", padx=(0, 4))
+        self.date_from = DateEntry(left_frame, width=140)
+        self.date_from.pack(side="left", padx=(0, 10))
 
-        lbl("Recherche :", 0, 4, 0)
-        self.search_entry = ctk.CTkEntry(
-            fb, height=28, width=165,
-            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            font=Fonts.body(11), corner_radius=6,
-            placeholder_text="Article, observation…"
-        )
-        self.search_entry.grid(row=0, column=5, padx=(0, 10), pady=5)
-        self.search_entry.bind("<KeyRelease>", lambda e: self.load_inventaires())
+        lbl(left_frame, "Fin :").pack(side="left", padx=(0, 4))
+        self.date_to = DateEntry(left_frame, width=140)
+        self.date_to.pack(side="left", padx=(0, 10))
 
-        lbl("Utilisateur :", 0, 6, 0)
-        self.user_filter = mk_combo(["Tous"])
-        self.user_filter.grid(row=0, column=7, padx=(0, 8), pady=5)
+        lbl(left_frame, "Magasin :").pack(side="left", padx=(0, 4))
+        self.magasin_filter = mk_combo(left_frame, ["Tous"])
+        self.magasin_filter.pack(side="left", padx=(0, 10))
 
-        # ── Ligne 1 ───────────────────────────────────────────────────────
-        lbl("Magasin :", 1, 0)
-        self.magasin_filter = mk_combo(["Tous"])
-        self.magasin_filter.grid(row=1, column=1, padx=(0, 10), pady=5)
-
-        lbl("Statut :", 1, 2, 0)
-        self.statut_filter = mk_combo(["Tous"] + STATUTS, w=118)
+        lbl(left_frame, "Statut :").pack(side="left", padx=(0, 4))
+        self.statut_filter = mk_combo(left_frame, ["Tous"] + STATUTS, w=118)
         self.statut_filter.set("Tous")
-        self.statut_filter.grid(row=1, column=3, padx=(0, 10), pady=5)
+        self.statut_filter.pack(side="left", padx=(0, 10))
 
-        # Boutons groupés ligne 1 droite
-        btn_grp = ctk.CTkFrame(fb, fg_color="transparent")
-        btn_grp.grid(row=1, column=6, columnspan=2,
-                     padx=(0, 8), pady=5, sticky="e")
+        lbl(left_frame, "Utilisateur :").pack(side="left", padx=(0, 4))
+        self.user_filter = mk_combo(left_frame, ["Tous"])
+        self.user_filter.pack(side="left", padx=(0, 10))
+
+        right_frame = ctk.CTkFrame(fb, fg_color="transparent")
+        right_frame.grid(row=0, column=1, sticky="e", padx=10, pady=5)
 
         for text, color, hover, cmd in [
-            ("🔍 Filtrer",  Colors.PRIMARY,  Colors.PRIMARY_HOVER, self.load_inventaires),
-            ("↺ Reset",     Colors.CLOUDS,   Colors.SILVER,        self._reset_filters),
-            ("📊 Excel",    Colors.PREMIUM,  Colors.PREMIUM_DARK,  self.export_excel),
+            ("🔍 Filtrer", Colors.PRIMARY, Colors.PRIMARY_HOVER, self.load_inventaires),
+            ("↺ Reset",    Colors.CLOUDS,  Colors.SILVER,        self._reset_filters),
         ]:
-            btn = ctk.CTkButton(btn_grp, text=text, width=86, height=28,
+            btn = ctk.CTkButton(right_frame, text=text, width=86, height=28,
                                 fg_color=color, hover_color=hover,
                                 text_color=(Colors.TEXT_PRIMARY
                                             if color == Colors.CLOUDS
@@ -1027,6 +1016,19 @@ class PageInventaireJour(ctk.CTkFrame):
             if color == Colors.CLOUDS:
                 btn.configure(border_width=1, border_color=Colors.BORDER)
             btn.pack(side="left", padx=(0, 5))
+
+        # ── Ligne 1 ───────────────────────────────────────────────────────
+        search_frame = ctk.CTkFrame(fb, fg_color="transparent")
+        search_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+        lbl(search_frame, "Recherche :").pack(side="left", padx=(0, 10))
+        self.search_entry = ctk.CTkEntry(
+            search_frame, height=28,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            font=Fonts.body(11), corner_radius=6,
+            placeholder_text="Article, observation…"
+        )
+        self.search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry.bind("<KeyRelease>", lambda e: self.load_inventaires())
 
     # ── Tableau avec badge statut ─────────────────────────────────────────────
 
@@ -1222,7 +1224,7 @@ class PageInventaireJour(ctk.CTkFrame):
                 LEFT JOIN tb_article  a        ON t.idarticle = a.idarticle
                 LEFT JOIN tb_unite    un       ON t.idunite   = un.idunite
                 LEFT JOIN tb_magasin  m_inv    ON t.idmagasin = m_inv.idmag
-                LEFT JOIN tb_magasin  m_stock  ON a.idmag     = m_stock.idmag
+                LEFT JOIN tb_magasin  m_stock  ON t.idmagasin = m_stock.idmag
                 WHERE {" AND ".join(where)}
                 ORDER BY t.date_creation DESC
             """, tuple(params))

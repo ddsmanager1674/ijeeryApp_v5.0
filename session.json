@@ -145,16 +145,40 @@
             "PageFrsDette"
         ],
         [
-            "Gérer Personnels",
-            "PagePersonnelCRUD"
-        ],
-        [
             "Information Article",
             "PageInfoArticle"
         ],
         [
             "Init DB",
             "DBInitializerApp"
+        ],
+        [
+            "Inventaire du Jour",
+            "PageInventaireJour"
+        ],
+        [
+            "Liste Facture",
+            "PageFactureListe"
+        ],
+        [
+            "Liste mouvements",
+            "PageListeMouvement"
+        ],
+        [
+            "Liste Personnel",
+            "AppMain"
+        ],
+        [
+            "Livraison Client",
+            "PageLivraisonClient"
+        ],
+        [
+            "Magasin",
+            "PageMagasin"
+        ],
+        [
+            "Marge Commerciale",
+            "PageStock"
         ],
         [
             "Matiere EB",
@@ -201,10 +225,6 @@
             "PagePresence"
         ],
         [
-            "Présence Personnel",
-            "PagePresencePersonnel"
-        ],
-        [
             "Prix d'article",
             "PagePrixListe"
         ],
@@ -247,6 +267,10 @@
         [
             "Stock Alerte",
             "PageStockAlerte"
+        ],
+        [
+            "Stock Article",
+            "PageStock"
         ],
         [
             "Stock Livraison",
