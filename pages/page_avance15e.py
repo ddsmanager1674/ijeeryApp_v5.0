@@ -134,7 +134,7 @@ class PageAVQ(ctk.CTkFrame):
         saisie_frame = ctk.CTkFrame(self, fg_color="transparent")
         saisie_frame.pack(pady=10, padx=10, fill="x")
 
-        ctk.CTkLabel(saisie_frame, text="Rechercher Professeur:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ctk.CTkLabel(saisie_frame, text="Rechercher EMployés:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         
         # Use ttk.Combobox for direct value passing in command and better integration
         self.liste_personnel_combo = ttk.Combobox(saisie_frame, values=self.charger_personnel_pour_avance(), width=40)

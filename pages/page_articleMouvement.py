@@ -437,8 +437,13 @@ class PageArticleMouvement(ctk.CTkFrame):
 
         stock_visible = "Stock Article" in {m[0] for m in self._session_data.get("menus", [])}
 
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        entree_visible = not os.path.exists(
+            os.path.join(project_root, "config-entree-mouvements-article")
+        )
+
         widths = {"Date": 140, "Reference": 110, "Designation": 220,
-          "Type": 130, "Entree": 90, "Sortie": 90,
+          "Type": 130, "Entree": (90 if entree_visible else 0), "Sortie": 90,
           "Stock": 110 if stock_visible else 0,
           "Magasin": 110, "Description": 240, "Utilisateur": 100,
           "idArticle": 0, "idUnite": 0, "idMagasin": 0}
