@@ -776,7 +776,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                     u.idunite, COALESCE(lf.idmag,-1),
                     COALESCE('[FRS: '||frs.nomfrs||
                              ' , ref. Commande: '||c.refcom||'] '
-                             ||COALESCE(lf.reflivfrs,''), '')
+                             ||COALESCE('Desc : '||lf.factfrs,''), '')
                 FROM tb_livraisonfrs lf
                 INNER JOIN tb_unite u ON lf.idunite = u.idunite
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
