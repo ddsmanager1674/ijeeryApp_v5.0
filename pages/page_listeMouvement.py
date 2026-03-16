@@ -290,7 +290,7 @@ class PageListeMouvement(ctk.CTkFrame):
 
         # Treeview
         cols_default = ("Date", "Référence", "Fournisseur", "Articles",
-                        "Montant Total", "Statut", "Utilisateur")
+                        "Montant Total", "Statut", "Description", "Utilisateur")
         self.tree = ttk.Treeview(
             tree_card,
             columns=cols_default,
@@ -426,6 +426,9 @@ class PageListeMouvement(ctk.CTkFrame):
     def get_query_for_mouvement(self, type_mouvement: str):
         """Retourne la requête SQL selon le type de mouvement."""
         queries = {
+            # ──────────────────────────────────────────────────────────────────
+            # ENTRÉES — colonne "Description" = tb_livraisonfrs.factfrs
+            # ──────────────────────────────────────────────────────────────────
             "entree": """
                 SELECT
                     c.datecom::DATE as "Date",
@@ -462,6 +465,19 @@ class PageListeMouvement(ctk.CTkFrame):
                         ) THEN '⚠️ Livré Partiel'
                         ELSE '⏳ En Attente'
                     END as "Statut",
+                    COALESCE(
+                        (
+                            SELECT lf.factfrs
+                            FROM tb_livraisonfrs lf
+                            WHERE lf.idcom = c.idcom
+                              AND lf.deleted = 0
+                              AND lf.factfrs IS NOT NULL
+                              AND lf.factfrs <> ''
+                            ORDER BY lf.idcom
+                            LIMIT 1
+                        ),
+                        'N/A'
+                    ) as "Description",
                     CONCAT(COALESCE(u.prenomuser,''), ' ', COALESCE(u.nomuser,'')) as "Utilisateur"
                 FROM tb_commande c
                 LEFT JOIN tb_fournisseur f ON c.idfrs = f.idfrs
@@ -569,6 +585,8 @@ class PageListeMouvement(ctk.CTkFrame):
                 self.tree.column(col, width=130, anchor="center", minwidth=90)
             elif col == "Utilisateur":
                 self.tree.column(col, width=140, anchor="w",   minwidth=100)
+            elif col == "Description":
+                self.tree.column(col, width=180, anchor="w",   minwidth=120)
             else:
                 self.tree.column(col, width=150, anchor="w",   minwidth=100)
 
