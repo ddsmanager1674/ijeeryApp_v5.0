@@ -100,14 +100,6 @@ def _setup_style():
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DatePickerPopup(ctk.CTkToplevel):
-    """
-    Mini-calendrier popup.
-    Paramètres :
-        anchor_widget  – widget d'ancrage pour positionner le popup
-        on_select      – callback(date_str: str) appelé au clic sur un jour
-        initial_date   – date pré-sélectionnée (str "YYYY-MM-DD" ou None)
-    """
-
     DAYS   = ["Lu", "Ma", "Me", "Je", "Ve", "Sa", "Di"]
     MON_FR = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
               "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
@@ -115,8 +107,6 @@ class DatePickerPopup(ctk.CTkToplevel):
     def __init__(self, master, anchor_widget, on_select, initial_date=None):
         super().__init__(master)
         self._on_select = on_select
-
-        # Date courante affichée
         try:
             init = datetime.strptime(initial_date, "%Y-%m-%d").date() if initial_date else date.today()
         except Exception:
@@ -125,7 +115,7 @@ class DatePickerPopup(ctk.CTkToplevel):
         self._month = init.month
         self._selected: date | None = init if initial_date else None
 
-        self.overrideredirect(True)          # sans barre de titre
+        self.overrideredirect(True)
         self.configure(fg_color=Colors.BG_CARD)
         self.attributes("-topmost", True)
         self.lift()
@@ -133,17 +123,13 @@ class DatePickerPopup(ctk.CTkToplevel):
 
         self._build()
 
-        # Positionner sous le widget d'ancrage
         self.update_idletasks()
         ax = anchor_widget.winfo_rootx()
         ay = anchor_widget.winfo_rooty() + anchor_widget.winfo_height() + 2
         self.geometry(f"+{ax}+{ay}")
 
-        # Fermer si clic en dehors
         self.bind("<FocusOut>", self._on_focus_out)
         self.focus_set()
-
-    # ── Construit le calendrier ──────────────────────────────────────────────
 
     def _build(self):
         for w in self.winfo_children():
@@ -154,7 +140,6 @@ class DatePickerPopup(ctk.CTkToplevel):
                               corner_radius=8)
         outer.pack(padx=0, pady=0)
 
-        # Barre navigation mois/année
         nav = ctk.CTkFrame(outer, fg_color=Colors.MIDNIGHT,
                             corner_radius=0, height=34)
         nav.pack(fill="x")
@@ -177,18 +162,15 @@ class DatePickerPopup(ctk.CTkToplevel):
                       corner_radius=4, command=self._next_month
                       ).pack(side="right", padx=4, pady=3)
 
-        # Grille jours
         grid = ctk.CTkFrame(outer, fg_color=Colors.BG_CARD)
         grid.pack(padx=6, pady=4)
 
-        # En-têtes
         for c, day in enumerate(self.DAYS):
             color = Colors.DANGER if c >= 5 else Colors.TEXT_SECONDARY
             ctk.CTkLabel(grid, text=day, font=Fonts.bold(9),
                          text_color=color, width=30, anchor="center"
                          ).grid(row=0, column=c, padx=1, pady=(2, 1))
 
-        # Jours du mois
         cal = calendar.monthcalendar(self._year, self._month)
         for r, week in enumerate(cal):
             for c, day in enumerate(week):
@@ -222,7 +204,6 @@ class DatePickerPopup(ctk.CTkToplevel):
                 )
                 btn.grid(row=r + 1, column=c, padx=1, pady=1)
 
-        # Bouton "Aujourd'hui"
         foot = ctk.CTkFrame(outer, fg_color=Colors.BG_CARD)
         foot.pack(fill="x", padx=6, pady=(0, 6))
         ctk.CTkButton(foot, text="Aujourd'hui", height=24,
@@ -258,18 +239,10 @@ class DatePickerPopup(ctk.CTkToplevel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Widget DateEntry (Entry + bouton 📅 → DatePickerPopup)
+# Widget DateEntry
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DateEntry(ctk.CTkFrame):
-    """
-    Champ de date avec icône calendrier.
-    Utilisation :
-        de = DateEntry(parent)
-        de.get()   → "YYYY-MM-DD" ou ""
-        de.set("2026-03-10")
-    """
-
     def __init__(self, parent, width=115, placeholder="YYYY-MM-DD", **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._popup = None
@@ -321,14 +294,9 @@ class DateEntry(ctk.CTkFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ArticleSearchWindow(ctk.CTkToplevel):
-    """
-    Mini-fenêtre de recherche et sélection d'article.
-    on_select(article_label: str, article_id: int)
-    """
-
     def __init__(self, master, article_map: dict, on_select):
         super().__init__(master)
-        self._article_map = article_map   # {designation: idarticle}
+        self._article_map = article_map
         self._on_select   = on_select
 
         self.title("Rechercher un article")
@@ -362,7 +330,6 @@ class ArticleSearchWindow(ctk.CTkToplevel):
         self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _build(self):
-        # En-tête
         hdr = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT,
                             corner_radius=0, height=40)
         hdr.pack(fill="x")
@@ -371,7 +338,6 @@ class ArticleSearchWindow(ctk.CTkToplevel):
                      font=Fonts.bold(12), text_color=Colors.TEXT_ON_DARK,
                      anchor="w").pack(side="left", fill="y", padx=12)
 
-        # Recherche
         search_row = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
         search_row.pack(fill="x", padx=0, pady=(0, 1))
 
@@ -386,13 +352,11 @@ class ArticleSearchWindow(ctk.CTkToplevel):
         self._search_entry.bind("<KeyRelease>",
                                 lambda e: self._populate(self._search_var.get()))
 
-        # Liste résultats
         list_frame = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=8)
         list_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         list_frame.grid_columnconfigure(0, weight=1)
         list_frame.grid_rowconfigure(0, weight=1)
 
-        # Style liste
         ls = ttk.Style()
         ls.configure("Art.Treeview",
                      background=Colors.BG_CARD,
@@ -419,10 +383,8 @@ class ArticleSearchWindow(ctk.CTkToplevel):
         self._list.grid(row=0, column=0, sticky="nsew", padx=(4, 0), pady=4)
         vsb.grid(row=0, column=1, sticky="ns", pady=4)
 
-        # Double-clic ou bouton sélectionner
         self._list.bind("<Double-1>", lambda e: self._confirm())
 
-        # Footer boutons
         foot = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
         foot.pack(fill="x")
 
@@ -466,7 +428,8 @@ class ArticleSearchWindow(ctk.CTkToplevel):
 class ModalInventaire(ctk.CTkToplevel):
     def __init__(self, master, on_save, db_get_cursor, db_commit,
                  article_map, magasin_map, current_user_id,
-                 mode="ajout", row_values=None, default_magasin_label=None, readonly=False):
+                 mode="ajout", row_values=None, default_magasin_label=None,
+                 readonly=False, calc_stock_fn=None):   # ← nouveau paramètre
         super().__init__(master)
         self._on_save        = on_save
         self._get_cursor     = db_get_cursor
@@ -480,10 +443,14 @@ class ModalInventaire(ctk.CTkToplevel):
         self._selected_article_id: int | None = None
         self._default_magasin_label = default_magasin_label
         self.readonly        = readonly
+        self._calc_stock_fn  = calc_stock_fn   # callable(idarticle, idunite, idmag) → float
 
         self.inv_id = row_values[0] if row_values else None
 
-        titre = "Nouvel inventaire" if mode == "ajout" else "Modifier l'inventaire"
+        if self.readonly:
+            titre = "Détails inventaire"
+        else:
+            titre = "Nouvel inventaire" if mode == "ajout" else "Modifier l'inventaire"
         self.title(titre)
         self.geometry("480x420")
         self.resizable(False, False)
@@ -510,13 +477,15 @@ class ModalInventaire(ctk.CTkToplevel):
     # ── UI ────────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # En-tête compact
         hdr = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT,
                             corner_radius=0, height=42)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        icon  = "➕" if self.mode == "ajout" else "✏️"
-        titre = "Nouvel inventaire" if self.mode == "ajout" else "Modifier l'inventaire"
+        if self.readonly:
+            icon, titre = "👁️", "Détails inventaire"
+        else:
+            icon  = "➕" if self.mode == "ajout" else "✏️"
+            titre = "Nouvel inventaire" if self.mode == "ajout" else "Modifier l'inventaire"
         ctk.CTkLabel(hdr, text=f"  {icon}  {titre}",
                      font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK,
                      anchor="w").pack(side="left", padx=16, fill="y")
@@ -540,7 +509,6 @@ class ModalInventaire(ctk.CTkToplevel):
                                    dropdown_fg_color=Colors.BG_CARD,
                                    font=Fonts.body(11))
 
-        # ── Ligne 0 : Article * (entry + bouton recherche) ────────────────
         lbl(0, "Article", required=True)
         art_row = ctk.CTkFrame(body, fg_color="transparent")
         art_row.grid(row=0, column=1, pady=3, sticky="ew")
@@ -563,19 +531,16 @@ class ModalInventaire(ctk.CTkToplevel):
         )
         self.btn_article_search.grid(row=0, column=1, padx=(4, 0))
 
-        # ── Ligne 1 : Unité * ─────────────────────────────────────────────
         lbl(1, "Unité", required=True)
         self.combo_unite = mk_combo([])
         self.combo_unite.grid(row=1, column=1, pady=3, sticky="ew")
 
-        # ── Ligne 2 : Magasin * ───────────────────────────────────────────
         lbl(2, "Magasin", required=True)
         self.combo_magasin = mk_combo(list(self.magasin_map.keys()))
         self.combo_magasin.grid(row=2, column=1, pady=3, sticky="ew")
         if self.mode == "ajout" and self._default_magasin_label in self.magasin_map:
             self.combo_magasin.set(self._default_magasin_label)
 
-        # ── Ligne 3 : Qté * ───────────────────────────────────────────────
         lbl(3, "Qté corrigée", required=True)
         self.entry_qte = ctk.CTkEntry(
             body, height=28, fg_color=Colors.BG_INPUT,
@@ -584,7 +549,6 @@ class ModalInventaire(ctk.CTkToplevel):
         )
         self.entry_qte.grid(row=3, column=1, pady=3, sticky="ew")
 
-        # ── Ligne 4 : Observation ─────────────────────────────────────────
         lbl(4, "Observation")
         self.textbox_obs = ctk.CTkTextbox(
             body, height=65, fg_color=Colors.BG_INPUT,
@@ -593,42 +557,35 @@ class ModalInventaire(ctk.CTkToplevel):
         )
         self.textbox_obs.grid(row=4, column=1, pady=3, sticky="ew")
 
-        # Note obligatoires
         ctk.CTkLabel(body, text="* Champs obligatoires",
                      font=Fonts.small(9), text_color=Colors.TEXT_MUTED
                      ).grid(row=5, column=0, columnspan=2, pady=(4, 0), sticky="w")
 
-        # Séparateur
         ctk.CTkFrame(body, height=1, fg_color=Colors.DIVIDER
                      ).grid(row=6, column=0, columnspan=2, pady=(8, 6), sticky="ew")
 
-        # Boutons
-        btn_row = ctk.CTkFrame(body, fg_color="transparent")
-        btn_row.grid(row=7, column=0, columnspan=2, sticky="e")
+        if not self.readonly:
+            btn_row = ctk.CTkFrame(body, fg_color="transparent")
+            btn_row.grid(row=7, column=0, columnspan=2, sticky="e")
 
-        ctk.CTkButton(btn_row, text="✕  Annuler", width=96, height=28,
-                      fg_color=Colors.CLOUDS, hover_color=Colors.SILVER,
-                      text_color=Colors.TEXT_PRIMARY,
-                      font=Fonts.bold(11), corner_radius=6,
-                      border_width=1, border_color=Colors.BORDER,
-                      command=self.destroy
-                      ).pack(side="left", padx=(0, 6))
+            ctk.CTkButton(
+                btn_row, text="✕  Annuler", width=96, height=28,
+                fg_color=Colors.CLOUDS, hover_color=Colors.SILVER,
+                text_color=Colors.TEXT_PRIMARY,
+                font=Fonts.bold(11), corner_radius=6,
+                border_width=1, border_color=Colors.BORDER,
+                command=self.destroy
+            ).pack(side="left", padx=(0, 6))
 
-        if self.mode == "modification":
-            self.btn_cancel_inv = ctk.CTkButton(btn_row, text="🚫  Annuler inv.", width=120, height=28,
-                                                 fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
-                                                 font=Fonts.bold(11), corner_radius=6,
-                                                 command=lambda: self._save(status_override="Annulé")
-                                                 )
-            self.btn_cancel_inv.pack(side="left", padx=(0, 6))
-
-        self.btn_save = ctk.CTkButton(btn_row, text="💾  Enregistrer", width=120, height=28,
-                                      fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
-                                      text_color=Colors.TEXT_ON_DARK,
-                                      font=Fonts.bold(11), corner_radius=6,
-                                      command=self._save
-                                      )
-        self.btn_save.pack(side="left")
+            if self.mode == "ajout":
+                self.btn_save = ctk.CTkButton(
+                    btn_row, text="💾  Enregistrer", width=120, height=28,
+                    fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
+                    text_color=Colors.TEXT_ON_DARK,
+                    font=Fonts.bold(11), corner_radius=6,
+                    command=self._save
+                )
+                self.btn_save.pack(side="left")
 
     def _apply_readonly_state(self):
         widgets = [
@@ -643,12 +600,14 @@ class ModalInventaire(ctk.CTkToplevel):
                 widget.configure(state="disabled")
             except Exception:
                 pass
-
         self.textbox_obs.configure(state="disabled")
-        self.btn_save.configure(state="disabled")
-        btn_cancel = getattr(self, "btn_cancel_inv", None)
-        if btn_cancel:
-            btn_cancel.configure(state="disabled")
+        btn_save = getattr(self, "btn_save", None)
+        if btn_save:
+            try:
+                btn_save.configure(state="disabled")
+            except Exception:
+                pass
+
     # ── Recherche article ─────────────────────────────────────────────────────
 
     def _open_article_search(self):
@@ -684,9 +643,11 @@ class ModalInventaire(ctk.CTkToplevel):
 
     def _prefill(self):
         rv = self.row_values
-        # rv index: 0=id, 1=magasin, 2=user, 3=datetime,
-        #           4=article, 5=unite, 6=magasin_stock,
-        #           7=qte, 8=qte_stock, 9=obs, 10=statut, 11=maj, 12=verificateur
+        # Indices treeview après ajout de la colonne "Différence" :
+        # 0=id, 1=magasin, 2=user, 3=datetime,
+        # 4=article, 5=unite, 6=magasin_stock,
+        # 7=qte_corrigee, 8=qte_en_stock, 9=difference,
+        # 10=obs, 11=statut, 12=maj, 13=verificateur
         art_label = rv[4] if rv[4] != "-" else ""
         if art_label and art_label in self.article_map:
             art_id = self.article_map[art_label]
@@ -704,17 +665,20 @@ class ModalInventaire(ctk.CTkToplevel):
         if rv[7] and rv[7] != "-":
             self.entry_qte.delete(0, "end")
             self.entry_qte.insert(0, rv[7])
-        if rv[9] and rv[9] != "-":
-            self.textbox_obs.insert("1.0", rv[9])
+        if rv[10] and rv[10] != "-":    # ← obs maintenant en position 10
+            self.textbox_obs.insert("1.0", rv[10])
 
     def _save(self, status_override=None):
         if self.readonly:
-            messagebox.showinfo(
-                "Lecture seule",
-                "Cet inventaire est déjà vérifié et ne peut plus être modifié.",
-                parent=self
-            )
+            messagebox.showinfo("Lecture seule",
+                                "Cet inventaire est en lecture seule.", parent=self)
             return
+        if self.mode != "ajout":
+            messagebox.showinfo("Action désactivée",
+                                "La modification ou l'annulation d'un inventaire "
+                                "déjà ajouté est désactivée.", parent=self)
+            return
+
         art_label = self.entry_article.get().strip()
         unite     = self.combo_unite.get().strip()
         mag       = self.combo_magasin.get().strip()
@@ -736,27 +700,30 @@ class ModalInventaire(ctk.CTkToplevel):
         statut = status_override or "Non vérifié"
         art_id = self._selected_article_id or self.article_map.get(art_label)
 
+        idunite = self.unite_map.get(unite)
+        idmag   = self.magasin_map.get(mag)
+
+        # ── Calcul du stock réel à l'instant T ───────────────────────────
+        qt_stock = 0.0
+        if self._calc_stock_fn and art_id and idunite and idmag:
+            try:
+                result = self._calc_stock_fn(art_id, idunite, idmag)
+                qt_stock = float(result) if result is not None else 0.0
+            except Exception:
+                qt_stock = 0.0
+
         try:
             cur = self._get_cursor()
             if self.mode == "ajout":
                 cur.execute(
                     """INSERT INTO tb_inventaire_temporaire
-                       (date_creation,date_mise_ajour,idarticle,idunite,idmagasin,
-                        qte_corrige,iduser,iduserverificateur,statut,deleted,observation)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s)""",
-                    (now, now, art_id, self.unite_map.get(unite),
-                     self.magasin_map.get(mag), qte,
+                       (date_creation, date_mise_ajour, idarticle, idunite, idmagasin,
+                        qte_corrige, qt_stock, iduser, iduserverificateur,
+                        statut, deleted, observation)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,0,%s)""",
+                    (now, now, art_id, idunite, idmag,
+                     qte, qt_stock,
                      self.current_user_id, None, statut, obs)
-                )
-            else:
-                cur.execute(
-                    """UPDATE tb_inventaire_temporaire
-                       SET date_mise_ajour=%s,idarticle=%s,idunite=%s,idmagasin=%s,
-                           qte_corrige=%s,statut=%s,observation=%s
-                       WHERE id=%s""",
-                    (now, art_id, self.unite_map.get(unite),
-                     self.magasin_map.get(mag), qte, statut, obs,
-                     self.inv_id)
                 )
             self._commit()
             messagebox.showinfo("✅ Succès", "Inventaire enregistré.", parent=self)
@@ -779,7 +746,7 @@ class ModalVerification(ctk.CTkToplevel):
         self._on_refresh = on_refresh
 
         self.title("Vérification inventaire")
-        self.geometry("520x360")
+        self.geometry("520x430")
         self.resizable(False, False)
         self.configure(fg_color=Colors.BG_PAGE)
         self.grab_set()
@@ -824,33 +791,39 @@ class ModalVerification(ctk.CTkToplevel):
                          text_color=Colors.TEXT_PRIMARY, anchor="w"
                          ).grid(row=row, column=1, pady=3, sticky="w")
 
-        # row_values indexes:
-        # 0=id, 1=magasin, 2=user, 3=datetime, 4=article, 5=unite,
-        # 6=magasin_stock, 7=qte, 8=qte_stock, 9=obs, 10=statut, 11=maj, 12=verificateur
-        lbl(0, "Article");     val(0, self.row_values[4])
-        lbl(1, "Unité");       val(1, self.row_values[5])
-        lbl(2, "Magasin");     val(2, self.row_values[1])
-        lbl(3, "Qté corrigée");val(3, self.row_values[7])
-        lbl(4, "Qté en stock");val(4, self.row_values[8])
+        # Indices treeview après ajout de la colonne "Différence" :
+        # 0=id, 1=magasin, 2=user, 3=datetime,
+        # 4=article, 5=unite, 6=magasin_stock,
+        # 7=qte_corrigee, 8=qte_en_stock, 9=difference,
+        # 10=obs, 11=statut, 12=maj, 13=verificateur
+        lbl(0, "Article");      val(0, self.row_values[4])
+        lbl(1, "Unité");        val(1, self.row_values[5])
+        lbl(2, "Magasin");      val(2, self.row_values[1])
+        lbl(3, "Qté corrigée"); val(3, self.row_values[7])
+        lbl(4, "Qté en stock"); val(4, self.row_values[8])
+        lbl(5, "Différence");   val(5, self.row_values[9])   # ← nouveau
 
-        lbl(5, "Observation")
+        lbl(6, "Observation")
         self.obs = ctk.CTkTextbox(
             body, height=70, fg_color=Colors.BG_INPUT,
             border_color=Colors.BORDER, border_width=1,
             font=Fonts.body(11), corner_radius=6
         )
-        self.obs.grid(row=5, column=1, pady=3, sticky="ew")
-        self.obs.insert("1.0", self.row_values[9] if self.row_values[9] != "-" else "")
+        self.obs.grid(row=6, column=1, pady=3, sticky="ew")
+        obs_val = self.row_values[10] if self.row_values[10] != "-" else ""  # ← index 10
+        self.obs.insert("1.0", obs_val)
         self.obs.configure(state="disabled")
 
-        self.var_verif = ctk.BooleanVar(value=(self.row_values[10] == "Vérifié"))
-        if self.row_values[10] != "Annulé":
-            ctk.CTkCheckBox(
-                body, text="Marquer comme vérifié",
-                variable=self.var_verif, command=self._toggle_verif,
-                fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
-                text_color=Colors.TEXT_PRIMARY, font=Fonts.bold(11)
-            ).grid(row=6, column=1, pady=(8, 0), sticky="w")
+        statut_val = self.row_values[11]   # ← index 11
+        self.var_verif = ctk.BooleanVar(value=(statut_val == "Vérifié"))
+        cb_state = "disabled" if statut_val == "Annulé" else "normal"
+        ctk.CTkCheckBox(
+            body, text="Marquer comme vérifié",
+            variable=self.var_verif, command=self._toggle_verif,
+            fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
+            text_color=Colors.TEXT_PRIMARY, font=Fonts.bold(11),
+            state=cb_state,
+        ).grid(row=7, column=1, pady=(8, 0), sticky="w")
 
         ctk.CTkButton(
             body, text="Fermer", width=100, height=28,
@@ -858,7 +831,7 @@ class ModalVerification(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY, font=Fonts.bold(11),
             border_width=1, border_color=Colors.BORDER,
             command=self.destroy
-        ).grid(row=7, column=1, pady=(10, 0), sticky="e")
+        ).grid(row=8, column=1, pady=(10, 0), sticky="e")
 
     def _toggle_verif(self):
         statut = "Vérifié" if self.var_verif.get() else "Non vérifié"
@@ -913,7 +886,7 @@ class PageInventaireJour(ctk.CTkFrame):
         self._build_footer()
 
         self._load_filter_sources()
-        self.load_inventaires()
+        self.after(0, self.load_inventaires)
 
     def _resolve_user_id(self, session_data):
         if isinstance(session_data, dict):
@@ -974,7 +947,6 @@ class PageInventaireJour(ctk.CTkFrame):
                                    button_color=Colors.PRIMARY,
                                    font=Fonts.body(11))
 
-        # ── Ligne 0 ───────────────────────────────────────────────────────
         left_frame = ctk.CTkFrame(fb, fg_color="transparent")
         left_frame.grid(row=0, column=0, sticky="w", padx=10, pady=5)
 
@@ -985,6 +957,10 @@ class PageInventaireJour(ctk.CTkFrame):
         lbl(left_frame, "Fin :").pack(side="left", padx=(0, 4))
         self.date_to = DateEntry(left_frame, width=140)
         self.date_to.pack(side="left", padx=(0, 10))
+
+        today_str = date.today().strftime("%Y-%m-%d")
+        self.date_from.set(today_str)
+        self.date_to.set(today_str)
 
         lbl(left_frame, "Magasin :").pack(side="left", padx=(0, 4))
         self.magasin_filter = mk_combo(left_frame, ["Tous"])
@@ -1017,7 +993,6 @@ class PageInventaireJour(ctk.CTkFrame):
                 btn.configure(border_width=1, border_color=Colors.BORDER)
             btn.pack(side="left", padx=(0, 5))
 
-        # ── Ligne 1 ───────────────────────────────────────────────────────
         search_frame = ctk.CTkFrame(fb, fg_color="transparent")
         search_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
         lbl(search_frame, "Recherche :").pack(side="left", padx=(0, 10))
@@ -1030,7 +1005,7 @@ class PageInventaireJour(ctk.CTkFrame):
         self.search_entry.pack(side="left", fill="x", expand=True)
         self.search_entry.bind("<KeyRelease>", lambda e: self.load_inventaires())
 
-    # ── Tableau avec badge statut ─────────────────────────────────────────────
+    # ── Tableau ───────────────────────────────────────────────────────────────
 
     def _build_table(self):
         card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=8)
@@ -1038,40 +1013,44 @@ class PageInventaireJour(ctk.CTkFrame):
         card.grid_columnconfigure(0, weight=1)
         card.grid_rowconfigure(0, weight=1)
 
-        # Colonnes : ID et Magasin cachés, Statut affiché comme badge texte
+        # ── Colonnes ─────────────────────────────────────────────────────
+        # "Qté en Stock" et "Différence" : visibles uniquement en mode vérification
         cols = ("ID", "Magasin", "Utilisateur", "Date/Heure",
                 "Article", "Unité", "Magasin stock",
-                "Qté corrigée", "Qté en Stock", "Observation",
+                "Qté corrigée", "Qté en Stock", "Différence", "Observation",
                 "Statut", "Dernière MàJ", "Vérificateur")
 
         self.tree = ttk.Treeview(card, columns=cols, show="headings",
                                   style="Inv.Treeview", selectmode="browse")
 
-        verif_qte_stock_w = 90 if self.mode == "verification" else 0
-        verif_user_w = 120 if self.mode == "verification" else 0
+        # Largeurs selon mode
+        verif_qte_stock_w = 90  if self.mode == "verification" else 0
+        verif_diff_w      = 85  if self.mode == "verification" else 0
+        verif_user_w      = 120 if self.mode == "verification" else 0
+
         for col, w, anc in [
-            ("ID",           0,   "center"),
-            ("Magasin",      0,   "w"),
-            ("Utilisateur",  118, "w"),
-            ("Date/Heure",   118, "center"),
-            ("Article",        160, "w"),
-            ("Unité",          80,  "center"),
-            ("Magasin stock",  120, "w"),
-            ("Qté corrigée",   80,  "center"),
-            ("Qté en Stock",   verif_qte_stock_w,  "center"),
-            ("Observation",    150, "w"),
-            ("Statut",         100, "center"),
-            ("Dernière MàJ",   118, "center"),
-            ("Vérificateur",   verif_user_w, "w"),
+            ("ID",           0,               "center"),
+            ("Magasin",      0,               "w"),
+            ("Utilisateur",  118,             "w"),
+            ("Date/Heure",   118,             "center"),
+            ("Article",      160,             "w"),
+            ("Unité",        80,              "center"),
+            ("Magasin stock",120,             "w"),
+            ("Qté corrigée", 80,              "center"),
+            ("Qté en Stock", verif_qte_stock_w, "center"),
+            ("Différence",   verif_diff_w,    "center"),  # ← nouveau
+            ("Observation",  150,             "w"),
+            ("Statut",       100,             "center"),
+            ("Dernière MàJ", 118,             "center"),
+            ("Vérificateur", verif_user_w,    "w"),
         ]:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor=anc,
                               minwidth=0 if w == 0 else 30,
                               stretch=(w != 0))
 
-        # Tags alternance fond + couleur par statut (foreground pour le badge texte)
-        self.tree.tag_configure("even", background=Colors.BG_CARD)
-        self.tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
+        self.tree.tag_configure("even",      background=Colors.BG_CARD)
+        self.tree.tag_configure("odd",       background=Colors.BG_ROW_ALT)
         self.tree.tag_configure("st_ok",
                                 foreground=Colors.SUCCESS_TEXT,
                                 background=Colors.SUCCESS_LIGHT)
@@ -1090,16 +1069,14 @@ class PageInventaireJour(ctk.CTkFrame):
         hsb.grid(row=1, column=0, sticky="ew", padx=(4, 0))
         self.tree.bind("<Double-1>", self._on_double_click)
 
-    # ── Footer stats bien aligné ──────────────────────────────────────────────
+    # ── Footer ────────────────────────────────────────────────────────────────
 
     def _build_footer(self):
         footer = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=8)
         footer.grid(row=3, column=0, padx=8, pady=(0, 6), sticky="ew")
-        # Poids : stats à gauche, bouton à droite
         footer.grid_columnconfigure(1, weight=0)
-        footer.grid_columnconfigure(2, weight=1)   # spacer
+        footer.grid_columnconfigure(2, weight=1)
 
-        # ── Bloc stats groupé ─────────────────────────────────────────────
         stats_frame = ctk.CTkFrame(footer, fg_color="transparent")
         stats_frame.grid(row=0, column=0, padx=(10, 0), pady=6, sticky="w")
 
@@ -1111,22 +1088,17 @@ class PageInventaireJour(ctk.CTkFrame):
             ("annule",      "🔴 Annulé",       Colors.DANGER_TEXT),
         ]
         for i, (key, label, color) in enumerate(stat_defs):
-            # Chaque stat = une mini-card inline
             cell = ctk.CTkFrame(stats_frame, fg_color=Colors.BG_PAGE,
                                 corner_radius=6)
             cell.pack(side="left", padx=(0 if i == 0 else 6, 0))
-
             ctk.CTkLabel(cell, text=label,
-                         font=Fonts.label(10), text_color=color,
-                         anchor="w"
+                         font=Fonts.label(10), text_color=color, anchor="w"
                          ).pack(side="left", padx=(8, 3), pady=4)
-
             val_lbl = ctk.CTkLabel(cell, text="0",
                                    font=Fonts.bold(12), text_color=color)
             val_lbl.pack(side="left", padx=(0, 8), pady=4)
             self._footer_labels[key] = val_lbl
 
-        # ── Bouton Nouveau à droite ───────────────────────────────────────
         if self.mode != "verification":
             ctk.CTkButton(footer, text="➕  Nouvel inventaire",
                           width=150, height=28,
@@ -1210,12 +1182,21 @@ class PageInventaireJour(ctk.CTkFrame):
             if st and st != "Tous":
                 where.append("t.statut=%s"); params.append(st)
 
+            # ── qt_stock ajouté au SELECT ─────────────────────────────────
+            # Résultat row[] :
+            #   0=id, 1=magasin, 2=user, 3=date_creation,
+            #   4=article, 5=unite, 6=magasin_stock,
+            #   7=qte_corrige, 8=qt_stock,   ← NOUVEAU
+            #   9=observation, 10=statut, 11=date_mise_ajour,
+            #   12=verificateur, 13=idarticle, 14=idunite, 15=idmag
             cur.execute(f"""
                 SELECT t.id, m_inv.designationmag,
                        COALESCE(u.username, u.nomuser||' '||u.prenomuser,'Utilisateur'),
                        t.date_creation, a.designation, un.designationunite,
                        COALESCE(m_stock.designationmag, '-') AS magasin_stock,
-                       t.qte_corrige, t.observation, t.statut, t.date_mise_ajour,
+                       t.qte_corrige,
+                       COALESCE(t.qt_stock, 0)              AS qt_stock,
+                       t.observation, t.statut, t.date_mise_ajour,
                        COALESCE(uv.username, uv.nomuser||' '||uv.prenomuser, '-') AS verificateur,
                        t.idarticle, t.idunite, t.idmagasin
                 FROM tb_inventaire_temporaire t
@@ -1237,24 +1218,53 @@ class PageInventaireJour(ctk.CTkFrame):
             "Non vérifié": "st_wait",
             "Annulé":      "st_cancel",
         }
+
         for idx, row in enumerate(rows):
-            statut  = row[9] or "Non vérifié"
+            # row[10] = statut (décalé après ajout de qt_stock en [8])
+            statut  = row[10] or "Non vérifié"
             st_tag  = STATUT_TAG_MAP.get(statut, "st_wait")
-            alt_tag = "even" if idx % 2 == 0 else "odd"
-            qte_stock = self._calc_stock_article(row[12], row[13], row[14])
-            qte_stock_txt = self._fmt_num(qte_stock) if qte_stock is not None else "-"
+
             qte_corrige_txt = self._fmt_num(row[7])
-            # Le tag statut surcharge la couleur de fond + foreground de toute la ligne
+
+            # ── Qté en Stock ──────────────────────────────────────────────
+            # Mode vérification : valeur figée (qt_stock stocké en BDD)
+            # Mode normal       : recalcul en temps réel
+            if self.mode == "verification":
+                qte_stock_val = float(row[8]) if row[8] is not None else 0.0
+                qte_stock_txt = self._fmt_num(qte_stock_val)
+            else:
+                qte_stock_val_calc = self._calc_stock_article(row[13], row[14], row[15])
+                qte_stock_val      = qte_stock_val_calc if qte_stock_val_calc is not None else 0.0
+                qte_stock_txt      = self._fmt_num(qte_stock_val)
+
+            # ── Différence : visible uniquement en mode vérification ──────
+            if self.mode == "verification":
+                try:
+                    diff = float(row[7]) - qte_stock_val
+                    if diff > 0:
+                        diff_txt = f"+{self._fmt_num(diff)}"
+                    else:
+                        diff_txt = self._fmt_num(diff)   # déjà négatif
+                except Exception:
+                    diff_txt = "-"
+            else:
+                diff_txt = ""
+
             self.tree.insert("", "end", tags=(st_tag,), values=(
-                row[0], self._safe(row[1]),
-                self._safe(row[2]), self._fmt_dt(row[3]),
-                self._safe(row[4]), self._safe(row[5]),
-                self._safe(row[6]), qte_corrige_txt,
-                qte_stock_txt,
-                self._safe(row[8]),
-                statut,
-                self._fmt_dt(row[10]),
-                self._safe(row[11]),
+                row[0],                    # 0  ID
+                self._safe(row[1]),        # 1  Magasin
+                self._safe(row[2]),        # 2  Utilisateur
+                self._fmt_dt(row[3]),      # 3  Date/Heure
+                self._safe(row[4]),        # 4  Article
+                self._safe(row[5]),        # 5  Unité
+                self._safe(row[6]),        # 6  Magasin stock
+                qte_corrige_txt,           # 7  Qté corrigée
+                qte_stock_txt,             # 8  Qté en Stock
+                diff_txt,                  # 9  Différence  ← nouveau
+                self._safe(row[9]),        # 10 Observation (row[9] après décalage SQL)
+                statut,                    # 11 Statut
+                self._fmt_dt(row[11]),     # 12 Dernière MàJ
+                self._safe(row[12]),       # 13 Vérificateur
             ))
 
         self._update_footer(rows)
@@ -1270,7 +1280,8 @@ class PageInventaireJour(ctk.CTkFrame):
             magasin_map=self.magasin_map,
             current_user_id=self.current_user_id,
             mode="ajout",
-            default_magasin_label=self.current_user_magasin_label
+            default_magasin_label=self.current_user_magasin_label,
+            calc_stock_fn=self._calc_stock_article,    # ← passage de la fonction
         )
 
     def _on_double_click(self, event):
@@ -1286,12 +1297,6 @@ class PageInventaireJour(ctk.CTkFrame):
                 on_refresh=self.load_inventaires,
             )
             return
-        statut = rv[10] if len(rv) > 10 else ""
-        if isinstance(statut, str):
-            statut = statut.strip()
-        else:
-            statut = ""
-        readonly = statut == "Vérifié"
         ModalInventaire(
             self, on_save=self.load_inventaires,
             db_get_cursor=db_manager.get_cursor,
@@ -1300,7 +1305,7 @@ class PageInventaireJour(ctk.CTkFrame):
             magasin_map=self.magasin_map,
             current_user_id=self.current_user_id,
             mode="modification", row_values=rv,
-            readonly=readonly
+            readonly=True
         )
 
     def _reset_filters(self):
@@ -1319,7 +1324,7 @@ class PageInventaireJour(ctk.CTkFrame):
             messagebox.showinfo("Info", "Aucune donnée."); return
         df = pd.DataFrame(data, columns=[
             "Utilisateur", "Date/Heure", "Article", "Unité", "Magasin stock",
-            "Qté corrigée", "Qté en Stock", "Observation",
+            "Qté corrigée", "Qté en Stock", "Différence", "Observation",    # ← ajout
             "Statut", "Dernière MàJ", "Vérificateur"])
         p = filedialog.asksaveasfilename(defaultextension=".xlsx",
                                           filetypes=[("Excel", "*.xlsx")])
@@ -1331,8 +1336,9 @@ class PageInventaireJour(ctk.CTkFrame):
 
     def _update_footer(self, rows):
         total       = len(rows)
-        verifie     = sum(1 for r in rows if r[9] == "Vérifié")
-        annule      = sum(1 for r in rows if r[9] == "Annulé")
+        # row[10] = statut (décalé après ajout de qt_stock)
+        verifie     = sum(1 for r in rows if r[10] == "Vérifié")
+        annule      = sum(1 for r in rows if r[10] == "Annulé")
         non_verifie = total - verifie - annule
         self._footer_labels["total"].configure(text=str(total))
         self._footer_labels["verifie"].configure(text=str(verifie))
@@ -1541,7 +1547,6 @@ class PageInventaireJour(ctk.CTkFrame):
             return "-"
         try:
             s = f"{float(value):,.2f}"
-            # Swap separators: thousands '.' and decimal ','
             return s.replace(",", "X").replace(".", ",").replace("X", ".")
         except Exception:
             return self._safe(value)
