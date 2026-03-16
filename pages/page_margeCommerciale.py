@@ -97,6 +97,7 @@ class PageStock(ctk.CTkFrame):
             "Prix d'achat": False,
             "Frais/Charges": False,
             "Marge (%)": False,
+            "Fournisseur": False,          # ← caché par défaut
         }
         self._col_widths         = {}
         self._col_menu           = None
@@ -118,7 +119,7 @@ class PageStock(ctk.CTkFrame):
             size=size, weight=weight)
 
     # ====================================================================
-    # setup_ui — REFONTE DESIGN UNIQUEMENT
+    # setup_ui
     # ====================================================================
 
     def setup_ui(self):
@@ -194,7 +195,6 @@ class PageStock(ctk.CTkFrame):
             height=30, width=110, font=self._f(10)
         ).pack(side="left", padx=(0, 4))
 
-        # Filtre "Afficher" (sélection avec cases à cocher)
         ctk.CTkLabel(
             inner, text="Afficher :", font=self._f(10),
             text_color=C.TEXT_SECONDARY
@@ -210,7 +210,6 @@ class PageStock(ctk.CTkFrame):
         )
         btn_afficher.pack(side="left", padx=(0, 8))
 
-        # Boutons actions (côté droit)
         self.btn_export = ctk.CTkButton(
             inner, text="📊  Export Excel",
             command=self.exporter_stocks,
@@ -261,11 +260,10 @@ class PageStock(ctk.CTkFrame):
         self.label_marge_beneficiaire.pack(side="right")
 
     # ====================================================================
-    # LOGIQUE MÉTIER — inchangée
+    # LOGIQUE MÉTIER
     # ====================================================================
 
     def connect_db(self):
-        """Connexion à la base de données PostgreSQL"""
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
@@ -283,7 +281,6 @@ class PageStock(ctk.CTkFrame):
             return None
 
     def formater_nombre(self, nombre):
-        """Formate les nombres pour l'affichage (ex: 1.250,00 ou 1.250)"""
         try:
             v = float(nombre)
             if v % 1 == 0:
@@ -297,14 +294,12 @@ class PageStock(ctk.CTkFrame):
             return "0,00"
 
     def formater_pourcentage(self, valeur):
-        """Formate un pourcentage pour l'affichage (ex: 12,50%)."""
         try:
             return f"{float(valeur):,.2f}%".replace(',', ' ').replace('.', ',').replace(' ', '.')
         except:
             return "0,00%"
 
     def parser_nombre(self, texte):
-        """Convertit un nombre formaté FR (1.234,56) en float."""
         try:
             s = str(texte).strip().replace('%', '')
             s = s.replace('.', '').replace(',', '.')
@@ -313,14 +308,15 @@ class PageStock(ctk.CTkFrame):
             return 0.0
 
     def creer_treeview(self):
-        """Initialise le tableau avec colonnes larges et barres de défilement"""
         if self.tree:
             self.tree.destroy()
 
-        colonnes_fixes    = (
+        # ── "Fournisseur" inséré en position 3, juste après "Unité" ──────
+        colonnes_fixes = (
             "Code",
             "Désignation",
             "Unité",
+            "Fournisseur",          # ← nouveau
             "Prix d'achat",
             "Frais/Charges",
             "Prix de revient",
@@ -339,16 +335,16 @@ class PageStock(ctk.CTkFrame):
             style="Stock.Treeview",
             selectmode="browse")
 
-        self.tree.tag_configure("even", background=C.BG_CARD,   foreground=C.TEXT_PRIMARY)
-        self.tree.tag_configure("odd",  background="#F0F4F8",   foreground=C.TEXT_PRIMARY)
-        self.tree.tag_configure("marge_loss_even", background=C.BG_CARD, foreground="#E74C3C")
-        self.tree.tag_configure("marge_loss_odd", background="#F0F4F8", foreground="#E74C3C")
-        self.tree.tag_configure("marge_low_even", background=C.BG_CARD, foreground="#E67E22")
-        self.tree.tag_configure("marge_low_odd", background="#F0F4F8", foreground="#E67E22")
-        self.tree.tag_configure("marge_mid_even", background=C.BG_CARD, foreground="#B7950B")
-        self.tree.tag_configure("marge_mid_odd", background="#F0F4F8", foreground="#B7950B")
-        self.tree.tag_configure("marge_good_even", background=C.BG_CARD, foreground="#1E8449")
-        self.tree.tag_configure("marge_good_odd", background="#F0F4F8", foreground="#1E8449")
+        self.tree.tag_configure("even",           background=C.BG_CARD,  foreground=C.TEXT_PRIMARY)
+        self.tree.tag_configure("odd",            background="#F0F4F8",  foreground=C.TEXT_PRIMARY)
+        self.tree.tag_configure("marge_loss_even",background=C.BG_CARD,  foreground="#E74C3C")
+        self.tree.tag_configure("marge_loss_odd", background="#F0F4F8",  foreground="#E74C3C")
+        self.tree.tag_configure("marge_low_even", background=C.BG_CARD,  foreground="#E67E22")
+        self.tree.tag_configure("marge_low_odd",  background="#F0F4F8",  foreground="#E67E22")
+        self.tree.tag_configure("marge_mid_even", background=C.BG_CARD,  foreground="#B7950B")
+        self.tree.tag_configure("marge_mid_odd",  background="#F0F4F8",  foreground="#B7950B")
+        self.tree.tag_configure("marge_good_even",background=C.BG_CARD,  foreground="#1E8449")
+        self.tree.tag_configure("marge_good_odd", background="#F0F4F8",  foreground="#1E8449")
 
         self.tree.bind("<Double-1>", self.ouvrir_inventaire_double_clic)
 
@@ -366,6 +362,8 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=350, anchor="w",      minwidth=200)
             elif col == "Code":
                 self.tree.column(col, width=150, anchor="center")
+            elif col == "Fournisseur":
+                self.tree.column(col, width=180, anchor="w",      minwidth=120)
             elif col in ("Prix d'achat", "Frais/Charges", "Prix de revient",
                          "Prix de vente", "Marge Unitaire", "Marge (%)", "Marge Total"):
                 self.tree.column(col, width=120, anchor="e")
@@ -414,7 +412,6 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=0, minwidth=0, stretch=False)
                 self.tree.heading(col, text="")
 
-        # Magasins: toujours cachés
         for col in self._magasin_cols:
             self.tree.column(col, width=0, minwidth=0, stretch=False)
             self.tree.heading(col, text="")
@@ -471,7 +468,6 @@ class PageStock(ctk.CTkFrame):
         self._apply_column_visibility()
 
     def charger_stocks_avec_progression(self):
-        """Charge les stocks avec une fenêtre de progression"""
         progress_window = ctk.CTkToplevel(self.root)
         progress_window.title("Chargement en cours...")
         progress_window.geometry("400x150")
@@ -499,7 +495,6 @@ class PageStock(ctk.CTkFrame):
         threading.Thread(target=charger_en_arriere_plan, daemon=True).start()
 
     def charger_stocks(self):
-        """Charge en 2 phases: articles/unites puis stocks calculés."""
         self.creer_treeview()
         self._charger_articles_unites_initiaux()
         threading.Thread(target=self._charger_stocks_calcules_async, daemon=True).start()
@@ -511,11 +506,24 @@ class PageStock(ctk.CTkFrame):
             return
         try:
             cursor = conn.cursor()
+            # ── Sous-requête scalaire : dernier fournisseur par idunite ────
             cursor.execute("""
                 SELECT
                     u.codearticle,
                     a.designation,
                     u.designationunite,
+                    COALESCE(
+                        (
+                            SELECT f.nomfrs
+                            FROM tb_commandedetail cd2
+                            INNER JOIN tb_fournisseur f ON f.idfrs = cd2.idfrs
+                            WHERE cd2.idunite = u.idunite
+                              AND cd2.idfrs IS NOT NULL
+                            ORDER BY cd2.id DESC
+                            LIMIT 1
+                        ),
+                        'Aucun Fournisseur'
+                    ) AS dernier_fournisseur,
                     COALESCE(pc.prix_achat, 0) AS prix_achat,
                     COALESCE(fc.frais_charge, 0) AS frais_charge,
                     COALESCE(dp.prix, 0) AS prix
@@ -544,28 +552,29 @@ class PageStock(ctk.CTkFrame):
             """)
             base_rows = cursor.fetchall()
             self.all_data = []
-            for code, designation, unite, prix_achat, frais_charge, prix in base_rows:
-                prix_achat_val = float(prix_achat or 0)
+            for code, designation, unite, fournisseur, prix_achat, frais_charge, prix in base_rows:
+                prix_achat_val   = float(prix_achat   or 0)
                 frais_charge_val = float(frais_charge or 0)
                 prix_revient_val = prix_achat_val + frais_charge_val
-                prix_vente_val = float(prix or 0)
-                marge_benef = prix_vente_val - prix_revient_val
-                marge_pct = ((marge_benef / prix_revient_val) * 100) if prix_revient_val != 0 else 100.0
+                prix_vente_val   = float(prix          or 0)
+                marge_benef      = prix_vente_val - prix_revient_val
+                marge_pct        = ((marge_benef / prix_revient_val) * 100) if prix_revient_val != 0 else 100.0
                 valeurs = [
                     code,
                     designation,
                     unite,
-                    self.formater_nombre(prix_achat_val),
-                    self.formater_nombre(frais_charge_val),
-                    self.formater_nombre(prix_revient_val),
-                    self.formater_nombre(prix_vente_val),
-                    self.formater_nombre(marge_benef),
-                    self.formater_pourcentage(marge_pct)
+                    fournisseur,                              # ← position 3
+                    self.formater_nombre(prix_achat_val),    # position 4
+                    self.formater_nombre(frais_charge_val),  # position 5
+                    self.formater_nombre(prix_revient_val),  # position 6
+                    self.formater_nombre(prix_vente_val),    # position 7
+                    self.formater_nombre(marge_benef),       # position 8
+                    self.formater_pourcentage(marge_pct),    # position 9
                 ]
                 for _idmag, _nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(0))
-                valeurs.append(self.formater_nombre(0))
-                valeurs.append(self.formater_nombre(0))
+                valeurs.append(self.formater_nombre(0))   # Total
+                valeurs.append(self.formater_nombre(0))   # Marge Total
                 self.all_data.append((valeurs, 0.0))
             self.recharger_treeview()
         except Exception as e:
@@ -575,7 +584,6 @@ class PageStock(ctk.CTkFrame):
             conn.close()
 
     def _charger_stocks_calcules_async(self):
-        """Calcule les stocks en arrière-plan et applique le résultat sur l'UI."""
         try:
             all_data_calculee = self._calculer_all_data_stocks()
             self.after(0, lambda: self._appliquer_all_data_calculee(all_data_calculee))
@@ -583,7 +591,7 @@ class PageStock(ctk.CTkFrame):
             self.after(0, lambda: messagebox.showerror("Erreur de chargement", f"Détails : {str(e)}"))
 
     def _calculer_all_data_stocks(self):
-        """Exécute la requête consolidée et prépare all_data."""
+        """Exécute la requête consolidée et prépare all_data (avec Fournisseur)."""
         conn = self.connect_db()
         if not conn:
             return []
@@ -670,11 +678,22 @@ class PageStock(ctk.CTkFrame):
                 FROM tb_commandedetail
                 WHERE montant_charge IS NOT NULL
                 GROUP BY idunite
+            ),
+            dernier_fournisseur_unite AS (
+                -- Dernier fournisseur (par id DESC) pour chaque idunite
+                SELECT DISTINCT ON (cd.idunite)
+                    cd.idunite,
+                    f.nomfrs
+                FROM tb_commandedetail cd
+                INNER JOIN tb_fournisseur f ON f.idfrs = cd.idfrs
+                WHERE cd.idfrs IS NOT NULL
+                ORDER BY cd.idunite, cd.id DESC
             )
             SELECT u.codearticle, a.designation, u.designationunite,
-                COALESCE(pau.prix_achat, 0) AS prix_achat,
-                COALESCE(fcu.frais_charge, 0) AS frais_charge,
-                COALESCE(dp.prix, 0) AS prix,
+                COALESCE(dfu.nomfrs, 'Aucun Fournisseur')         AS dernier_fournisseur,
+                COALESCE(pau.prix_achat, 0)          AS prix_achat,
+                COALESCE(fcu.frais_charge, 0)        AS frais_charge,
+                COALESCE(dp.prix, 0)                 AS prix,
                 u.idarticle, u.idunite, m.idmag,
                 COALESCE(sb.solde_base,0) / NULLIF(COALESCE(uc.coeff_hierarchique,1),0) as stock
             FROM tb_unite u
@@ -685,24 +704,28 @@ class PageStock(ctk.CTkFrame):
             LEFT JOIN dernier_prix dp ON dp.idunite = u.idunite
             LEFT JOIN prix_achat_unite pau ON pau.idunite = u.idunite
             LEFT JOIN frais_charge_unite fcu ON fcu.idunite = u.idunite
+            LEFT JOIN dernier_fournisseur_unite dfu ON dfu.idunite = u.idunite
             WHERE a.deleted=0 AND m.deleted=0
             ORDER BY a.designation ASC, u.codearticle ASC
             """
             cursor.execute(query_optimisee)
             resultats = cursor.fetchall()
             articles_dict = {}
-            for code, desig, unite, prix_achat, frais_charge, prix, idarticle, idunite, idmag, stock in resultats:
+            # résultat : code, desig, unite, fournisseur, prix_achat,
+            #            frais_charge, prix, idarticle, idunite, idmag, stock
+            for code, desig, unite, fournisseur, prix_achat, frais_charge, prix, idarticle, idunite, idmag, stock in resultats:
                 key = (code, idunite)
                 if key not in articles_dict:
                     articles_dict[key] = {
-                        'code': code,
-                        'designation': desig,
-                        'unite': unite,
-                        'prix_achat': prix_achat,
-                        'frais_charge': frais_charge,
-                        'prix': prix,
-                        'stocks': {},
-                        'total': 0
+                        'code':          code,
+                        'designation':   desig,
+                        'unite':         unite,
+                        'fournisseur':   fournisseur or 'Aucun Fournisseur',
+                        'prix_achat':    prix_achat,
+                        'frais_charge':  frais_charge,
+                        'prix':          prix,
+                        'stocks':        {},
+                        'total':         0
                     }
                 if idmag:
                     nom_mag   = next((m[1] for m in self.magasins if m[0] == idmag), f"Mag{idmag}")
@@ -711,27 +734,28 @@ class PageStock(ctk.CTkFrame):
                     articles_dict[key]['total'] += stock_val
             all_data = []
             for _idx, (_key, data) in enumerate(articles_dict.items()):
-                prix_achat_val = float(data['prix_achat'] or 0)
+                prix_achat_val   = float(data['prix_achat']   or 0)
                 frais_charge_val = float(data['frais_charge'] or 0)
                 prix_revient_val = prix_achat_val + frais_charge_val
-                prix_vente_val = float(data['prix'] or 0)
-                marge_benef = prix_vente_val - prix_revient_val
-                marge_pct = ((marge_benef / prix_revient_val) * 100) if prix_revient_val != 0 else 100.0
+                prix_vente_val   = float(data['prix']         or 0)
+                marge_benef      = prix_vente_val - prix_revient_val
+                marge_pct        = ((marge_benef / prix_revient_val) * 100) if prix_revient_val != 0 else 100.0
                 valeurs = [
                     data['code'],
                     data['designation'],
                     data['unite'],
-                    self.formater_nombre(prix_achat_val),
-                    self.formater_nombre(frais_charge_val),
-                    self.formater_nombre(prix_revient_val),
-                    self.formater_nombre(prix_vente_val),
-                    self.formater_nombre(marge_benef),
-                    self.formater_pourcentage(marge_pct)
+                    data['fournisseur'],                      # ← position 3
+                    self.formater_nombre(prix_achat_val),    # position 4
+                    self.formater_nombre(frais_charge_val),  # position 5
+                    self.formater_nombre(prix_revient_val),  # position 6
+                    self.formater_nombre(prix_vente_val),    # position 7
+                    self.formater_nombre(marge_benef),       # position 8
+                    self.formater_pourcentage(marge_pct),    # position 9
                 ]
                 for _, nom_mag in self.magasins:
                     valeurs.append(self.formater_nombre(data['stocks'].get(nom_mag, 0)))
-                valeurs.append(self.formater_nombre(data['total']))
-                valeurs.append(self.formater_nombre(0))
+                valeurs.append(self.formater_nombre(data['total']))   # Total
+                valeurs.append(self.formater_nombre(0))               # Marge Total
                 all_data.append((valeurs, data['total']))
             return all_data
         except Exception as e:
@@ -742,7 +766,6 @@ class PageStock(ctk.CTkFrame):
             conn.close()
 
     def _appliquer_all_data_calculee(self, all_data_calculee):
-        """Applique les stocks calculés et rafraîchit le Treeview."""
         self.all_data = all_data_calculee
         if self.entry_recherche.get().strip():
             self.filtrer_stocks()
@@ -828,7 +851,6 @@ class PageStock(ctk.CTkFrame):
             conn.close()
 
     def charger_magasins(self):
-        """Charge la liste des magasins depuis la base de données"""
         conn = self.connect_db()
         if not conn:
             return
@@ -883,13 +905,12 @@ class PageStock(ctk.CTkFrame):
             self.tree.column("Total", width=0, minwidth=0, stretch=False, anchor="center")
 
     def _valeurs_avec_marge_totale(self, valeurs):
-        """Retourne une copie de valeurs avec 'Marge Total' recalculée selon le filtre magasin actif."""
         try:
-            valeurs_out = list(valeurs)
+            valeurs_out    = list(valeurs)
             idx_marge_benef = self.colonnes_dynamiques.index("Marge Unitaire")
-            idx_total = self.colonnes_dynamiques.index("Total")
+            idx_total       = self.colonnes_dynamiques.index("Total")
             idx_marge_total = self.colonnes_dynamiques.index("Marge Total")
-            marge_benef = self.parser_nombre(valeurs_out[idx_marge_benef])
+            marge_benef     = self.parser_nombre(valeurs_out[idx_marge_benef])
 
             if self.filtre_magasin == "Tous":
                 stock_courant = self.parser_nombre(valeurs_out[idx_total])
@@ -957,15 +978,17 @@ class PageStock(ctk.CTkFrame):
         if not valeurs or (len(valeurs) > 1 and "Aucun" in str(valeurs[1])):
             return
 
-        code_article = str(valeurs[0]).zfill(10)
-        designation = str(valeurs[1]) if len(valeurs) > 1 else ""
-        unite = str(valeurs[2]) if len(valeurs) > 2 else ""
-        prix_achat = self.parser_nombre(valeurs[3]) if len(valeurs) > 3 else 0.0
-        frais_charge = self.parser_nombre(valeurs[4]) if len(valeurs) > 4 else 0.0
-        prix_revient = self.parser_nombre(valeurs[5]) if len(valeurs) > 5 else prix_achat
-        prix_vente = self.parser_nombre(valeurs[6]) if len(valeurs) > 6 else 0.0
-        marge_unitaire = self.parser_nombre(valeurs[7]) if len(valeurs) > 7 else (prix_vente - prix_revient)
-        marge_pct = self.parser_nombre(valeurs[8]) if len(valeurs) > 8 else 0.0
+        # ── Indices mis à jour après insertion de "Fournisseur" en pos 3 ──
+        code_article  = str(valeurs[0]).zfill(10)
+        designation   = str(valeurs[1]) if len(valeurs) > 1 else ""
+        unite         = str(valeurs[2]) if len(valeurs) > 2 else ""
+        # valeurs[3] = Fournisseur  (ignoré ici, pas utilisé dans la modale)
+        prix_achat    = self.parser_nombre(valeurs[4]) if len(valeurs) > 4 else 0.0
+        frais_charge  = self.parser_nombre(valeurs[5]) if len(valeurs) > 5 else 0.0
+        prix_revient  = self.parser_nombre(valeurs[6]) if len(valeurs) > 6 else prix_achat
+        prix_vente    = self.parser_nombre(valeurs[7]) if len(valeurs) > 7 else 0.0
+        marge_unitaire= self.parser_nombre(valeurs[8]) if len(valeurs) > 8 else (prix_vente - prix_revient)
+        marge_pct     = self.parser_nombre(valeurs[9]) if len(valeurs) > 9 else 0.0
 
         conn = self.connect_db()
         if not conn:
@@ -988,8 +1011,7 @@ class PageStock(ctk.CTkFrame):
                 SELECT id, COALESCE(punitcmd, 0)
                 FROM tb_commandedetail
                 WHERE idunite = %s AND punitcmd IS NOT NULL
-                ORDER BY id DESC
-                LIMIT 200
+                ORDER BY id DESC LIMIT 200
             """, (idunite,))
             hist_achat = cursor.fetchall()
 
@@ -997,8 +1019,7 @@ class PageStock(ctk.CTkFrame):
                 SELECT id, COALESCE(montant_charge, 0)
                 FROM tb_commandedetail
                 WHERE idunite = %s AND montant_charge IS NOT NULL
-                ORDER BY id DESC
-                LIMIT 200
+                ORDER BY id DESC LIMIT 200
             """, (idunite,))
             hist_charge = cursor.fetchall()
 
@@ -1006,14 +1027,13 @@ class PageStock(ctk.CTkFrame):
                 SELECT id, COALESCE(prix, 0), dateregistre
                 FROM tb_prix
                 WHERE idunite = %s AND deleted = 0
-                ORDER BY dateregistre DESC, id DESC
-                LIMIT 200
+                ORDER BY dateregistre DESC, id DESC LIMIT 200
             """, (idunite,))
             hist_vente = cursor.fetchall()
 
-            avg_achat = (sum(float(v[1] or 0) for v in hist_achat) / len(hist_achat)) if hist_achat else 0.0
+            avg_achat  = (sum(float(v[1] or 0) for v in hist_achat)  / len(hist_achat))  if hist_achat  else 0.0
             avg_charge = (sum(float(v[1] or 0) for v in hist_charge) / len(hist_charge)) if hist_charge else 0.0
-            avg_vente = (sum(float(v[1] or 0) for v in hist_vente) / len(hist_vente)) if hist_vente else 0.0
+            avg_vente  = (sum(float(v[1] or 0) for v in hist_vente)  / len(hist_vente))  if hist_vente  else 0.0
 
             self._ouvrir_detail_article_modal(
                 code_article=code_article,
@@ -1040,21 +1060,11 @@ class PageStock(ctk.CTkFrame):
 
     def _ouvrir_detail_article_modal(
         self,
-        code_article,
-        designation,
-        unite,
-        prix_achat,
-        frais_charge,
-        prix_revient,
-        prix_vente,
-        marge_unitaire,
-        marge_pct,
-        hist_achat,
-        hist_charge,
-        hist_vente,
-        avg_achat,
-        avg_charge,
-        avg_vente,
+        code_article, designation, unite,
+        prix_achat, frais_charge, prix_revient, prix_vente,
+        marge_unitaire, marge_pct,
+        hist_achat, hist_charge, hist_vente,
+        avg_achat, avg_charge, avg_vente,
     ):
         win = ctk.CTkToplevel(self)
         win.title("Détail Marge Commerciale")
@@ -1079,10 +1089,8 @@ class PageStock(ctk.CTkFrame):
                 f"Prix de vente: {self.formater_nombre(prix_vente)} Ar   |   "
                 f"Marge unitaire: {self.formater_nombre(marge_unitaire)} Ar ({self.formater_pourcentage(marge_pct)})"
             ),
-            justify="left",
-            anchor="w",
-            font=self._f(10, "bold"),
-            text_color=C.TEXT_PRIMARY
+            justify="left", anchor="w",
+            font=self._f(10, "bold"), text_color=C.TEXT_PRIMARY
         ).pack(fill="x", padx=12, pady=10)
 
         hist_wrap = ctk.CTkFrame(main, fg_color="transparent")
@@ -1094,53 +1102,40 @@ class PageStock(ctk.CTkFrame):
 
         fr_achat = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
         fr_achat.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        ctk.CTkLabel(
-            fr_achat,
+        ctk.CTkLabel(fr_achat,
             text=f"Historique Prix d'achat (Moyenne: {self.formater_nombre(avg_achat)} Ar)",
-            font=self._f(10, "bold"),
-            text_color=C.TEXT_PRIMARY
+            font=self._f(10, "bold"), text_color=C.TEXT_PRIMARY
         ).pack(anchor="w", padx=10, pady=(8, 4))
         tv_achat = ttk.Treeview(fr_achat, columns=("id", "val"), show="headings", height=12, style="Stock.Treeview")
-        tv_achat.heading("id", text="N°")
-        tv_achat.heading("val", text="Prix d'achat")
-        tv_achat.column("id", width=80, anchor="center")
-        tv_achat.column("val", width=140, anchor="e")
+        tv_achat.heading("id",  text="N°");         tv_achat.column("id",  width=80,  anchor="center")
+        tv_achat.heading("val", text="Prix d'achat"); tv_achat.column("val", width=140, anchor="e")
         tv_achat.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         for _id, val in hist_achat:
             tv_achat.insert("", "end", values=(_id, self.formater_nombre(val)))
 
         fr_charge = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
         fr_charge.grid(row=0, column=1, sticky="nsew", padx=(5, 5))
-        ctk.CTkLabel(
-            fr_charge,
+        ctk.CTkLabel(fr_charge,
             text=f"Historique Frais/Charges (Moyenne: {self.formater_nombre(avg_charge)} Ar)",
-            font=self._f(10, "bold"),
-            text_color=C.TEXT_PRIMARY
+            font=self._f(10, "bold"), text_color=C.TEXT_PRIMARY
         ).pack(anchor="w", padx=10, pady=(8, 4))
         tv_charge = ttk.Treeview(fr_charge, columns=("id", "val"), show="headings", height=12, style="Stock.Treeview")
-        tv_charge.heading("id", text="N°")
-        tv_charge.heading("val", text="Frais/Charges")
-        tv_charge.column("id", width=80, anchor="center")
-        tv_charge.column("val", width=140, anchor="e")
+        tv_charge.heading("id",  text="N°");           tv_charge.column("id",  width=80,  anchor="center")
+        tv_charge.heading("val", text="Frais/Charges"); tv_charge.column("val", width=140, anchor="e")
         tv_charge.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         for _id, val in hist_charge:
             tv_charge.insert("", "end", values=(_id, self.formater_nombre(val)))
 
         fr_vente = ctk.CTkFrame(hist_wrap, fg_color=C.BG_CARD, corner_radius=8)
         fr_vente.grid(row=0, column=2, sticky="nsew", padx=(5, 0))
-        ctk.CTkLabel(
-            fr_vente,
+        ctk.CTkLabel(fr_vente,
             text=f"Historique Prix de vente (Moyenne: {self.formater_nombre(avg_vente)} Ar)",
-            font=self._f(10, "bold"),
-            text_color=C.TEXT_PRIMARY
+            font=self._f(10, "bold"), text_color=C.TEXT_PRIMARY
         ).pack(anchor="w", padx=10, pady=(8, 4))
         tv_vente = ttk.Treeview(fr_vente, columns=("id", "date", "val"), show="headings", height=12, style="Stock.Treeview")
-        tv_vente.heading("id", text="N°")
-        tv_vente.heading("date", text="Date")
-        tv_vente.heading("val", text="Prix de vente")
-        tv_vente.column("id", width=70, anchor="center")
-        tv_vente.column("date", width=120, anchor="center")
-        tv_vente.column("val", width=140, anchor="e")
+        tv_vente.heading("id",   text="N°");            tv_vente.column("id",   width=70,  anchor="center")
+        tv_vente.heading("date", text="Date");           tv_vente.column("date", width=120, anchor="center")
+        tv_vente.heading("val",  text="Prix de vente"); tv_vente.column("val",  width=140, anchor="e")
         tv_vente.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         for _id, val, dte in hist_vente:
             dte_txt = dte.strftime("%d/%m/%Y") if dte else ""
@@ -1153,22 +1148,22 @@ class PageStock(ctk.CTkFrame):
         row = ctk.CTkFrame(sim, fg_color="transparent")
         row.pack(fill="x", padx=10, pady=(0, 8))
 
-        ctk.CTkLabel(row, text="Prix d'achat", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ctk.CTkLabel(row, text="Prix d'achat",   font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
         ent_achat = ctk.CTkEntry(row, width=110, height=28)
         ent_achat.insert(0, self.formater_nombre(prix_achat))
         ent_achat.pack(side="left", padx=(6, 10))
 
-        ctk.CTkLabel(row, text="Frais/Charges", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ctk.CTkLabel(row, text="Frais/Charges",  font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
         ent_charge = ctk.CTkEntry(row, width=110, height=28)
         ent_charge.insert(0, self.formater_nombre(frais_charge))
         ent_charge.pack(side="left", padx=(6, 10))
 
-        ctk.CTkLabel(row, text="Prix de vente", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ctk.CTkLabel(row, text="Prix de vente",  font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
         ent_vente = ctk.CTkEntry(row, width=110, height=28)
         ent_vente.insert(0, self.formater_nombre(prix_vente))
         ent_vente.pack(side="left", padx=(6, 10))
 
-        ctk.CTkLabel(row, text="Stock", font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
+        ctk.CTkLabel(row, text="Stock",          font=self._f(9), text_color=C.TEXT_SECONDARY).pack(side="left")
         ent_stock = ctk.CTkEntry(row, width=110, height=28)
         ent_stock.insert(0, "0,00")
         ent_stock.pack(side="left", padx=(6, 12))
@@ -1197,7 +1192,6 @@ class PageStock(ctk.CTkFrame):
         _simuler()
 
     def clignoter_bouton(self):
-        """Fait clignoter le bouton de péremption"""
         if not hasattr(self, "btn_peremption"):
             return
         if not self.clignotement_actif:
@@ -1213,7 +1207,6 @@ class PageStock(ctk.CTkFrame):
         toggle_color()
 
     def filtrer_stocks(self):
-        """Filtre les données selon le critère de recherche"""
         for item in self.tree.get_children():
             self.tree.delete(item)
         search_term = self.entry_recherche.get().lower().strip()
@@ -1224,7 +1217,8 @@ class PageStock(ctk.CTkFrame):
             (valeurs, total) for valeurs, total in self.all_data
             if search_term in (
                 f"{valeurs[0]} {valeurs[1]} {valeurs[2]} {valeurs[3]} "
-                f"{valeurs[4]} {valeurs[5]} {valeurs[6]} {valeurs[7]} {valeurs[8]}"
+                f"{valeurs[4]} {valeurs[5]} {valeurs[6]} {valeurs[7]} "
+                f"{valeurs[8]} {valeurs[9]}"
             ).lower()
         ]
         filtered_data = [
@@ -1241,16 +1235,16 @@ class PageStock(ctk.CTkFrame):
             self.label_total_articles.configure(text=f"Total articles : {len(filtered_data)}")
             self._maj_label_marge_beneficiaire(somme_marge)
         else:
-            empty = ["", "Aucun résultat trouvé", "", "", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 9)
+            # 10 colonnes fixes désormais → padding ajusté en conséquence
+            empty = ["", "Aucun résultat trouvé", "", "", "", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 10)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
             self._maj_label_marge_beneficiaire(0.0)
 
     def reinitialiser_filtre(self):
-        """Réinitialise le filtre et recharge toutes les données"""
         self.entry_recherche.delete(0, 'end')
         self.filtre_magasin = "Tous"
-        self.filtre_marge = "Toutes"
+        self.filtre_marge   = "Toutes"
         if self.combo_filtre_magasin is not None:
             self.combo_filtre_magasin.set("Tous")
         if self.combo_filtre_marge is not None:
@@ -1259,11 +1253,10 @@ class PageStock(ctk.CTkFrame):
         self.recharger_treeview()
 
     def recharger_treeview(self):
-        """Recharge le Treeview avec toutes les données stockées"""
         for item in self.tree.get_children():
             self.tree.delete(item)
         if self.all_data:
-            visibles = 0
+            visibles    = 0
             somme_marge = 0.0
             for idx, (valeurs, total) in enumerate(self.all_data):
                 valeurs_aff = self._valeurs_avec_marge_totale(valeurs)
@@ -1276,13 +1269,12 @@ class PageStock(ctk.CTkFrame):
             self.label_total_articles.configure(text=f"Total articles : {visibles}")
             self._maj_label_marge_beneficiaire(somme_marge)
         else:
-            empty = ["", "Aucun article trouvé", "", "", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 9)
+            empty = ["", "Aucun article trouvé", "", "", "", "", "", "", "", ""] + [""] * (len(self.colonnes_dynamiques) - 10)
             self.tree.insert('', 'end', values=empty)
             self.label_total_articles.configure(text="Total articles : 0")
             self._maj_label_marge_beneficiaire(0.0)
 
     def exporter_stocks(self):
-        """Exporte les stocks vers un fichier CSV"""
         try:
             from tkinter import filedialog
             import csv
@@ -1344,7 +1336,6 @@ class PageStock(ctk.CTkFrame):
             conn.close()
 
     def ouvrir_fenetre_peremption(self):
-        """Ouvre une fenêtre Toplevel affichant les articles périmés"""
         self.fenetre_peremp = ctk.CTkToplevel(self)
         self.fenetre_peremp.title("Suivi des Péremptions")
         self.fenetre_peremp.geometry("1100x700")
@@ -1356,7 +1347,6 @@ class PageStock(ctk.CTkFrame):
         self.page_peremp.pack(fill="both", expand=True, padx=10, pady=10)
 
     def mettre_a_jour_badge_peremption(self):
-        """Analyse les dates et ajuste la couleur et le texte du bouton"""
         if not hasattr(self, "btn_peremption"):
             return
         conn = self.connect_db()
