@@ -1,9 +1,10 @@
 import json
 import psycopg2
+from resource_utils import get_config_path
 
 try:
     # Charger la config
-    with open('config.json', 'r') as f:
+    with open(get_config_path('config.json'), 'r') as f:
         config = json.load(f)
     
     db_config = config['database']

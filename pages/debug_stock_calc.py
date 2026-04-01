@@ -3,10 +3,11 @@ Script de test pour mettre à jour manuellement tb_stock pour BISCUIT 4X4 BE
 """
 import psycopg2
 import json
+from resource_utils import get_config_path
 
 def connect_db():
     try:
-        with open('config.json') as f:
+        with open(get_config_path('config.json')) as f:
             config = json.load(f)
             db_config = config['database']
         

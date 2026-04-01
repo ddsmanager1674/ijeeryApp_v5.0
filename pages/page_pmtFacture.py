@@ -604,7 +604,7 @@ class PagePmtFacture(ctk.CTkToplevel):
     def charger_settings(self):
         """Charge les paramètres depuis settings.json"""
         try:
-            with open('settings.json', 'r') as f:
+            with open(get_config_path('settings.json'), 'r') as f:
                 return json.load(f)
         except Exception as e:
             print(f"⚠️ Impossible de charger settings.json : {e}")

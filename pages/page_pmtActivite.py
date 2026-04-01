@@ -8,6 +8,7 @@ from pathlib import Path
 from num2words import num2words
 from fpdf import FPDF 
 import json
+from resource_utils import get_config_path
 
 class DatabaseManager:
     def __init__(self):
@@ -17,7 +18,7 @@ class DatabaseManager:
     def _load_db_config(self):
         """Loads database configuration from 'config.json'."""
         try:
-            with open('config.json', 'r', encoding='utf-8') as f:
+            with open(get_config_path('config.json'), 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 return config['database']
         except FileNotFoundError:

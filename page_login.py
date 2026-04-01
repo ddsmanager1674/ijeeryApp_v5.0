@@ -95,9 +95,8 @@ else:
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ── Remember Me ───────────────────────────────────────────────────────────────
-_REMEMBER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "remember.json")
+# ── Remember Me ─────────────────────────────────────────────────────────────────
+_REMEMBER_PATH = get_resource_path("remember.json")
 
 
 def _encode_password(plain: str) -> str:

@@ -15,6 +15,7 @@ from tkinter import ttk, messagebox
 import psycopg2
 import json
 import threading
+from resource_utils import get_config_path
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -644,7 +645,7 @@ class PagePrixRevient(ctk.CTkFrame):
     # ── Base de données ───────────────────────────────────────────────────────
     def connect_db(self):
         try:
-            with open('config.json', 'r', encoding='utf-8') as f:
+            with open(get_config_path('config.json'), 'r', encoding='utf-8') as f:
                 cfg = json.load(f).get('database', {})
             return psycopg2.connect(
                 host=cfg.get('host'), user=cfg.get('user'),

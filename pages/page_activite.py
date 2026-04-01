@@ -6,6 +6,7 @@ import sys
 import tkinter.messagebox
 import json
 import os
+from resource_utils import get_config_path
 
 
 class DatabaseManager:
@@ -16,7 +17,7 @@ class DatabaseManager:
     def _load_db_config(self):
         """Loads database configuration from 'config.json'."""
         try:
-            with open('config.json', 'r', encoding='utf-8') as f:
+            with open(get_config_path('config.json'), 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 return config['database']
         except FileNotFoundError:

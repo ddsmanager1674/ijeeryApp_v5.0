@@ -8,6 +8,7 @@ import subprocess
 import psycopg2 # Assurez-vous d'avoir installé psycopg2 : pip install psycopg2-binary
 from psycopg2 import sql
 from tkinter import messagebox, filedialog
+from resource_utils import get_config_path
 
 class ConfigDataBase(ctk.CTk):
     def __init__(self):
@@ -16,7 +17,7 @@ class ConfigDataBase(ctk.CTk):
         self.geometry("600x550")
         self.resizable(False, False)
 
-        self.config_file_path = "config.json"
+        self.config_file_path = get_config_path('config.json')
         self.config_data = self.load_config()
 
         self.create_widgets()

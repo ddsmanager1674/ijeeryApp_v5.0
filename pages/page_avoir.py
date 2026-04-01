@@ -405,7 +405,7 @@ class PageAvoir(ctk.CTkFrame):
             'Avoir_ImpressionTicket':       0,
         }
         try:
-            with open('settings.json', 'r', encoding='utf-8') as f:
+            with open(get_config_path('settings.json'), 'r', encoding='utf-8') as f:
                 settings = json.load(f)
             print("✅ Paramètres d'impression chargés depuis settings.json")
             return settings

@@ -15,7 +15,7 @@ from tkinter import ttk, messagebox
 import psycopg2
 import json
 import threading
-from resource_utils import get_session_path, safe_file_read
+from resource_utils import get_config_path, get_session_path, safe_file_read
 
 # page_prixSaisie doit rester optionnel
 try:
@@ -139,7 +139,7 @@ class PagePrixListe(ctk.CTkFrame):
 
     def _connect(self):
         try:
-            with open('config.json', 'r', encoding='utf-8') as f:
+            with open(get_config_path('config.json'), 'r', encoding='utf-8') as f:
                 cfg = json.load(f).get('database', {})
             return psycopg2.connect(
                 host=cfg.get('host'), user=cfg.get('user'),

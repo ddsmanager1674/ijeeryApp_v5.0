@@ -30,6 +30,7 @@ from typing import Optional, Dict, Any, List
 import customtkinter as ctk
 from tkinter import ttk
 import psycopg2
+from resource_utils import get_config_path
 
 # PDF via ReportLab
 from reportlab.lib.pagesizes import A5
@@ -451,7 +452,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             'Avoir_ImpressionTicket': 0,
         }
         try:
-            with open('settings.json', 'r', encoding='utf-8') as f:
+            with open(get_config_path('settings.json'), 'r', encoding='utf-8') as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"⚠ settings.json : {e} — paramètres par défaut appliqués.")

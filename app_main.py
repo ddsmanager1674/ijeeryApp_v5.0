@@ -1139,8 +1139,9 @@ class App(ctk.CTk):
         if not messagebox.askyesno("Déconnexion", "Voulez-vous vraiment vous déconnecter ?"):
             return
         try:
-            if os.path.exists("session.json"):
-                os.remove("session.json")
+            session_file = os.path.join(_BASE, "session.json")
+            if os.path.exists(session_file):
+                os.remove(session_file)
             if self.db_conn:
                 try: self.db_conn.close()
                 except Exception: pass
