@@ -1152,14 +1152,27 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 client_nom = self._get_client_name(idclient)
                 articles = [("", "Paiement global crédit client", "", 1, float(montant_global), float(montant_global))]
 
-                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le facture PDF de paiement ?")
-                self._generer_ticket_pdf_paiement_credit(
+                result = messagebox.askyesno("Impression", "Voulez-vous ouvrir la facture PDF de paiement A5 ?")
+                facture_path = self._generer_ticket_pdf_paiement_credit(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
                     refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
-                    observation=observation, date_paiement=date_pmt, open_after=result
+                    observation=observation, date_paiement=date_pmt,
+                    open_after=result, output_format="A5"
                 )
-                
+                if facture_path:
+                    messagebox.showinfo("Confirmation", "La facture PDF de paiement A5 a été générée.")
+                    if messagebox.askyesno("Impression", "Voulez-vous également générer le ticket de paiement 80mm ?"):
+                        ticket_path = self._generer_ticket_pdf_paiement_credit(
+                            societe=societe_tuple, username=username, articles=articles,
+                            montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
+                            refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
+                            observation=observation, date_paiement=date_pmt,
+                            open_after=True, output_format="ticket80"
+                        )
+                        if ticket_path:
+                            messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
+
                 self._render_credit_table(tree_credits, idclient, label_montant_restant)
                 payment_window.destroy()
             
@@ -1548,7 +1561,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             messagebox.showerror("Erreur", f"Erreur génération PDF créance: {e}")
             return None
 
-    def _generer_ticket_pdf_paiement_credit(self, societe, username, articles, montant, mode_nom, refpmt, idclient, client_nom, observation, date_paiement, open_after=False):
+    def _generer_ticket_pdf_paiement_credit(self, societe, username, articles, montant, mode_nom, refpmt, idclient, client_nom, observation, date_paiement, open_after=False, output_format="A5"):
         try:
             client_adresse = "-"
             client_contact = "-"
@@ -1566,7 +1579,106 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     pass
 
             temp_dir = tempfile.gettempdir()
-            path = os.path.join(temp_dir, f"Paiement_Credit_{refpmt}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            if str(output_format).lower() == "ticket80":
+                path = os.path.join(temp_dir, f"Paiement_Credit_Ticket80_{refpmt}_{timestamp}.pdf")
+                ticket_width = 80 * mm
+                ticket_height = 200 * mm
+                c = canvas.Canvas(path, pagesize=(ticket_width, ticket_height))
+                y = ticket_height - 10 * mm
+                x_center = ticket_width / 2
+                margin = 5 * mm
+
+                nom_soc = societe[0] if societe else "IJEERY"
+                adr_soc = societe[1] if societe and len(societe) > 1 else ""
+                ville_soc = societe[2] if societe and len(societe) > 2 else ""
+                contact_soc = societe[3] if societe and len(societe) > 3 else ""
+
+                c.setFont("Helvetica-Bold", 12)
+                c.drawCentredString(x_center, y, (nom_soc or "IJEERY").upper())
+                y -= 5 * mm
+                c.setFont("Helvetica", 8)
+                if adr_soc:
+                    c.drawCentredString(x_center, y, adr_soc)
+                    y -= 4 * mm
+                if ville_soc:
+                    c.drawCentredString(x_center, y, ville_soc)
+                    y -= 4 * mm
+                if contact_soc:
+                    c.drawCentredString(x_center, y, f"Tél: {contact_soc}")
+                    y -= 6 * mm
+
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+                c.setFont("Helvetica-Bold", 11)
+                c.drawCentredString(x_center, y, "REÇU DE PAIEMENT CRÉDIT")
+                y -= 7 * mm
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+
+                c.setFont("Helvetica", 9)
+                c.drawString(margin, y, f"Date: {date_paiement.strftime('%d/%m/%Y %H:%M')}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Réf: {refpmt}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Client: {client_nom}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Mode: {mode_nom}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Opérateur: {username}")
+                y -= 7 * mm
+
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(margin, y, "Montant payé :")
+                c.drawRightString(ticket_width - margin, y, f"{self._formater_nombre(montant)} Ar")
+                y -= 10 * mm
+                try:
+                    _, _, _, total_restant, _ = self._compute_credit_status_fifo(idclient)
+                except Exception:
+                    total_restant = 0
+                c.setFont("Helvetica", 9)
+                c.drawString(margin, y, "Reste de Crédit :")
+                c.drawRightString(ticket_width - margin, y, f"{self._formater_nombre(total_restant)} Ar")
+                y -= 10 * mm
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+
+                c.setFont("Helvetica-Bold", 9)
+                c.drawString(margin, y, "Observation :")
+                y -= 4 * mm
+                c.setFont("Helvetica", 8)
+                max_line_width = ticket_width - 2 * margin
+                current_line = ""
+                for mot in str(observation or "").split():
+                    test_line = (current_line + " " + mot).strip() if current_line else mot
+                    if c.stringWidth(test_line, "Helvetica", 8) <= max_line_width:
+                        current_line = test_line
+                    else:
+                        c.drawString(margin, y, current_line)
+                        y -= 4 * mm
+                        current_line = mot
+                if current_line:
+                    c.drawString(margin, y, current_line)
+                    y -= 7 * mm
+
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+                c.setFont("Helvetica", 8)
+                c.drawCentredString(x_center, y, "Merci de votre confiance")
+                y -= 4 * mm
+                c.drawCentredString(x_center, y, "Document non contractuel")
+                c.save()
+
+                if open_after:
+                    if os.name == 'nt':
+                        os.startfile(path)
+                    else:
+                        subprocess.Popen(['xdg-open', path])
+                return path
+
+            path = os.path.join(temp_dir, f"Paiement_Credit_{refpmt}_{timestamp}.pdf")
 
             page_width, _ = landscape(A5)
             margin = 5 * mm

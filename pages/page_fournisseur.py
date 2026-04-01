@@ -1078,13 +1078,26 @@ class PageFournisseur(ctk.CTkFrame):
                 articles = [("", "Paiement global dette fournisseur", "", 1,
                               float(montant_global), float(montant_global))]
 
-                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le PDF de paiement ?")
-                self._generer_ticket_pdf_paiement_dette(
+                result = messagebox.askyesno("Impression", "Voulez-vous ouvrir le PDF de paiement ?")
+                facture_path = self._generer_ticket_pdf_paiement_dette(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant_global), mode_nom=selected_mode or "Espèces",
                     refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
-                    observation=observation_full, date_paiement=date_pmt, open_after=result
+                    observation=observation_full, date_paiement=date_pmt,
+                    open_after=result, output_format="A5"
                 )
+                if facture_path:
+                    messagebox.showinfo("Confirmation", "Le PDF de paiement a été généré.")
+                    if messagebox.askyesno("Impression", "Voulez-vous également générer le ticket 80mm ?"):
+                        ticket_path = self._generer_ticket_pdf_paiement_dette(
+                            societe=societe_tuple, username=username, articles=articles,
+                            montant=float(montant_global), mode_nom=selected_mode or "Espèces",
+                            refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
+                            observation=observation_full, date_paiement=date_pmt,
+                            open_after=True, output_format="ticket80"
+                        )
+                        if ticket_path:
+                            messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
 
                 self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
                 self.load_fournisseur()
@@ -1218,7 +1231,8 @@ class PageFournisseur(ctk.CTkFrame):
 
     def _generer_ticket_pdf_paiement_dette(self, societe, username, articles, montant,
                                            mode_nom, refpmt, idfrs, frs_nom,
-                                           observation, date_paiement, open_after=False):
+                                           observation, date_paiement, open_after=False,
+                                           output_format="A5"):
         try:
             frs_adresse = "-"; frs_contact = "-"
             try:
@@ -1231,8 +1245,108 @@ class PageFournisseur(ctk.CTkFrame):
                 except: pass
 
             temp_dir = tempfile.gettempdir()
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            nom_soc  = societe[0] if societe else "IJEERY"
+            adr_soc  = societe[1] if societe and len(societe) > 1 else ""
+            ville_soc= societe[2] if societe and len(societe) > 2 else ""
+            contact_soc = societe[3] if societe and len(societe) > 3 else ""
+
+            if str(output_format).lower() == "ticket80":
+                path = os.path.join(temp_dir,
+                    f"Paiement_Dette_Frs_Ticket80_{refpmt}_{timestamp}.pdf")
+
+                ticket_width = 80 * mm
+                ticket_height = 200 * mm
+                c = canvas.Canvas(path, pagesize=(ticket_width, ticket_height))
+                y = ticket_height - 10 * mm
+                x_center = ticket_width / 2
+                margin = 5 * mm
+
+                c.setFont("Helvetica-Bold", 12)
+                c.drawCentredString(x_center, y, (nom_soc or "IJEERY").upper())
+                y -= 5 * mm
+                c.setFont("Helvetica", 8)
+                if adr_soc:
+                    c.drawCentredString(x_center, y, adr_soc)
+                    y -= 4 * mm
+                if ville_soc:
+                    c.drawCentredString(x_center, y, ville_soc)
+                    y -= 4 * mm
+                if contact_soc:
+                    c.drawCentredString(x_center, y, f"Tél: {contact_soc}")
+                    y -= 6 * mm
+
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+                c.setFont("Helvetica-Bold", 11)
+                c.drawCentredString(x_center, y, "REÇU PAIEMENT DETTE FOURNISSEUR")
+                y -= 8 * mm
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+
+                c.setFont("Helvetica", 9)
+                c.drawString(margin, y, f"Date: {date_paiement.strftime('%d/%m/%Y %H:%M')}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Réf: {refpmt}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Fournisseur: {frs_nom}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Mode: {mode_nom}")
+                y -= 5 * mm
+                c.drawString(margin, y, f"Opérateur: {username}")
+                y -= 7 * mm
+
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(margin, y, "Montant payé :")
+                c.drawRightString(ticket_width - margin, y, f"{self._formater_nombre(montant)} Ar")
+                y -= 10 * mm
+
+                try:
+                    _, _, _, total_restant, _ = self._compute_dette_status_fifo(idfrs)
+                except Exception:
+                    total_restant = 0
+                c.setFont("Helvetica", 9)
+                c.drawString(margin, y, "Reste de Dette :")
+                c.drawRightString(ticket_width - margin, y, f"{self._formater_nombre(total_restant)} Ar")
+                y -= 8 * mm
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+
+                c.setFont("Helvetica-Bold", 9)
+                c.drawString(margin, y, "Observation :")
+                y -= 4 * mm
+                c.setFont("Helvetica", 8)
+                current_line = ""
+                max_width = ticket_width - 2 * margin
+                for mot in str(observation or "").split():
+                    test_line = f"{current_line} {mot}".strip() if current_line else mot
+                    if c.stringWidth(test_line, "Helvetica", 8) <= max_width:
+                        current_line = test_line
+                    else:
+                        c.drawString(margin, y, current_line)
+                        y -= 4 * mm
+                        current_line = mot
+                if current_line:
+                    c.drawString(margin, y, current_line)
+                    y -= 7 * mm
+
+                c.line(margin, y, ticket_width - margin, y)
+                y -= 7 * mm
+                c.setFont("Helvetica", 8)
+                c.drawCentredString(x_center, y, "Merci de votre confiance")
+                y -= 4 * mm
+                c.drawCentredString(x_center, y, "Document non contractuel")
+                c.save()
+
+                if open_after:
+                    if os.name == 'nt': os.startfile(path)
+                    else: subprocess.Popen(['xdg-open', path])
+                return path
+
             path = os.path.join(temp_dir,
-                f"Paiement_Dette_Frs_{refpmt}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+                f"Paiement_Dette_Frs_{refpmt}_{timestamp}.pdf")
 
             page_width, _ = landscape(A5)
             margin = 5 * mm
