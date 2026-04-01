@@ -571,6 +571,7 @@ class PageAvoir(ctk.CTkFrame):
             row=0, column=0, padx=(10, 6), pady=8, sticky="w")
         self.entry_designation = ctk.CTkEntry(
             card, **entry_kw, placeholder_text="Motif / description de l'avoir…",
+            state="disabled",
         )
         self.entry_designation.grid(row=0, column=1, padx=(0, 10), pady=8, sticky="ew")
 
@@ -653,6 +654,9 @@ class PageAvoir(ctk.CTkFrame):
         )
         self.btn_annuler_mod.grid(row=1, column=6, padx=(4, 10), pady=(0, 8), sticky="ew")
         self.btn_annuler_mod.grid_remove()  # visible seulement en mode modification
+
+        # Masquer la bande de saisie d'article par défaut
+        card.grid_remove()
 
     # ── Row 3 — Tableau Treeview ──────────────────────────────────────────────
 
@@ -817,6 +821,7 @@ class PageAvoir(ctk.CTkFrame):
             font=Fonts.bold(11),
             fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
             corner_radius=6, command=self.supprimer_detail,
+            state="disabled",
         )
         self.btn_supprimer_ligne.grid(row=0, column=1, padx=4, pady=6)
 
@@ -1902,6 +1907,7 @@ class PageAvoir(ctk.CTkFrame):
             self.entry_designation.configure(state="normal")
             self.entry_designation.delete(0, "end")
             self.entry_designation.insert(0, f"Avoir pour Facture {vente[1]} - {vente[3] or ''}".strip())
+            self.entry_designation.configure(state="disabled")
 
             self.detail_avoir = []
             for d in details:
@@ -1928,7 +1934,7 @@ class PageAvoir(ctk.CTkFrame):
             self.combo_magasin.configure(state="disabled")
             self.btn_recherche_article.configure(state="disabled")
             self.btn_ajouter.configure(state="normal")
-            self.btn_supprimer_ligne.configure(state="normal")
+            self.btn_supprimer_ligne.configure(state="disabled")
 
             # Activer l'enregistrement
             self.btn_enregistrer.configure(
@@ -2133,7 +2139,7 @@ class PageAvoir(ctk.CTkFrame):
                 )
                 self.btn_recherche_article.configure(state="disabled")
                 self.btn_ajouter.configure(state="normal")
-                self.btn_supprimer_ligne.configure(state="normal")
+                self.btn_supprimer_ligne.configure(state="disabled")
                 self.btn_imprimer.configure(state="disabled")
             except Exception:
                 pass
@@ -3018,6 +3024,7 @@ class PageAvoir(ctk.CTkFrame):
 
         self.entry_designation.configure(state="normal")
         self.entry_designation.delete(0, "end")
+        self.entry_designation.configure(state="disabled")
 
         self.entry_client.configure(state="normal")
         self.entry_client.delete(0, "end")
@@ -3043,7 +3050,7 @@ class PageAvoir(ctk.CTkFrame):
         )
         self.btn_recherche_article.configure(state="disabled")
         self.btn_ajouter.configure(state="normal")
-        self.btn_supprimer_ligne.configure(state="normal")
+        self.btn_supprimer_ligne.configure(state="disabled")
 
         if reset_imprimer:
             self.btn_imprimer.configure(state="disabled")
