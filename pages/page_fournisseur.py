@@ -536,7 +536,9 @@ class PageFournisseur(ctk.CTkFrame):
             self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
 
             def on_paiement_global_click():
-                self._open_global_payment_window(idfrs, detail_window, tree_dettes, label_montant_restant)
+                self._open_global_payment_window(
+                    idfrs, detail_window, tree_dettes, label_montant_restant,
+                    refresh_callback=refresh_payment_history)
 
             btn_paiement_global.configure(command=on_paiement_global_click)
         except psycopg2.Error as err:
@@ -594,37 +596,52 @@ class PageFournisseur(ctk.CTkFrame):
         tree_pmt.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
         scrollbar_pmt.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
 
-        try:
-            self.cursor.execute("""
-                SELECT p.id, p.datepmt, p.mtpaye, p.observation,
-                       COALESCE(m.modedepaiement, 'N/A') as mode_paiement,
-                       COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
-                FROM tb_pmtcom p
-                LEFT JOIN tb_users u ON p.iduser = u.iduser
-                LEFT JOIN tb_modepaiement m ON p.idmode = m.idmode
-                WHERE p.idfrs = %s
-                ORDER BY p.datepmt DESC
-            """, (idfrs,))
-            paiements = self.cursor.fetchall()
+        label_no_paiement = None
+        def refresh_payment_history():
+            nonlocal label_no_paiement
+            for item in tree_pmt.get_children():
+                tree_pmt.delete(item)
+            if label_no_paiement is not None:
+                try:
+                    label_no_paiement.destroy()
+                except Exception:
+                    pass
+                label_no_paiement = None
 
-            for idx, pmt in enumerate(paiements):
-                pmt_id, date_pmt, montant_pmt, observation, mode_paiement, utilisateur = pmt
-                tag = "even" if idx % 2 == 0 else "odd"
-                tree_pmt.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
-                    pmt_id,
-                    date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
-                    self._formater_nombre(montant_pmt or 0),
-                    mode_paiement or "N/A",
-                    observation or "",
-                    utilisateur or "N/A"
-                ), tags=(tag,))
+            try:
+                self.cursor.execute("""
+                    SELECT p.id, p.datepmt, p.mtpaye, p.observation,
+                           COALESCE(m.modedepaiement, 'N/A') as mode_paiement,
+                           COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
+                    FROM tb_pmtcom p
+                    LEFT JOIN tb_users u ON p.iduser = u.iduser
+                    LEFT JOIN tb_modepaiement m ON p.idmode = m.idmode
+                    WHERE p.idfrs = %s
+                    ORDER BY p.datepmt DESC
+                """, (idfrs,))
+                paiements = self.cursor.fetchall()
 
-            if not paiements:
-                ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré",
-                             text_color="gray", font=_F(_FONT_SIZE_MD)).grid(row=1, column=0, pady=20)
+                for idx, pmt in enumerate(paiements):
+                    pmt_id, date_pmt, montant_pmt, observation, mode_paiement, utilisateur = pmt
+                    tag = "even" if idx % 2 == 0 else "odd"
+                    tree_pmt.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
+                        pmt_id,
+                        date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
+                        self._formater_nombre(montant_pmt or 0),
+                        mode_paiement or "N/A",
+                        observation or "",
+                        utilisateur or "N/A"
+                    ), tags=(tag,))
 
-        except psycopg2.Error as err:
-            messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
+                if not paiements:
+                    label_no_paiement = ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré",
+                                                         text_color="gray", font=_F(_FONT_SIZE_MD))
+                    label_no_paiement.grid(row=1, column=0, pady=20)
+
+            except psycopg2.Error as err:
+                messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
+
+        refresh_payment_history()
 
     # ──────────────────────────────────────────────────────────────────
     # LOGIQUE FIFO DES DETTES FOURNISSEUR
@@ -960,7 +977,7 @@ class PageFournisseur(ctk.CTkFrame):
     # FENÊTRE PAIEMENT GLOBAL
     # ──────────────────────────────────────────────────────────────────
 
-    def _open_global_payment_window(self, idfrs, parent_window, tree_dettes, label_montant_restant):
+    def _open_global_payment_window(self, idfrs, parent_window, tree_dettes, label_montant_restant, refresh_callback=None):
         payment_window = ctk.CTkToplevel(parent_window)
         payment_window.title("Paiement Global des Dettes Fournisseur")
         parent_window.update_idletasks()
@@ -1100,6 +1117,8 @@ class PageFournisseur(ctk.CTkFrame):
                             messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
 
                 self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
+                if refresh_callback:
+                    refresh_callback()
                 self.load_fournisseur()
                 payment_window.destroy()
 
@@ -1207,6 +1226,7 @@ class PageFournisseur(ctk.CTkFrame):
                     frs_nom=self._get_frs_name(idfrs), montant_total=float(montant), open_after=result
                 )
 
+                self.load_fournisseur()
                 dette_window.destroy()
                 parent_window.destroy()
                 self.open_frs_dette_details(idfrs)

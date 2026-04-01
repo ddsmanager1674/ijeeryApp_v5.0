@@ -300,6 +300,11 @@ class PageClient(ctk.CTkFrame):
                 cli[1], cli[2], cli[3], cli[4], credit_str, dernier_credit, cli[6]
             ), tags=(tag,))
 
+    def refresh_client_list(self):
+        self.load_client()
+        self.tree.update_idletasks()
+        if self.search_entry.get().strip():
+            self.filter_clients()
     def sort_by_column(self, column):
         if self.sort_column == column:
             self.sort_ascending = not self.sort_ascending
@@ -592,7 +597,9 @@ class PageClient(ctk.CTkFrame):
             self._render_credit_table(tree_credits, idclient, label_montant_restant)
 
             def on_paiement_global_click():
-                self._open_global_payment_window(idclient, detail_window, tree_credits, label_montant_restant)
+                self._open_global_payment_window(
+                    idclient, detail_window, tree_credits, label_montant_restant,
+                    refresh_callback=refresh_payment_history)
 
             btn_paiement_global.configure(command=on_paiement_global_click)
         except psycopg2.Error as err:
@@ -648,33 +655,49 @@ class PageClient(ctk.CTkFrame):
         tree_paiements.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
         scrollbar_pmt.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
         
+        empty_label = None
+        def refresh_payment_history():
+            nonlocal empty_label
+            for item in tree_paiements.get_children():
+                tree_paiements.delete(item)
+            if empty_label is not None:
+                try:
+                    empty_label.destroy()
+                except Exception:
+                    pass
+                empty_label = None
+
+            try:
+                self.cursor.execute("""
+                    SELECT p.id, p.datepmt, p.mtpaye, p.observation, 
+                           COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
+                    FROM tb_pmtcredit p
+                    LEFT JOIN tb_users u ON p.iduser = u.iduser
+                    WHERE p.idclient = %s
+                    ORDER BY p.datepmt DESC
+                """, (idclient,))
+                paiements = self.cursor.fetchall()
+                
+                for idx, pmt in enumerate(paiements):
+                    pmt_id, date_pmt, montant_pmt, observation, utilisateur = pmt
+                    tag = "even" if idx % 2 == 0 else "odd"
+                    tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
+                        pmt_id,
+                        date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
+                        f"{self._formater_nombre(float(montant_pmt or 0))}",
+                        observation or "",
+                        utilisateur or "N/A"
+                    ), tags=(tag,))
+                
+                if not paiements:
+                    empty_label = ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré", 
+                                              text_color="gray", font=_F(_FONT_SIZE_MD))
+                    empty_label.grid(row=1, column=0, pady=20)
+            except psycopg2.Error as err:
+                messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
+
         try:
-            self.cursor.execute("""
-                SELECT p.id, p.datepmt, p.mtpaye, p.observation, 
-                       COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
-                FROM tb_pmtcredit p
-                LEFT JOIN tb_users u ON p.iduser = u.iduser
-                WHERE p.idclient = %s
-                ORDER BY p.datepmt DESC
-            """, (idclient,))
-            paiements = self.cursor.fetchall()
-            
-            for idx, pmt in enumerate(paiements):
-                pmt_id, date_pmt, montant_pmt, observation, utilisateur = pmt
-                tag = "even" if idx % 2 == 0 else "odd"
-                tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
-                    pmt_id,
-                    date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
-                    f"{self._formater_nombre(float(montant_pmt or 0))}",
-                    observation or "",
-                    utilisateur or "N/A"
-                ), tags=(tag,))
-            
-            if not paiements:
-                empty_label = ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré", 
-                                          text_color="gray", font=_F(_FONT_SIZE_MD))
-                empty_label.grid(row=1, column=0, pady=20)
-        
+            refresh_payment_history()
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
 
@@ -955,6 +978,7 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
                 for item in tree_credits.get_children():
                     tree_credits.delete(item)
                 
+                self.refresh_client_list()
                 try:
                     self.cursor.execute("""
                         SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
@@ -1027,7 +1051,7 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
         ctk.CTkButton(btn_frame, text="Annuler", command=payment_window.destroy,
                      fg_color="#e74c3c", font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
 
-    def _open_global_payment_window(self, idclient, parent_window, tree_credits, label_montant_restant):
+    def _open_global_payment_window(self, idclient, parent_window, tree_credits, label_montant_restant, refresh_callback=None):
         payment_window = ctk.CTkToplevel(parent_window)
         payment_window.title("Paiement Global des Crédits")
         parent_window.update_idletasks()
@@ -1174,6 +1198,9 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                             messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
 
                 self._render_credit_table(tree_credits, idclient, label_montant_restant)
+                if refresh_callback:
+                    refresh_callback()
+                self.refresh_client_list()
                 payment_window.destroy()
             
             except ValueError:
@@ -2005,6 +2032,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 
                 creance_window.destroy()
                 parent_window.destroy()
+                self.refresh_client_list()
                 self.open_client_credit_details(idclient)
             
             except ValueError:
