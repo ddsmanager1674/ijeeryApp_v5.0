@@ -95,7 +95,11 @@ class PageInfoArticle(ctk.CTkFrame):
         self.create_main_container()
         
         self._initialize_views()
-        self.show_view(None) 
+        # Par défaut, l'unité est cochée et affichée au lancement
+        if self.update_vars["Unite"].get() == "On":
+            self.show_view("PageUnite")
+        else:
+            self.show_view(None)
 
     def create_sidebar(self):
         self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0, fg_color="#3b8ed4")
@@ -110,7 +114,7 @@ class PageInfoArticle(ctk.CTkFrame):
         ).grid(row=0, column=0, padx=20, pady=(20, 10))
 
         self.update_vars = {
-            "Unite": tk.StringVar(value="Off"),
+            "Unite": tk.StringVar(value="On"),
             "Fournisseur": tk.StringVar(value="Off")
         }
         
@@ -123,7 +127,7 @@ class PageInfoArticle(ctk.CTkFrame):
             "corner_radius": 5
         }
         
-        # Checkbox Unité
+        # Checkbox Unité (toujours cochée et inactive)
         self.checkbox_unite = ctk.CTkCheckBox(
             self.sidebar_frame, 
             text="Mise à jour Unité", 
@@ -131,6 +135,7 @@ class PageInfoArticle(ctk.CTkFrame):
             variable=self.update_vars["Unite"], 
             onvalue="On", 
             offvalue="Off",
+            state="disabled",
             **checkbox_config
         )
         self.checkbox_unite.grid(row=1, column=0, padx=15, pady=(15, 5), sticky="w")
@@ -146,6 +151,7 @@ class PageInfoArticle(ctk.CTkFrame):
             **checkbox_config
         )
         self.checkbox_fournisseur.grid(row=2, column=0, padx=15, pady=5, sticky="w")
+        self.checkbox_fournisseur.grid_remove()
 
     def create_main_container(self):
         self.right_panel = ctk.CTkFrame(self, fg_color="transparent")
