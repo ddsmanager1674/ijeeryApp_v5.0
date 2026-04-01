@@ -1,9 +1,0 @@
-{
-    "database": {
-        "host": "localhost",
-        "user": "postgres",
-        "password": "root",
-        "database": "sarah_gros",
-        "port": 5432
-    }
-}
