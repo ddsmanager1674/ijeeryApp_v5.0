@@ -613,7 +613,7 @@ class PageFournisseur(ctk.CTkFrame):
                 tree_pmt.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
                     pmt_id,
                     date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
-                    f"{self._formater_nombre(montant_pmt or 0):,.0f}",
+                    self._formater_nombre(montant_pmt or 0),
                     mode_paiement or "N/A",
                     observation or "",
                     utilisateur or "N/A"
