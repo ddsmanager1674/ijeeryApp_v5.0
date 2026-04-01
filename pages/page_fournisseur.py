@@ -1004,6 +1004,8 @@ class PageFournisseur(ctk.CTkFrame):
                      font=_F(_FONT_SIZE_MD, "bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
         entry_montant = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
+        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
 
         ctk.CTkLabel(main_frame, text="Observation (optionnel):",
                      font=_F(_FONT_SIZE_MD, "bold")).grid(row=3, column=0, sticky="w", padx=8, pady=(2, 4))
@@ -1035,7 +1037,7 @@ class PageFournisseur(ctk.CTkFrame):
 
         def enregistrer_paiement_global():
             try:
-                montant_global = float(entry_montant.get().replace(',', '.'))
+                montant_global = float(entry_montant.get().replace('.', '').replace(',', '.'))
                 observation = entry_obs.get().strip()
 
                 if montant_global <= 0:
@@ -1148,6 +1150,8 @@ class PageFournisseur(ctk.CTkFrame):
         entry_montant = ctk.CTkEntry(main_frame, placeholder_text="Ex: 150000",
                                      font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
+        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
+        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
 
         def enregistrer_dette():
             try:
@@ -1158,7 +1162,7 @@ class PageFournisseur(ctk.CTkFrame):
                     messagebox.showwarning("Attention", "Veuillez remplir tous les champs.")
                     return
 
-                montant = float(montant_str.replace(',', '.'))
+                montant = float(montant_str.replace('.', '').replace(',', '.'))
                 if montant <= 0:
                     messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
                     return
@@ -1435,6 +1439,28 @@ class PageFournisseur(ctk.CTkFrame):
         if isinstance(nombre, (int, float)):
             return f"{nombre:,.0f}".replace(".", ",").replace(",", ".")
         return str(nombre)
+
+    def format_montant(self, entry_widget):
+        """Formate le montant avec séparateurs de milliers (format français: 1.234.567)."""
+        current = entry_widget.get()
+        if not current:
+            return
+
+        cleaned = current.replace('.', '').replace(',', '').replace(' ', '')
+        if not cleaned or not cleaned.isdigit():
+            entry_widget.delete(0, 'end')
+            entry_widget.insert(0, current)
+            return
+
+        formatted = ''
+        for i, digit in enumerate(reversed(cleaned)):
+            if i > 0 and i % 3 == 0:
+                formatted = '.' + formatted
+            formatted = digit + formatted
+
+        entry_widget.delete(0, 'end')
+        entry_widget.insert(0, formatted)
+        entry_widget.icursor(len(formatted))
 
     def _get_societe_info(self):
         defaults = {'name': 'IJEERY', 'addr': '', 'ville': '', 'tel': '',
