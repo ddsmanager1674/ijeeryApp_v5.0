@@ -1727,6 +1727,12 @@ class PageAvoir(ctk.CTkFrame):
         )
         tree.tag_configure("even", background=Colors.BG_CARD)
         tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
+        # Ligne désactivée si la facture a déjà un avoir associé
+        tree.tag_configure(
+            "disabled",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_MUTED,
+        )
 
         col_config = {
             "ID": (0, False), "Ref Vente": (120, True),
@@ -1760,7 +1766,12 @@ class PageAvoir(ctk.CTkFrame):
                 cursor.execute(
                     """
                     SELECT v.id, v.refvente, v.dateregistre,
-                           c.nomcli, COALESCE(v.totmtvente,0), u.nomuser
+                           c.nomcli, COALESCE(v.totmtvente,0), u.nomuser,
+                           EXISTS(
+                               SELECT 1 FROM tb_avoir a
+                               WHERE a.deleted = 0
+                                 AND a.observation ILIKE '%%' || v.refvente || '%%'
+                           ) AS has_avoir
                     FROM tb_vente v
                     LEFT JOIN tb_client c ON v.idclient = c.idclient
                     LEFT JOIN tb_users  u ON v.iduser   = u.iduser
@@ -1772,14 +1783,17 @@ class PageAvoir(ctk.CTkFrame):
                     (date_filtre, filtre_like, filtre_like, filtre_like),
                 )
                 for idx, row in enumerate(cursor.fetchall()):
-                    id_vente, ref_vente, date_vente, nom_cli, montant, nom_user = row
+                    id_vente, ref_vente, date_vente, nom_cli, montant, nom_user, has_avoir = row
+                    tags = ("disabled",) if has_avoir else ("even" if idx % 2 == 0 else "odd",)
                     tree.insert('', 'end', values=(
                         id_vente, ref_vente,
                         date_vente.strftime("%d/%m/%Y %H:%M:%S") if date_vente else "N/A",
                         nom_cli or "N/A",
                         self.formater_nombre(montant or 0.0),
                         nom_user or "Inconnu",
-                    ), tags=("even" if idx % 2 == 0 else "odd",))
+                    ), tags=tags)
+                    if has_avoir:
+                        print(f"[AVOIR] Facture déjà associée à un avoir : {ref_vente}")
             except Exception as e:
                 MessageDialog("Erreur SQL", f"Chargement factures : {e}", type_='error')
             finally:
@@ -1793,7 +1807,18 @@ class PageAvoir(ctk.CTkFrame):
             if not sel:
                 MessageDialog("Attention", "Sélectionnez une facture.", type_='warning')
                 return
-            idvente = tree.item(sel[0])['values'][0]
+            item = sel[0]
+            tags = tree.item(item).get('tags', [])
+            if 'disabled' in tags:
+                ref_vente = tree.item(item)['values'][1]
+                print(f"[AVOIR] Sélection interdite : facture déjà avoirée {ref_vente}")
+                MessageDialog(
+                    "Attention",
+                    "Cette facture a déjà un avoir associé et ne peut plus être sélectionnée.",
+                    type_='warning'
+                )
+                return
+            idvente = tree.item(item)['values'][0]
             fen.destroy()
             self.charger_vente_modification(idvente)
 
