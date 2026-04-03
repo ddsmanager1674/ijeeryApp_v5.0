@@ -30,6 +30,7 @@ from typing import Optional, Dict, Any, List
 import customtkinter as ctk
 from tkinter import ttk
 import psycopg2
+import psycopg2.pool
 from resource_utils import get_config_path
 
 # PDF via ReportLab
@@ -364,6 +365,7 @@ class PageVenteParMsin(ctk.CTkFrame):
 
         # ── État interne ──────────────────────────────────────────────────────
         self.conn: Optional[psycopg2.connection] = None
+        self._pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
         self.article_selectionne: Optional[Dict] = None
         self.stock_temporaire_selection: Optional[float] = None
         self.detail_vente: List[Dict] = []
@@ -400,8 +402,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         # ── Construction de l'interface ───────────────────────────────────────
         self._setup_ui()
 
-        # ── Connexion DB et chargements initiaux ──────────────────────────────
-        self.conn = self._connect_db()
+        # ── Initialisation pool DB et chargements initiaux ────────────────────
+        self._init_pool()
         self.generer_reference()
         self.charger_magasins()
         self.charger_client()
@@ -416,26 +418,45 @@ class PageVenteParMsin(ctk.CTkFrame):
 
     def _connect_db(self) -> Optional[psycopg2.connection]:
         """
-        Ouvre une nouvelle connexion PostgreSQL à partir de config.json.
-        Retourne None en cas d'erreur (évite les crashs silencieux).
+        Récupère une connexion du pool (ou ouvre une nouvelle si pool indisponible).
+        Retourne None en cas d'erreur.
         """
-        try:
-            with open(get_config_path('config.json')) as f:
-                cfg = json.load(f)['database']
-            return psycopg2.connect(
-                host=cfg['host'], user=cfg['user'],
-                password=cfg['password'], database=cfg['database'],
-                port=cfg['port']
-            )
-        except FileNotFoundError:
-            MessageDialog("Config manquante", "Fichier 'config.json' introuvable.", 'error')
-        except psycopg2.Error as e:
-            MessageDialog("Connexion DB", f"Impossible de se connecter : {e}", 'error')
-        return None
+        return self._get_conn()
 
     # Alias public conservé pour compatibilité avec le code existant
     def connect_db(self):
         return self._connect_db()
+
+    def _init_pool(self):
+        """Initialise le pool de connexions PostgreSQL."""
+        try:
+            with open(get_config_path('config.json')) as f:
+                cfg = json.load(f)['database']
+            self._pool = psycopg2.pool.SimpleConnectionPool(
+                minconn=1, maxconn=24,
+                host=cfg['host'], user=cfg['user'],
+                password=cfg['password'], database=cfg['database'],
+                port=cfg['port'], connect_timeout=5
+            )
+        except Exception as e:
+            MessageDialog("Pool DB", f"Impossible d'initialiser le pool : {e}", 'error')
+            self._pool = None
+
+    def _get_conn(self) -> Optional[psycopg2.connection]:
+        """Récupère une connexion du pool."""
+        if self._pool:
+            try:
+                return self._pool.getconn()
+            except psycopg2.pool.PoolError:
+                MessageDialog("Pool DB", "Pool épuisé, réinitialisation.", 'warning')
+                self._init_pool()
+                return self._pool.getconn() if self._pool else None
+        return None
+
+    def _put_conn(self, conn: psycopg2.connection):
+        """Remet une connexion dans le pool."""
+        if self._pool and conn:
+            self._pool.putconn(conn)
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 2 — PARAMÈTRES D'IMPRESSION
@@ -908,10 +929,11 @@ class PageVenteParMsin(ctk.CTkFrame):
 
     def get_article_price(self, idarticle: int, idunite: int) -> float:
         """Récupère le dernier prix de vente pour (idarticle, idunite) depuis tb_prix."""
-        if not self.conn:
+        conn = self._get_conn()
+        if not conn:
             return 0.0
         try:
-            cur = self.conn.cursor()
+            cur = conn.cursor()
             cur.execute("""
                 SELECT COALESCE(prix) FROM tb_prix
                 WHERE idarticle=%s AND idunite=%s ORDER BY id DESC LIMIT 1
@@ -925,10 +947,11 @@ class PageVenteParMsin(ctk.CTkFrame):
             return 0.0
         finally:
             if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def get_unite_niveau_max(self, idarticle: int):
         """Retourne (idunite, niveau, designationunite) de niveau max pour l'article."""
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return None
         try:
             cur = conn.cursor()
@@ -940,7 +963,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             print(f"Erreur get_unite_niveau_max: {e}")
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def verifier_unite_depot_b(self, idarticle: int, idunite: int):
         """
@@ -950,7 +974,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         mag_nom = self.combo_magasin.get()
         if "B" not in mag_nom.upper():
             return (True, "")
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return (False, "Erreur de connexion")
         try:
             cur = conn.cursor()
@@ -978,7 +1002,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             return (False, str(e))
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def calculer_stock_article(self, idarticle: int, idunite_cible: int,
                                 idmag: Optional[int] = None) -> float:
@@ -986,7 +1011,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         Calcul consolidé du stock (identique à page_stock.py).
         Réservoir commun converti via qtunite, filtrable par magasin.
         """
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return 0
         try:
             cur = conn.cursor()
@@ -1024,7 +1049,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             print(f"Erreur calcul stock: {e}")
             return 0
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def calculer_stock_magasin_precis(self, idarticle: int, idunite: int, idmag: int) -> float:
         """
@@ -1034,7 +1060,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         """
         if not idmag or not idarticle or not idunite:
             return 0.0
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn:
             return 0.0
         try:
@@ -1181,8 +1207,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             print(f"Erreur calcul stock magasin précis : {e}")
             return 0.0
         finally:
-            cur.close()
-            conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 7 — LOGIQUE MÉTIER : CHARGEMENTS INITIAUX
@@ -1192,7 +1218,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         """Génère et affiche une nouvelle référence FA-AAAA-NNNNN."""
         if self.mode_modification and self.idvente_charge:
             return  # Ne pas écraser la référence existante en mode modif
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -1216,11 +1242,12 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", f"Génération référence : {e}", 'error')
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def charger_magasins(self):
         """Charge les magasins dans combo_magasin et sélectionne celui de l'utilisateur."""
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -1248,11 +1275,12 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", f"Chargement magasins : {e}", 'error')
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def charger_client(self):
         """Pré-charge la map {nomcli: idclient} pour la validation rapide."""
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -1263,7 +1291,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", f"Chargement clients : {e}", 'error')
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def charger_infos_societe(self):
         """Charge les informations de la société depuis tb_infosociete (pour les PDF)."""
@@ -1273,7 +1302,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             'nifsociete': 'N/A', 'statsociete': 'N/A',
             'cifsociete': 'N/A', 'ambleme': '', 'autre': '',
         }
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn:
             self.infos_societe = _defaults
             return
@@ -1295,7 +1324,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             MessageDialog("Avertissement", f"Infos société : {e}", 'warning')
             self.infos_societe = _defaults
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 8 — LOGIQUE MÉTIER : GESTION DU DÉTAIL DE VENTE
@@ -1602,7 +1632,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         def charger(_e=None):
             filtre = entry_search.get().strip()
             for i in tree.get_children(): tree.delete(i)
-            conn = self._connect_db()
+            conn = self._get_conn()
             if not conn: return
             try:
                 cur = conn.cursor()
@@ -1623,7 +1653,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             except Exception as e:
                 MessageDialog("Erreur", str(e), 'error')
             finally:
-                cur.close(); conn.close()
+                if 'cur' in locals(): cur.close()
+                self._put_conn(conn)
 
         entry_search.bind("<KeyRelease>", charger)
         type_filter.configure(command=lambda _: charger())
@@ -1722,7 +1753,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             idmag   = self.magasin_map.get(mag_nom)
             tree.heading("Stock", text=f"Stock '{mag_nom}'" if mag_nom else "Stock Magasin")
             if not idmag: return
-            conn = self._connect_db()
+            conn = self._get_conn()
             if not conn: return
             try:
                 cur = conn.cursor()
@@ -1882,7 +1913,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             except Exception as e:
                 MessageDialog("Erreur chargement", str(e), 'error')
             finally:
-                cur.close(); conn.close()
+                if 'cur' in locals(): cur.close()
+                self._put_conn(conn)
 
         entry_search.bind("<KeyRelease>", lambda _e: charger(entry_search.get()))
 
@@ -2004,7 +2036,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 MessageDialog("Erreur", "Veuillez entrer ou choisir un client.", 'error')
                 return
 
-            conn = self._connect_db()
+            conn = self._get_conn()
             if not conn: return
             cur = conn.cursor()
 
@@ -2127,7 +2159,8 @@ class PageVenteParMsin(ctk.CTkFrame):
                 traceback.print_exc()
                 return
             finally:
-                cur.close(); conn.close()
+                if 'cur' in locals(): cur.close()
+                self._put_conn(conn)
 
             # ── Affichage de la confirmation ───────────────────────────────────
             total_general = sum(f['total'] for f in factures_creees)
@@ -2254,7 +2287,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         Récupère toutes les données d'une facture (en-tête + lignes + société)
         pour la génération des PDF.
         """
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return None
         data = {'societe': self.infos_societe, 'vente': None, 'utilisateur': None, 'details': []}
         try:
@@ -2312,7 +2345,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             traceback.print_exc()
             return None
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     # ── generate_pdf_a5 : inchangé (logique ReportLab complexe) ───────────────
     def generate_pdf_a5(self, data: dict, filename: str):
@@ -2594,7 +2628,7 @@ class PageVenteParMsin(ctk.CTkFrame):
 
         def charger(filtre=""):
             for i in tree.get_children(): tree.delete(i)
-            conn = self._connect_db()
+            conn = self._get_conn()
             if not conn: return
             try:
                 cur = conn.cursor()
@@ -2618,7 +2652,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             except Exception as e:
                 MessageDialog("Erreur", str(e), 'error')
             finally:
-                cur.close(); conn.close()
+                if 'cur' in locals(): cur.close()
+                self._put_conn(conn)
 
         entry_search.bind("<KeyRelease>", lambda _e: charger(entry_search.get()))
 
@@ -2642,7 +2677,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         Les données sont stockées temporairement dans self.details_proforma_a_ajouter.
         """
         self.nouveau_facture(); self.reset_proforma_state()
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -2681,7 +2716,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", str(e), 'error'); self.reset_proforma_state()
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def ajouter_details_proforma_en_masse(self):
         """
@@ -2738,7 +2774,7 @@ class PageVenteParMsin(ctk.CTkFrame):
 
     def marquer_proforma_comme_facture(self, idprof: int):
         """Met le statut du proforma à 'Facturé' après conversion en vente."""
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -2749,7 +2785,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             conn.rollback(); print(f"Erreur statut proforma: {e}")
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def desactiver_entree_manuelle(self):
         """Désactive tous les champs de saisie manuelle (mode proforma en cours)."""
@@ -2825,7 +2862,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         dlg = PasswordDialog("Autorisation requise", "Code d'autorisation :")
         if not dlg.result:
             return
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -2839,11 +2876,12 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", str(e), 'error')
         finally:
-            conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     def verifier_code_autorisation(self, code_saisi: str) -> bool:
         """Vérifie un code d'autorisation en base (utilisé pour l'ouverture Avoir)."""
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return False
         try:
             cur = conn.cursor()
@@ -2853,7 +2891,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             print(f"Erreur vérification code: {e}"); return False
         finally:
-            conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 14 — LOGIQUE MÉTIER : ALERTES STOCK
@@ -2968,7 +3007,7 @@ class PageVenteParMsin(ctk.CTkFrame):
     def charger_vente_modification(self, idvente: int):
         """Charge une facture existante dans le formulaire pour modification."""
         self.nouveau_facture()
-        conn = self._connect_db()
+        conn = self._get_conn()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -3027,7 +3066,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", str(e), 'error'); traceback.print_exc(); self.nouveau_facture()
         finally:
-            cur.close(); conn.close()
+            if 'cur' in locals(): cur.close()
+            self._put_conn(conn)
 
 
 # ==============================================================================
