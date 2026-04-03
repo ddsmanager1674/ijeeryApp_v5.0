@@ -1,6 +1,6 @@
 {
     "database": {
-        "host": "127.0.0.1",
+        "host": "localhost",
         "user": "postgres",
         "password": "root",
         "database": "sarah_gros",

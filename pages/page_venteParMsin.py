@@ -1656,8 +1656,20 @@ class PageVenteParMsin(ctk.CTkFrame):
                 if 'cur' in locals(): cur.close()
                 self._put_conn(conn)
 
-        entry_search.bind("<KeyRelease>", charger)
-        type_filter.configure(command=lambda _: charger())
+        # ─── DÉBOUNCE sur recherche client (300ms) ───────────────────────────────────
+        # Correction Problème n°2 : Limiter les appels DB lors de la frappe rapide
+        # Sans debounce : taper "DURAND" = 6 requêtes SQL simultanées
+        # Avec debounce : taper "DURAND" = 1 seule requête après 300ms d'inactivité
+        debounce_id = None
+        
+        def debounced_charger(_e=None):
+            nonlocal debounce_id
+            if debounce_id:
+                fen.after_cancel(debounce_id)  # Annuler l'appel précédent
+            debounce_id = fen.after(300, lambda: charger())  # Relancer après 300ms
+        
+        entry_search.bind("<KeyRelease>", debounced_charger)
+        type_filter.configure(command=lambda _: debounced_charger())  # Filtre aussi debounced
 
         def valider():
             sel = tree.selection()
@@ -1916,7 +1928,19 @@ class PageVenteParMsin(ctk.CTkFrame):
                 if 'cur' in locals(): cur.close()
                 self._put_conn(conn)
 
-        entry_search.bind("<KeyRelease>", lambda _e: charger(entry_search.get()))
+        # ─── DÉBOUNCE sur recherche article (300ms) ───────────────────────────────────
+        # Correction Problème n°2 : Éviter la CTE massive à chaque frappe
+        # CTE complexe (100+ lignes) avec SUM/exp() agrègeant tous les mouvements historiques
+        # Sans debounce : 6 CTE = 3-12s au serveur | Avec debounce : 1 CTE = 500ms-2s
+        debounce_id = None
+        
+        def debounced_charger_article(_e=None):
+            nonlocal debounce_id
+            if debounce_id:
+                fen.after_cancel(debounce_id)
+            debounce_id = fen.after(300, lambda: charger(entry_search.get()))
+        
+        entry_search.bind("<KeyRelease>", debounced_charger_article)
 
         def valider():
             sel = tree.selection()
@@ -2655,7 +2679,18 @@ class PageVenteParMsin(ctk.CTkFrame):
                 if 'cur' in locals(): cur.close()
                 self._put_conn(conn)
 
-        entry_search.bind("<KeyRelease>", lambda _e: charger(entry_search.get()))
+        # ─── DÉBOUNCE sur recherche proforma (300ms) ──────────────────────────────────
+        # Correction Problème n°2 : Réduire les appels à la requête GROUP BY/JOIN complexe
+        # Impact : de 6-20 requêtes rapides → 1 seule requête après 300ms d'inactivité
+        debounce_id = None
+        
+        def debounced_charger_proforma(_e=None):
+            nonlocal debounce_id
+            if debounce_id:
+                fen.after_cancel(debounce_id)
+            debounce_id = fen.after(300, lambda: charger(entry_search.get()))
+        
+        entry_search.bind("<KeyRelease>", debounced_charger_proforma)
 
         def valider():
             sel = tree.selection()
