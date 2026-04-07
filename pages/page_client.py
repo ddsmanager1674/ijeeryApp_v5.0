@@ -1172,7 +1172,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     societe_data.get('name', ''), societe_data.get('addr', ''),
                     societe_data.get('ville', ''), societe_data.get('tel', ''),
                 )
-                username = self._get_username_by_id(1)
+                username = self._get_username_by_id(self._get_connected_user_id())
                 client_nom = self._get_client_name(idclient)
                 articles = [("", "Paiement global crédit client", "", 1, float(montant_global), float(montant_global))]
 
@@ -2015,7 +2015,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 
                 messagebox.showinfo("Succès", f"Créance de {self._formater_nombre(montant)} Ar enregistrée avec succès!")
                 
-                username = self._get_username_by_id(1)
+                username = self._get_username_by_id(self._get_connected_user_id())
                 societe_data = self._get_societe_info()
                 societe_tuple = (
                     societe_data.get('name', ''), societe_data.get('addr', ''),
