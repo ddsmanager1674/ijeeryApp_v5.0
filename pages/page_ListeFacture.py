@@ -324,10 +324,12 @@ class PageDetailFacture(ctk.CTkToplevel):
                 f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
 
             self.generate_pdf_a5_duplicata(data, filename, page_vente)
-            messagebox.showinfo("Succès", f"Duplicata généré avec succès !\n{filename}")
+            messagebox.showinfo(parent=self, title="Succès", message=f"Duplicata généré avec succès !\n{filename}")
 
             if os.path.exists(filename):
                 os.startfile(filename)
+            
+            self.destroy()
 
         except Exception as e:
             messagebox.showerror("Erreur",
@@ -338,8 +340,8 @@ class PageDetailFacture(ctk.CTkToplevel):
     def annuler_facture(self):
         """Annule la facture (change le statut à 'ANNULE')"""
         if messagebox.askyesno(
-                "Confirmation",
-                f"Voulez-vous annuler la facture {self.refvente} ?"):
+                parent=self, title="Confirmation",
+                message=f"Voulez-vous annuler la facture {self.refvente} ?"):
             try:
                 with open(get_config_path('config.json')) as f:
                     config = json.load(f)
@@ -350,7 +352,7 @@ class PageDetailFacture(ctk.CTkToplevel):
                     ("ANNULE", self.refvente))
                 conn.commit()
                 messagebox.showinfo(
-                    "Succès", f"La facture {self.refvente} a été annulée.")
+                    parent=self, title="Succès", message=f"La facture {self.refvente} a été annulée.")
                 self.statut = "ANNULE"
                 if hasattr(self, 'btn_annuler'):
                     self.btn_annuler.pack_forget()
