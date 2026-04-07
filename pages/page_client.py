@@ -1588,7 +1588,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             messagebox.showerror("Erreur", f"Erreur génération PDF créance: {e}")
             return None
 
-    def _generer_ticket_pdf_paiement_credit(self, societe, username, articles, montant, mode_nom, refpmt, idclient, client_nom, observation, date_paiement, open_after=False, output_format="A5"):
+    def _generer_ticket_pdf_paiement_credit(self, societe, username, articles, montant, mode_nom, refpmt, idclient, client_nom, observation, date_paiement, open_after=False, output_format="A5", operation_title="PAIEMENT DE CREDIT", info_title="Infos Paiement Credit"):
         try:
             client_adresse = "-"
             client_contact = "-"
@@ -1755,8 +1755,8 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 ("LEFTPADDING",(0,0),(-1,-1),6), ("RIGHTPADDING",(0,0),(-1,-1),6),
             ]))
 
-            operation_title = Paragraph(
-                "PAIEMENT DE CREDIT",
+            op_title = Paragraph(
+                operation_title,
                 ParagraphStyle("OpCreditTitle", parent=styles["Normal"], fontSize=14,
                                fontName="Helvetica-Bold", alignment=TA_CENTER, textColor=color_header))
             operation_info = Paragraph(
@@ -1765,7 +1765,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 f"<b>Mode de paiement :</b> {mode_nom}<br/>"
                 f"<b>Operateur :</b> {username}",
                 ParagraphStyle("OpCreditInfo", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=12))
-            operation_table = Table([[operation_title, operation_info]],
+            operation_table = Table([[op_title, operation_info]],
                                     colWidths=[title_width, info_width], rowHeights=[header_height])
             operation_table.setStyle(TableStyle([
                 ("BOX",(0,0),(-1,-1),1,colors.black), ("ALIGN",(0,0),(0,0),"CENTER"),
@@ -1784,7 +1784,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             elements.append(Spacer(1, 3 * mm))
 
             elements.append(Paragraph(
-                "<b><u>Infos Paiement Credit</u></b><br/>",
+                f"<b><u>{info_title}</u></b><br/>",
                 ParagraphStyle("InfoCreditLine", parent=styles["Normal"], fontSize=9, alignment=TA_CENTER, leading=11)))
             elements.append(Spacer(1, 2 * mm))
 
@@ -2022,13 +2022,27 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     societe_data.get('ville', ''), societe_data.get('tel', ''),
                 )
                 articles = [("", "Creance manuelle", "", 1, float(montant), float(montant))]
+                observation = f"Créance manuelle : {num_fact}"
                 result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le ticket PDF de créance ?")
-                self._generer_ticket_pdf_creance(
+                ticket_path = self._generer_ticket_pdf_creance(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant), mode_nom="Credit", refpmt=num_fact,
                     client_nom=self._get_client_name(idclient), montant_total=float(montant),
                     open_after=result
                 )
+                if ticket_path:
+                    messagebox.showinfo("Confirmation", "Le ticket PDF de créance a été généré.")
+                    if messagebox.askyesno("Impression", "Voulez-vous ouvrir la facture PDF A5 de créance ?"):
+                        facture_a5_path = self._generer_ticket_pdf_paiement_credit(
+                            societe=societe_tuple, username=username, articles=articles,
+                            montant=float(montant), mode_nom="Credit", refpmt=num_fact,
+                            idclient=idclient, client_nom=self._get_client_name(idclient),
+                            observation=observation, date_paiement=datetime.now(),
+                            open_after=True, output_format="A5",
+                            operation_title="VALIDATION CREANCE", info_title="Infos Créance"
+                        )
+                        if facture_a5_path:
+                            messagebox.showinfo("Confirmation", "La facture PDF A5 de créance a été générée.")
                 
                 creance_window.destroy()
                 parent_window.destroy()

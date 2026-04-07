@@ -5,14 +5,6 @@
     "fonction_name": "Administration",
     "menus": [
         [
-            "Absence",
-            "PageAbsence"
-        ],
-        [
-            "Ajout Banque",
-            "PageBanqueNv"
-        ],
-        [
             "Article",
             "PageArticle"
         ],
@@ -49,14 +41,6 @@
             "PageAvoir"
         ],
         [
-            "Banque",
-            "PageBanque"
-        ],
-        [
-            "Base Liste",
-            "PageBaseListe"
-        ],
-        [
             "Bon de Réceptio",
             "PageBonReception"
         ],
@@ -85,40 +69,12 @@
             "PageClientCredit"
         ],
         [
-            "Commande Frs",
-            "PageCommandeFrs"
-        ],
-        [
             "Config DB",
             "DatabaseConfig"
         ],
         [
-            "Decaissement",
-            "PageDecaissement"
-        ],
-        [
-            "DecaissementBq",
-            "PageDecaissementBq"
-        ],
-        [
-            "Encaissement",
-            "PageEncaissement"
-        ],
-        [
-            "EncaissementBq",
-            "PageEncaissementBq"
-        ],
-        [
             "Etat de Salaire",
             "PageSalaireEtatSB"
-        ],
-        [
-            "Evenements",
-            "PageEvenement"
-        ],
-        [
-            "Facturation",
-            "PageFacturation"
         ],
         [
             "Facture Liste",
@@ -133,20 +89,36 @@
             "PageFournisseur"
         ],
         [
-            "Fournisseur Dettes",
-            "PageFrsDette"
-        ],
-        [
-            "Gérer Personnels",
-            "PagePersonnelCRUD"
-        ],
-        [
             "Information Article",
             "PageInfoArticle"
         ],
         [
-            "Init DB",
-            "DBInitializerApp"
+            "Inventaire du Jour",
+            "PageInventaireJour"
+        ],
+        [
+            "Liste Facture",
+            "PageFactureListe"
+        ],
+        [
+            "Liste mouvements",
+            "PageListeMouvement"
+        ],
+        [
+            "Liste Personnel",
+            "AppMain"
+        ],
+        [
+            "Livraison Client",
+            "PageLivraisonClient"
+        ],
+        [
+            "Magasin",
+            "PageMagasin"
+        ],
+        [
+            "Marge Commerciale",
+            "PageStock"
         ],
         [
             "Menu",
@@ -179,14 +151,6 @@
         [
             "Péremption d'article",
             "PageGestionPeremption"
-        ],
-        [
-            "Présence",
-            "PagePresence"
-        ],
-        [
-            "Présence Personnel",
-            "PagePresencePersonnel"
         ],
         [
             "Prix d'article",
@@ -229,6 +193,10 @@
             "PageStockAlerte"
         ],
         [
+            "Stock Article",
+            "PageStock"
+        ],
+        [
             "Stock Livraison",
             "PageStockLivraison"
         ],
@@ -253,14 +221,6 @@
             "PageTransfert"
         ],
         [
-            "Transfert Banque",
-            "PageTransfertBanque"
-        ],
-        [
-            "Transfert Caisse",
-            "PageTransfertCaisse"
-        ],
-        [
             "Type de paiement",
             "PageTypePmt"
         ],
@@ -275,10 +235,6 @@
         [
             "Utilisateurs",
             "PageUsers"
-        ],
-        [
-            "Ventes",
-            "PageVente"
         ],
         [
             "Ventes par Dépôt",

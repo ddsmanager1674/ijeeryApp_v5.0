@@ -1219,12 +1219,26 @@ class PageFournisseur(ctk.CTkFrame):
                     societe_data.get('ville', ''), societe_data.get('tel', ''),
                 )
                 articles = [("", "Dette manuelle fournisseur", "", 1, float(montant), float(montant))]
+                observation = f"Dette manuelle fournisseur : {num_fact}"
                 result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le ticket PDF de dette ?")
-                self._generer_ticket_pdf_dette(
+                ticket_path = self._generer_ticket_pdf_dette(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant), mode_nom="Dette", refpmt=num_fact,
                     frs_nom=self._get_frs_name(idfrs), montant_total=float(montant), open_after=result
                 )
+                if ticket_path:
+                    messagebox.showinfo("Confirmation", "Le ticket PDF de dette a été généré.")
+                    if messagebox.askyesno("Impression", "Voulez-vous ouvrir la facture PDF A5 de dette ?"):
+                        facture_a5_path = self._generer_ticket_pdf_paiement_dette(
+                            societe=societe_tuple, username=username, articles=articles,
+                            montant=float(montant), mode_nom="Dette", refpmt=num_fact,
+                            idfrs=idfrs, frs_nom=self._get_frs_name(idfrs),
+                            observation=observation, date_paiement=datetime.now(),
+                            open_after=True, output_format="A5",
+                            operation_title="VALIDATION DETTE FOURNISSEUR", info_title="Infos Dette Fournisseur"
+                        )
+                        if facture_a5_path:
+                            messagebox.showinfo("Confirmation", "La facture PDF A5 de dette a été générée.")
 
                 self.load_fournisseur()
                 dette_window.destroy()
@@ -1252,7 +1266,8 @@ class PageFournisseur(ctk.CTkFrame):
     def _generer_ticket_pdf_paiement_dette(self, societe, username, articles, montant,
                                            mode_nom, refpmt, idfrs, frs_nom,
                                            observation, date_paiement, open_after=False,
-                                           output_format="A5"):
+                                           output_format="A5", operation_title="PAIEMENT DETTE FOURNISSEUR",
+                                           info_title="Infos Paiement Dette Fournisseur"):
         try:
             frs_adresse = "-"; frs_contact = "-"
             try:
@@ -1299,7 +1314,7 @@ class PageFournisseur(ctk.CTkFrame):
                 c.line(margin, y, ticket_width - margin, y)
                 y -= 7 * mm
                 c.setFont("Helvetica-Bold", 11)
-                c.drawCentredString(x_center, y, "REÇU PAIEMENT DETTE FOURNISSEUR")
+                c.drawCentredString(x_center, y, operation_title)
                 y -= 8 * mm
                 c.line(margin, y, ticket_width - margin, y)
                 y -= 7 * mm
@@ -1411,7 +1426,7 @@ class PageFournisseur(ctk.CTkFrame):
                 ("TOPPADDING",(0,0),(-1,-1),6), ("BOTTOMPADDING",(0,0),(-1,-1),6),
                 ("LEFTPADDING",(0,0),(-1,-1),6), ("RIGHTPADDING",(0,0),(-1,-1),6)]))
 
-            operation_title = Paragraph("PAIEMENT DE DETTE FOURNISSEUR",
+            op_title = Paragraph(operation_title,
                 ParagraphStyle("OpFrsTitle", parent=styles["Normal"], fontSize=12,
                                fontName="Helvetica-Bold", alignment=TA_CENTER, textColor=color_header))
             operation_info = Paragraph(
@@ -1420,7 +1435,7 @@ class PageFournisseur(ctk.CTkFrame):
                 f"<b>Mode de paiement :</b> {mode_nom}<br/>"
                 f"<b>Operateur :</b> {username}",
                 ParagraphStyle("OpFrsInfo", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=12))
-            operation_table = Table([[operation_title, operation_info]],
+            operation_table = Table([[op_title, operation_info]],
                                      colWidths=[title_width, info_width], rowHeights=[header_height])
             operation_table.setStyle(TableStyle([
                 ("BOX",(0,0),(-1,-1),1,colors.black), ("ALIGN",(0,0),(0,0),"CENTER"),
@@ -1436,7 +1451,7 @@ class PageFournisseur(ctk.CTkFrame):
             elements.append(header_table)
             elements.append(Spacer(1, 3*mm))
 
-            elements.append(Paragraph("<b><u>Infos Paiement Dette Fournisseur</u></b><br/>",
+            elements.append(Paragraph(f"<b><u>{info_title}</u></b><br/>",
                 ParagraphStyle("InfoDetteLine", parent=styles["Normal"], fontSize=9,
                                alignment=TA_CENTER, leading=11)))
             elements.append(Spacer(1, 2*mm))
