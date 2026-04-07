@@ -223,7 +223,7 @@ class PageDetailFacture(ctk.CTkToplevel):
 
             sql = """
                 SELECT u.codearticle, a.designation, vd.qtvente, vd.prixunit,
-                       (vd.qtvente * vd.prixunit) as total
+                       (vd.qtvente * (vd.prixunit - vd.remise)) as total
                 FROM tb_ventedetail vd
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
@@ -272,7 +272,7 @@ class PageDetailFacture(ctk.CTkToplevel):
 
             sql_details = """
                 SELECT u.codearticle, a.designation, u.designationunite,
-                       vd.qtvente, vd.prixunit, m.designationmag
+                       vd.qtvente, vd.prixunit, vd.remise, m.designationmag
                 FROM tb_ventedetail vd
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
@@ -310,8 +310,8 @@ class PageDetailFacture(ctk.CTkToplevel):
                 },
                 'details': [
                     {'code_article': r[0], 'designation': r[1], 'unite': r[2],
-                     'qte': r[3], 'prixunit': r[4], 'magasin': r[5],
-                     'montant': r[3] * r[4]}
+                     'qte': r[3], 'prixunit': r[4], 'remise': r[5], 'magasin': r[6],
+                     'montant': r[3] * (float(r[4]) - float(r[5]))}
                     for r in details_rows
                 ]
             }
