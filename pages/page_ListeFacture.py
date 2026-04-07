@@ -435,7 +435,8 @@ class PageDetailFacture(ctk.CTkToplevel):
             droite_text = (
                 f"<b>Facture N°: {vente['refvente']}{suite_label}</b><br/>"
                 f"{vente['dateregistre']}<br/>"
-                f"<b>CLIENT: {client['nomcli']}</b><br/>"
+                f"<b>Magasin: {data['details'][0]['magasin'] if data['details'] else 'N/A'}</b><br/>"
+                f"<b>Client: {client['nomcli']}</b><br/>"
                 f"<font size='8'>Op: {user_name}</font>"
             )
             gauche = Paragraph(gauche_text, style_p)
