@@ -44,6 +44,7 @@ from reportlab.lib import colors
 # ──────────────────────────────────────────────────────────────────────────────
 from app_theme import Colors, Fonts, styled, Theme
 from resource_utils import get_config_path, safe_file_read
+from settings_utils import open_file_if_enabled
 from pages.page_avoir import PageAvoir
 from pages.page_proforma import PageCommandeCli
 
@@ -2298,7 +2299,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                     top.lower()
                 except Exception:
                     pass
-                os.startfile(os.path.abspath(filename))
+                open_file_if_enabled(os.path.abspath(filename), operation="open")
             elif sys.platform == 'darwin':
                 os.system(f'open "{filename}"')
             else:

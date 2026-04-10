@@ -8,6 +8,7 @@ import textwrap
 import subprocess
 import tempfile
 from resource_utils import get_config_path, safe_file_read
+from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A5, landscape
@@ -1095,26 +1096,27 @@ class PageFournisseur(ctk.CTkFrame):
                 articles = [("", "Paiement global dette fournisseur", "", 1,
                               float(montant_global), float(montant_global))]
 
-                result = messagebox.askyesno("Impression", "Voulez-vous ouvrir le PDF de paiement ?")
+                settings = load_settings()
+                open_a5 = is_setting_enabled("Fournisseur_PmtDette_OpenA5", default=0, settings=settings)
                 facture_path = self._generer_ticket_pdf_paiement_dette(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant_global), mode_nom=selected_mode or "Espèces",
                     refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
                     observation=observation_full, date_paiement=date_pmt,
-                    open_after=result, output_format="A5"
+                    open_after=open_a5, output_format="A5"
                 )
                 if facture_path:
                     messagebox.showinfo("Confirmation", "Le PDF de paiement a été généré.")
-                    if messagebox.askyesno("Impression", "Voulez-vous également générer le ticket 80mm ?"):
-                        ticket_path = self._generer_ticket_pdf_paiement_dette(
-                            societe=societe_tuple, username=username, articles=articles,
-                            montant=float(montant_global), mode_nom=selected_mode or "Espèces",
-                            refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
-                            observation=observation_full, date_paiement=date_pmt,
-                            open_after=True, output_format="ticket80"
-                        )
-                        if ticket_path:
-                            messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
+                    open_ticket = is_setting_enabled("Fournisseur_PmtDette_OpenTicket80", default=0, settings=settings)
+                    ticket_path = self._generer_ticket_pdf_paiement_dette(
+                        societe=societe_tuple, username=username, articles=articles,
+                        montant=float(montant_global), mode_nom=selected_mode or "Espèces",
+                        refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
+                        observation=observation_full, date_paiement=date_pmt,
+                        open_after=open_ticket, output_format="ticket80"
+                    )
+                    if open_ticket and ticket_path:
+                        messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
 
                 self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
                 if refresh_callback:
@@ -1220,25 +1222,26 @@ class PageFournisseur(ctk.CTkFrame):
                 )
                 articles = [("", "Dette manuelle fournisseur", "", 1, float(montant), float(montant))]
                 observation = f"Dette manuelle fournisseur : {num_fact}"
-                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le ticket PDF de dette ?")
+                settings = load_settings()
+                open_ticket = is_setting_enabled("Fournisseur_Dette_OpenTicketPdf", default=0, settings=settings)
                 ticket_path = self._generer_ticket_pdf_dette(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant), mode_nom="Dette", refpmt=num_fact,
-                    frs_nom=self._get_frs_name(idfrs), montant_total=float(montant), open_after=result
+                    frs_nom=self._get_frs_name(idfrs), montant_total=float(montant), open_after=open_ticket
                 )
                 if ticket_path:
                     messagebox.showinfo("Confirmation", "Le ticket PDF de dette a été généré.")
-                    if messagebox.askyesno("Impression", "Voulez-vous ouvrir la facture PDF A5 de dette ?"):
-                        facture_a5_path = self._generer_ticket_pdf_paiement_dette(
-                            societe=societe_tuple, username=username, articles=articles,
-                            montant=float(montant), mode_nom="Dette", refpmt=num_fact,
-                            idfrs=idfrs, frs_nom=self._get_frs_name(idfrs),
-                            observation=observation, date_paiement=datetime.now(),
-                            open_after=True, output_format="A5",
-                            operation_title="VALIDATION DETTE FOURNISSEUR", info_title="Infos Dette Fournisseur"
-                        )
-                        if facture_a5_path:
-                            messagebox.showinfo("Confirmation", "La facture PDF A5 de dette a été générée.")
+                    open_a5 = is_setting_enabled("Fournisseur_Dette_OpenA5", default=0, settings=settings)
+                    facture_a5_path = self._generer_ticket_pdf_paiement_dette(
+                        societe=societe_tuple, username=username, articles=articles,
+                        montant=float(montant), mode_nom="Dette", refpmt=num_fact,
+                        idfrs=idfrs, frs_nom=self._get_frs_name(idfrs),
+                        observation=observation, date_paiement=datetime.now(),
+                        open_after=open_a5, output_format="A5",
+                        operation_title="VALIDATION DETTE FOURNISSEUR", info_title="Infos Dette Fournisseur"
+                    )
+                    if open_a5 and facture_a5_path:
+                        messagebox.showinfo("Confirmation", "La facture PDF A5 de dette a été générée.")
 
                 self.load_fournisseur()
                 dette_window.destroy()
@@ -1376,8 +1379,7 @@ class PageFournisseur(ctk.CTkFrame):
                 c.save()
 
                 if open_after:
-                    if os.name == 'nt': os.startfile(path)
-                    else: subprocess.Popen(['xdg-open', path])
+                    open_file_if_enabled(path, operation="open")
                 return path
 
             path = os.path.join(temp_dir,
@@ -1503,8 +1505,7 @@ class PageFournisseur(ctk.CTkFrame):
             doc.build(elements)
 
             if open_after:
-                if os.name == 'nt': os.startfile(path)
-                else: subprocess.Popen(['xdg-open', path])
+                open_file_if_enabled(path, operation="open")
             return path
 
         except Exception as e:
@@ -1572,8 +1573,7 @@ class PageFournisseur(ctk.CTkFrame):
             c.showPage(); c.save()
 
             if open_after:
-                if os.name == 'nt': os.startfile(path)
-                else: subprocess.Popen(['xdg-open', path])
+                open_file_if_enabled(path, operation="open")
             return path
 
         except Exception as e:

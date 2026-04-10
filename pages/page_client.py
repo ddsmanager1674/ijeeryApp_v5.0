@@ -8,6 +8,10 @@ import textwrap
 import subprocess
 import tempfile
 from resource_utils import get_config_path, safe_file_read
+from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
+from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
+from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
+from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A5, landscape
@@ -971,8 +975,9 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
                 os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
                 self._generate_ticket_80mm_payment(idclient, montant_paiement, idmode_sel, date_pmt, ticket_filename)
                 
-                result = messagebox.askyesno("Imprimer", "Voulez-vous imprimer le reçu paiement sur X80?")
-                if result:
+                settings = load_settings()
+                auto_print = is_setting_enabled("Client_PmtCredit_PrintX80", default=0, settings=settings)
+                if auto_print:
                     self._print_ticket_80mm(ticket_filename)
                 
                 for item in tree_credits.get_children():
@@ -1176,26 +1181,27 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 client_nom = self._get_client_name(idclient)
                 articles = [("", "Paiement global crédit client", "", 1, float(montant_global), float(montant_global))]
 
-                result = messagebox.askyesno("Impression", "Voulez-vous ouvrir la facture PDF de paiement A5 ?")
+                settings = load_settings()
+                open_a5 = is_setting_enabled("Client_PmtCredit_OpenA5", default=0, settings=settings)
                 facture_path = self._generer_ticket_pdf_paiement_credit(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
                     refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
                     observation=observation, date_paiement=date_pmt,
-                    open_after=result, output_format="A5"
+                    open_after=open_a5, output_format="A5"
                 )
                 if facture_path:
                     messagebox.showinfo("Confirmation", "La facture PDF de paiement A5 a été générée.")
-                    if messagebox.askyesno("Impression", "Voulez-vous également générer le ticket de paiement 80mm ?"):
-                        ticket_path = self._generer_ticket_pdf_paiement_credit(
-                            societe=societe_tuple, username=username, articles=articles,
-                            montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
-                            refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
-                            observation=observation, date_paiement=date_pmt,
-                            open_after=True, output_format="ticket80"
-                        )
-                        if ticket_path:
-                            messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
+                    open_ticket = is_setting_enabled("Client_PmtCredit_OpenTicket80", default=0, settings=settings)
+                    ticket_path = self._generer_ticket_pdf_paiement_credit(
+                        societe=societe_tuple, username=username, articles=articles,
+                        montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
+                        refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
+                        observation=observation, date_paiement=date_pmt,
+                        open_after=open_ticket, output_format="ticket80"
+                    )
+                    if open_ticket and ticket_path:
+                        messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
 
                 self._render_credit_table(tree_credits, idclient, label_montant_restant)
                 if refresh_callback:
@@ -1579,10 +1585,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             c.showPage()
             c.save()
             if open_after:
-                if os.name == 'nt':
-                    os.startfile(path)
-                else:
-                    subprocess.Popen(['xdg-open', path])
+                open_file_if_enabled(path, operation="open")
             return path
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération PDF créance: {e}")
@@ -1699,10 +1702,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 c.save()
 
                 if open_after:
-                    if os.name == 'nt':
-                        os.startfile(path)
-                    else:
-                        subprocess.Popen(['xdg-open', path])
+                    open_file_if_enabled(path, operation="open")
                 return path
 
             path = os.path.join(temp_dir, f"Paiement_Credit_{refpmt}_{timestamp}.pdf")
@@ -1857,10 +1857,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
 
             doc.build(elements)
             if open_after:
-                if os.name == 'nt':
-                    os.startfile(path)
-                else:
-                    subprocess.Popen(['xdg-open', path])
+                open_file_if_enabled(path, operation="open")
             return path
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération PDF paiement crédit: {e}")
@@ -2023,26 +2020,27 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 )
                 articles = [("", "Creance manuelle", "", 1, float(montant), float(montant))]
                 observation = f"Créance manuelle : {num_fact}"
-                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le ticket PDF de créance ?")
+                settings = load_settings()
+                open_ticket = is_setting_enabled("Client_Creance_OpenTicketPdf", default=0, settings=settings)
                 ticket_path = self._generer_ticket_pdf_creance(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant), mode_nom="Credit", refpmt=num_fact,
                     client_nom=self._get_client_name(idclient), montant_total=float(montant),
-                    open_after=result
+                    open_after=open_ticket
                 )
                 if ticket_path:
                     messagebox.showinfo("Confirmation", "Le ticket PDF de créance a été généré.")
-                    if messagebox.askyesno("Impression", "Voulez-vous ouvrir la facture PDF A5 de créance ?"):
-                        facture_a5_path = self._generer_ticket_pdf_paiement_credit(
-                            societe=societe_tuple, username=username, articles=articles,
-                            montant=float(montant), mode_nom="Credit", refpmt=num_fact,
-                            idclient=idclient, client_nom=self._get_client_name(idclient),
-                            observation=observation, date_paiement=datetime.now(),
-                            open_after=True, output_format="A5",
-                            operation_title="VALIDATION CREANCE", info_title="Infos Créance"
-                        )
-                        if facture_a5_path:
-                            messagebox.showinfo("Confirmation", "La facture PDF A5 de créance a été générée.")
+                    open_a5 = is_setting_enabled("Client_Creance_OpenA5", default=0, settings=settings)
+                    facture_a5_path = self._generer_ticket_pdf_paiement_credit(
+                        societe=societe_tuple, username=username, articles=articles,
+                        montant=float(montant), mode_nom="Credit", refpmt=num_fact,
+                        idclient=idclient, client_nom=self._get_client_name(idclient),
+                        observation=observation, date_paiement=datetime.now(),
+                        open_after=open_a5, output_format="A5",
+                        operation_title="VALIDATION CREANCE", info_title="Infos Créance"
+                    )
+                    if open_a5 and facture_a5_path:
+                        messagebox.showinfo("Confirmation", "La facture PDF A5 de créance a été générée.")
                 
                 creance_window.destroy()
                 parent_window.destroy()

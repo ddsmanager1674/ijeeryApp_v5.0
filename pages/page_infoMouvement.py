@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts
+from settings_utils import open_file_if_enabled
 
 # Imports pour génération PDF
 from reportlab.lib.pagesizes import A5, landscape
@@ -1503,7 +1504,7 @@ class PageChangementArticle(ctk.CTkFrame):
             doc.build(elements)
             print(f"✅ PDF généré : {output_path}")
             if sys.platform == 'win32':
-                os.startfile(output_path)
+                open_file_if_enabled(output_path, operation="open")
             return output_path
         except Exception as e:
             print(f"❌ Erreur PDF : {e}")

@@ -30,6 +30,8 @@ import os
 import sys
 import subprocess
 
+from settings_utils import open_file_if_enabled
+
 from resource_utils import get_config_path, get_session_path, safe_file_read
 from app_theme import Colors, Fonts
 
@@ -1699,7 +1701,7 @@ class PageSortie(ctk.CTkFrame):
         """Ouvre un fichier avec l'application par défaut du système."""
         try:
             if os.name == 'nt':
-                os.startfile(filename)
+                open_file_if_enabled(filename, operation="open")
             elif sys.platform == 'darwin':
                 subprocess.call(['open', filename])
             else:
@@ -1764,7 +1766,7 @@ class PageSortie(ctk.CTkFrame):
                 except Exception: pass
 
                 if result and sys.platform == 'win32':
-                    try: os.startfile(filename)
+                    try: open_file_if_enabled(filename, operation="open")
                     except Exception: pass
 
                 return result
@@ -1840,7 +1842,7 @@ class PageSortie(ctk.CTkFrame):
                 except Exception: pass
 
                 if result and sys.platform == 'win32':
-                    try: os.startfile(filename)
+                    try: open_file_if_enabled(filename, operation="open")
                     except Exception: pass
 
                 return result
@@ -2094,7 +2096,7 @@ class PageSortie(ctk.CTkFrame):
 
             try:
                 if sys.platform == 'win32':
-                    os.startfile(filename, "print")
+                    open_file_if_enabled(filename, operation="print")
                 else:
                     subprocess.Popen(['lp', filename])
             except Exception:

@@ -24,6 +24,7 @@ import os
 import subprocess
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
+from settings_utils import is_global_print_enabled, open_file_if_enabled
 
 from app_theme import Colors, Fonts
 
@@ -1219,6 +1220,8 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             settings = self.charger_settings()
             imprimer_ticket = settings.get('ClientAPayer_ImpressionTicket', 1)
+            if not is_global_print_enabled(settings=settings, default=1):
+                imprimer_ticket = 0
             
             print(f"📋 ClientAPayer_ImpressionTicket = {imprimer_ticket}")
             
@@ -1462,10 +1465,7 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             if imprimer_ticket == 1:
                 try:
-                    if os.name == 'nt':
-                        os.startfile(output_path)
-                    elif os.name == 'posix':
-                        subprocess.call(['xdg-open', output_path])
+                    open_file_if_enabled(output_path, operation="open")
                     print(f"✅ État crédit ouvert : {output_path}")
                 except Exception as e:
                     print(f"⚠️ Erreur ouverture état crédit : {e}")
@@ -1613,10 +1613,7 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             if imprimer_ticket == 1:
                 try:
-                    if os.name == 'nt':
-                        os.startfile(filename)
-                    elif os.name == 'posix':
-                        subprocess.call(['xdg-open', filename])
+                    open_file_if_enabled(filename, operation="open")
                     print(f"✅ Ticket de caisse ouvert : {filename}")
                 except Exception as e:
                     print(f"⚠️ Erreur lors de l'ouverture du PDF : {e}")

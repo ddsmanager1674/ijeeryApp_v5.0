@@ -10,6 +10,7 @@ import os
 import sys # Ajouté pour open_file sur Linux/macOS
 import textwrap # Ajouté pour le formatage du ticket de caisse
 from resource_utils import get_config_path, safe_file_read
+from settings_utils import open_file_if_enabled
 
 
 # --- NOUVELLES IMPORTATIONS POUR L'IMPRESSION ---
@@ -1743,12 +1744,7 @@ class PageVente(ctk.CTkFrame):
     def open_file(self, filename):
         """Ouvre le fichier généré avec le programme par défaut."""
         try:
-            if sys.platform == 'win32':
-                os.startfile(filename)
-            elif sys.platform == 'darwin':
-                os.system(f'open "{filename}"')
-            else:
-                os.system(f'xdg-open "{filename}"')
+            open_file_if_enabled(filename, operation="open")
         except Exception as e:
             pass # Ignorer les erreurs d'ouverture de fichier
 

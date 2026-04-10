@@ -32,6 +32,7 @@ from decimal import Decimal, InvalidOperation
 
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
+from settings_utils import open_file_if_enabled
 
 # ── Imports ReportLab (impression PDF) ───────────────────────────────────────
 from reportlab.lib.pagesizes import A5, landscape
@@ -2822,7 +2823,7 @@ class PageAvoir(ctk.CTkFrame):
         """Ouvre un fichier avec l'application par défaut du système."""
         try:
             if sys.platform == 'win32':
-                os.startfile(filename)
+                open_file_if_enabled(filename, operation="open")
             elif sys.platform == 'darwin':
                 os.system(f'open "{filename}"')
             else:
