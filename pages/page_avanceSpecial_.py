@@ -10,6 +10,13 @@ import json
 import sys
 import os
 from resource_utils import get_config_path, safe_file_read
+try:
+    from tkcalendar import DateEntry
+except Exception:  # tkcalendar non installé → fallback sur Entry texte
+    DateEntry = None
+
+# Thème UI iJeery
+from app_theme import Colors, Fonts, Theme, styled, Layout
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -22,13 +29,23 @@ if parent_dir not in sys.path:
 def charger_personnels(cursor):
         """Charge la liste des personnels depuis la base de données."""
         cursor.execute("SELECT id, nom, prenom FROM tb_personnel ORDER BY nom")
-        return [{"id": row[0], "nom": row[1], "prenom": row[2], "nom_complet": f"{row[1]} {row[2]}"} for row in cursor.fetchall()]
+        # [UI] Affichage propre: prenom None → "-"
+        out = []
+        for _id, nom, prenom in cursor.fetchall():
+            prenom_disp = (prenom or "").strip() if prenom is not None else ""
+            prenom_disp = prenom_disp if prenom_disp else "-"
+            nom_disp = (nom or "").strip() if nom is not None else ""
+            nom_disp = nom_disp if nom_disp else "-"
+            out.append({"id": _id, "nom": nom, "prenom": prenom, "nom_complet": f"{nom_disp} {prenom_disp}"})
+        return out
 
 # ---
 class FenetreAvanceSpec(ctk.CTkFrame):
 
     def __init__(self, master, iduser=None):
-        super().__init__(master)
+        # [UI] Harmonisation Avance Spéciale avec app_theme (header/cards/boutons/table)
+        # [LOGIQUE] Aucune modification des règles métier/SQL ; uniquement UI et styles
+        super().__init__(master, fg_color=Colors.BG_PAGE)
         self.master = master
         # Stocker l'iduser passé en paramètre
         self.iduser = iduser
@@ -49,6 +66,10 @@ class FenetreAvanceSpec(ctk.CTkFrame):
 
         self.personnel = charger_personnels(self.cursor)
         self.prof_ids = {prof["nom_complet"]: prof["id"] for prof in self.personnel}
+        self.id_prof_selectionne = None
+        self.selected_personnel_var = ctk.StringVar(value="")
+        self._avances_raw = []
+        self._sort_state = {"col": None, "desc": False}
 
         # Widgets d'interface
         self.creer_widgets()
@@ -113,8 +134,9 @@ class FenetreAvanceSpec(ctk.CTkFrame):
             return False
 
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background="#FFFFFF")
-        tree.tag_configure("row_odd", background="#D9EEED")
+        # [UI] Palette alignée au thème iJeery
+        tree.tag_configure("row_even", background=Colors.BG_CARD)
+        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):
@@ -122,54 +144,399 @@ class FenetreAvanceSpec(ctk.CTkFrame):
      
     
     def autocompletion_personnel(self, event):
-        typed = self.personnel_var.get().lower()
-        if typed == "":
-            data = self.nom_complets
-        else:
-            data = [nom for nom in self.nom_complets if typed in nom.lower()]
+        # [UI] Ancien mode combobox (désactivé) — personnel se fait via bouton Rechercher
+        return
 
-        # update values
-        self.combobox_personnel['values'] = data
-        self.combobox_personnel.event_generate('<Down>')  # show dropdown list
+    # ──────────────────────────────────────────────────────────────────────
+    # [UI] Sélecteur personnel (bouton Rechercher + champ readonly)
+    # ──────────────────────────────────────────────────────────────────────
+
+    def open_personnel_picker(self):
+        top = ctk.CTkToplevel(self)
+        top.title("Rechercher un personnel")
+        top.geometry("520x420")
+        top.transient(self.winfo_toplevel())
+        top.grab_set()
+
+        top.grid_columnconfigure(0, weight=1)
+        top.grid_rowconfigure(2, weight=1)
+
+        header = ctk.CTkFrame(top, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
+        left = styled.frame(header)
+        left.pack(side="left", padx=14)
+        ctk.CTkLabel(left, text="👤", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
+        inner = styled.frame(left)
+        inner.pack(side="left")
+        ctk.CTkLabel(inner, text="Personnel", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
+        ctk.CTkLabel(inner, text="Rechercher et sélectionner", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
+
+        tools = ctk.CTkFrame(top, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        tools.grid(row=1, column=0, sticky="ew", padx=10, pady=(10, 6))
+        tools.grid_columnconfigure(0, weight=1)
+
+        q_var = ctk.StringVar(value="")
+        q_entry = ctk.CTkEntry(
+            tools, textvariable=q_var, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            corner_radius=8, font=Fonts.body(11), placeholder_text="Nom ou prénom…",
+        )
+        q_entry.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+
+        table_card = ctk.CTkFrame(top, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        table_card.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        table_card.grid_columnconfigure(0, weight=1)
+        table_card.grid_rowconfigure(0, weight=1)
+
+        tv = ttk.Treeview(table_card, columns=("id", "nom", "prenom"), show="headings", height=10, style="P.Treeview")
+        tv.heading("id", text="ID")
+        tv.heading("nom", text="Nom")
+        tv.heading("prenom", text="Prénom")
+        tv.column("id", width=70, anchor="center")
+        tv.column("nom", width=200, anchor="w")
+        tv.column("prenom", width=200, anchor="w")
+        tv.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
+        vsb = ttk.Scrollbar(table_card, orient="vertical", command=tv.yview)
+        tv.configure(yscrollcommand=vsb.set)
+        vsb.grid(row=0, column=1, sticky="ns", pady=6)
+
+        def _fill(query: str = ""):
+            for item in tv.get_children():
+                tv.delete(item)
+            try:
+                if not self.cursor:
+                    return
+                like = f"%{query.strip()}%"
+                self.cursor.execute(
+                    "SELECT id, nom, prenom FROM tb_personnel WHERE (nom ILIKE %s OR prenom ILIKE %s) ORDER BY nom, prenom",
+                    (like, like),
+                )
+                for _id, nom, prenom in self.cursor.fetchall():
+                    nom_disp = (nom or "").strip() if nom is not None else ""
+                    prenom_disp = (prenom or "").strip() if prenom is not None else ""
+                    nom_disp = nom_disp if nom_disp else "-"
+                    prenom_disp = prenom_disp if prenom_disp else "-"
+                    tv.insert("", "end", values=(_id, nom_disp, prenom_disp))
+            except Exception:
+                return
+
+        def _select():
+            sel = tv.selection()
+            if not sel:
+                return
+            _id, nom, prenom = tv.item(sel[0], "values")
+            try:
+                self.id_prof_selectionne = int(_id)
+            except Exception:
+                self.id_prof_selectionne = None
+            self.selected_personnel_var.set(self._fmt_personnel(nom, prenom))
+            top.destroy()
+
+        tv.bind("<Double-1>", lambda e: _select())
+        q_entry.bind("<Return>", lambda e: _fill(q_var.get()))
+
+        footer = ctk.CTkFrame(top, fg_color="transparent")
+        footer.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 10))
+        styled.button_secondary(footer, text="Annuler", icon="✖", width=120, height=32, command=top.destroy).pack(side="right")
+        styled.button_success(footer, text="Sélectionner", icon="✅", width=140, height=32, command=_select).pack(side="right", padx=(0, 8))
+
+        _fill("")
+        q_entry.focus_set()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # [UI] Filtres + tri liste avances (client-side)
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _get_date_filter_value(self, w):
+        if DateEntry and hasattr(w, "get_date"):
+            return w.get_date().strftime("%Y-%m-%d")
+        if hasattr(w, "get"):
+            return (w.get() or "").strip()
+        return ""
+
+    def reset_filters(self):
+        try:
+            self.filter_search_var.set("")
+        except Exception:
+            pass
+        if DateEntry:
+            try:
+                self.filter_date_start.set_date(date.today())
+                self.filter_date_end.set_date(date.today())
+            except Exception:
+                pass
+        else:
+            try:
+                self.filter_date_start.delete(0, ctk.END)
+                self.filter_date_end.delete(0, ctk.END)
+            except Exception:
+                pass
+        try:
+            self.sort_key.set("Date (desc)")
+        except Exception:
+            pass
+        self.apply_filters()
+
+    def sort_treeview(self, key):
+        if self._sort_state.get("col") == key:
+            self._sort_state["desc"] = not self._sort_state.get("desc", False)
+        else:
+            self._sort_state = {"col": key, "desc": False}
+        self.apply_filters(force_sort_key=key, force_desc=self._sort_state["desc"])
+
+    def apply_filters(self, force_sort_key=None, force_desc=None):
+        q = (self.filter_search_var.get() if hasattr(self, "filter_search_var") else "").strip().lower()
+        d1 = self._get_date_filter_value(getattr(self, "filter_date_start", None))
+        d2 = self._get_date_filter_value(getattr(self, "filter_date_end", None))
+
+        def _parse_ymd(s):
+            try:
+                return datetime.strptime(s, "%Y-%m-%d").date()
+            except Exception:
+                return None
+
+        d1v = _parse_ymd(d1) if d1 else None
+        d2v = _parse_ymd(d2) if d2 else None
+
+        rows = []
+        for r in (self._avances_raw or []):
+            if q:
+                hay = f"{r.get('ref','')} {r.get('obs','')} {r.get('personnel','')}".lower()
+                if q not in hay:
+                    continue
+            if d1v or d2v:
+                dd = (r.get("date_dt") or datetime.min).date()
+                if d1v and dd < d1v:
+                    continue
+                if d2v and dd > d2v:
+                    continue
+            rows.append(r)
+
+        sort_mode = (self.sort_key.get() if hasattr(self, "sort_key") else "Date (desc)")
+        if force_sort_key:
+            map_key = {
+                "date": ("date_dt", False),
+                "montant": ("montant", False),
+                "personnel": ("personnel", False),
+                "ref": ("ref", False),
+                "obs": ("obs", False),
+            }
+            col, _ = map_key.get(force_sort_key, ("date_dt", True))
+            desc = bool(force_desc)
+            rows.sort(key=lambda x: x.get(col) or "", reverse=desc)
+        else:
+            if sort_mode == "Date (asc)":
+                rows.sort(key=lambda x: x.get("date_dt") or datetime.min, reverse=False)
+            elif sort_mode == "Personnel (A→Z)":
+                rows.sort(key=lambda x: (x.get("personnel") or "").lower(), reverse=False)
+            elif sort_mode == "Personnel (Z→A)":
+                rows.sort(key=lambda x: (x.get("personnel") or "").lower(), reverse=True)
+            elif sort_mode == "Montant (asc)":
+                rows.sort(key=lambda x: x.get("montant") or 0, reverse=False)
+            elif sort_mode == "Montant (desc)":
+                rows.sort(key=lambda x: x.get("montant") or 0, reverse=True)
+            else:
+                rows.sort(key=lambda x: x.get("date_dt") or datetime.min, reverse=True)
+
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for r in rows:
+            self.tree.insert(
+                "",
+                "end",
+                values=(
+                    r["date_str"],
+                    r["ref"],
+                    r["obs"],
+                    r["montant_str"],
+                    r["nb_remb"],
+                    r["pmt_mois_str"],
+                ),
+            )
+        self._refresh_table_alternating_colors(self.tree)
 
     def generate_observation(self, nom, prenom):
         today = date.today().strftime("%d/%m/%Y")
-        return f"AVS - {nom.upper()} {prenom.capitalize()} - {today}"
+        # [LOGIQUE] Robuste aux valeurs NULL (évite prenom=None → capitalize() crash)
+        nom_s = (nom or "").strip()
+        prenom_s = (prenom or "").strip()
+        nom_fmt = nom_s.upper() if nom_s else "INCONNU"
+        prenom_fmt = prenom_s.capitalize() if prenom_s else ""
+        sep = " " if prenom_fmt else ""
+        return f"AVS - {nom_fmt}{sep}{prenom_fmt} - {today}"
+
+    def _fmt_personnel(self, nom, prenom):
+        nom_s = (nom or "").strip() if nom is not None else ""
+        prenom_s = (prenom or "").strip() if prenom is not None else ""
+        nom_s = nom_s if nom_s else "-"
+        prenom_s = prenom_s if prenom_s else "-"
+        return f"{nom_s} {prenom_s}".strip()
+
+    def _setup_treeview_style(self):
+        # [UI] Style tableau cohérent avec le thème iJeery
+        s = ttk.Style()
+        try:
+            s.theme_use("clam")
+        except Exception:
+            pass
+        s.configure(
+            "P.Treeview",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD,
+            rowheight=26,
+            borderwidth=0,
+            font=("Segoe UI", 10),
+        )
+        s.configure(
+            "P.Treeview.Heading",
+            background=Colors.MIDNIGHT,
+            foreground=Colors.TEXT_ON_DARK,
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padding=(6, 5),
+        )
+        s.map("P.Treeview", background=[("selected", Colors.PRIMARY_LIGHT)])
+        s.map("P.Treeview.Heading", background=[("active", Colors.MIDNIGHT_LIGHT)])
 
     def creer_widgets(self):
-        # Section Champs de Saisie en Haut
-        input_frame = ctk.CTkFrame(self)
-        input_frame.pack(pady=10, padx=10, fill="x")
+        # [UI] Header + cards (même logique que les pages modernisées)
+        self._setup_treeview_style()
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(3, weight=1)
 
-        # Combobox pour les personnel
-        ctk.CTkLabel(input_frame, text="Personnel :").grid(row=0, column=0, padx=5, pady=2, sticky="w")
-        self.personnel_var = tk.StringVar()
-        self.nom_complets = [p["nom_complet"] for p in self.personnel]
-        
-        # Use ttk.Combobox
-        self.combobox_personnel = ttk.Combobox(input_frame, textvariable=self.personnel_var, values=self.nom_complets, state="normal")
-        self.combobox_personnel.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
-        self.combobox_personnel.bind("<KeyRelease>", self.autocompletion_personnel)
+        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
+        header.grid_columnconfigure(1, weight=1)
 
-        # Champ de saisie mtpaye
-        ctk.CTkLabel(input_frame, text="Montant à Payer :").grid(row=0, column=2, padx=5, pady=2, sticky="w")
+        left = styled.frame(header)
+        left.grid(row=0, column=0, padx=14, sticky="w")
+        ctk.CTkLabel(left, text="💰", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
+        inner = styled.frame(left)
+        inner.pack(side="left")
+        ctk.CTkLabel(inner, text="Avance Spéciale", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
+        ctk.CTkLabel(inner, text="Saisie, remboursement et export", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
+
+        # Section Champs de Saisie (card)
+        input_frame = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        input_frame.grid(row=1, column=0, padx=10, pady=(10, 6), sticky="ew")
+        # [UI] Formulaire inline : Rechercher personnel + Montant + Nb remboursements + Enregistrer
+        input_frame.grid_columnconfigure(2, weight=1)
+
+        ctk.CTkLabel(input_frame, text="Personnel", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
+            row=0, column=0, padx=(12, 6), pady=10, sticky="w"
+        )
+        styled.button_primary(
+            input_frame, text="Rechercher", icon="🔎", width=120, height=32, command=self.open_personnel_picker
+        ).grid(row=0, column=1, padx=(0, 8), pady=10, sticky="w")
+
+        self.selected_personnel_entry = ctk.CTkEntry(
+            input_frame,
+            textvariable=self.selected_personnel_var,
+            height=32,
+            fg_color=Colors.BG_INPUT,
+            border_color=Colors.BORDER,
+            corner_radius=8,
+            font=Fonts.body(11),
+            state="readonly",
+            placeholder_text="Aucun personnel sélectionné",
+        )
+        self.selected_personnel_entry.grid(row=0, column=2, padx=(0, 12), pady=10, sticky="ew")
+
+        ctk.CTkLabel(input_frame, text="Montant", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
+            row=0, column=3, padx=(0, 6), pady=10, sticky="w"
+        )
         self.mtpaye_var = tk.StringVar()
-        ctk.CTkEntry(input_frame, textvariable=self.mtpaye_var).grid(row=0, column=3, padx=5, pady=2, sticky="ew")
+        self.mtpaye_entry = ctk.CTkEntry(
+            input_frame, textvariable=self.mtpaye_var, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            corner_radius=8, font=Fonts.body(11), placeholder_text="0,00",
+        )
+        self.mtpaye_entry.grid(row=0, column=4, padx=(0, 12), pady=10, sticky="w")
 
-        # Champ de saisie nombre de remboursement
-        ctk.CTkLabel(input_frame, text="Nb Remboursement :").grid(row=0, column=4, padx=5, pady=2, sticky="w")
+        ctk.CTkLabel(input_frame, text="Nb remb.", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
+            row=0, column=5, padx=(0, 6), pady=10, sticky="w"
+        )
         self.nbremboursement_var = tk.StringVar()
-        ctk.CTkEntry(input_frame, textvariable=self.nbremboursement_var).grid(row=0, column=5, padx=5, pady=2, sticky="ew")
+        self.nbremb_entry = ctk.CTkEntry(
+            input_frame, textvariable=self.nbremboursement_var, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            corner_radius=8, font=Fonts.body(11), placeholder_text="1",
+            width=90,
+        )
+        self.nbremb_entry.grid(row=0, column=6, padx=(0, 12), pady=10, sticky="w")
 
-        # Frame for Treeview to better manage its packing
-        tree_container_frame = ctk.CTkFrame(self, fg_color="transparent")
-        tree_container_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        styled.button_success(
+            input_frame, text="Enregistrer", icon="💾", width=150, height=32, command=self.enregistrer_avance
+        ).grid(row=0, column=7, padx=(0, 12), pady=10, sticky="e")
+
+        # Card filtres/tri (liste avances spéciales)
+        filtres_frame = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        filtres_frame.grid(row=2, column=0, padx=10, pady=(0, 6), sticky="ew")
+        filtres_frame.grid_columnconfigure(5, weight=1)
+
+        ctk.CTkLabel(filtres_frame, text="Du", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
+        if DateEntry:
+            de_kw = dict(width=12, background=Colors.PRIMARY_HOVER, foreground=Colors.TEXT_ON_DARK, borderwidth=2, date_pattern="yyyy-mm-dd")
+            self.filter_date_start = DateEntry(filtres_frame, **de_kw)
+            self.filter_date_end = DateEntry(filtres_frame, **de_kw)
+        else:
+            self.filter_date_start = ctk.CTkEntry(filtres_frame, width=120, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, corner_radius=8, font=Fonts.body(11), placeholder_text="YYYY-MM-DD")
+            self.filter_date_end = ctk.CTkEntry(filtres_frame, width=120, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, corner_radius=8, font=Fonts.body(11), placeholder_text="YYYY-MM-DD")
+        self.filter_date_start.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="w")
+
+        ctk.CTkLabel(filtres_frame, text="Au", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=2, padx=(0, 6), pady=10, sticky="w")
+        self.filter_date_end.grid(row=0, column=3, padx=(0, 10), pady=10, sticky="w")
+
+        ctk.CTkLabel(filtres_frame, text="Recherche", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=4, padx=(0, 6), pady=10, sticky="w")
+        self.filter_search_var = ctk.StringVar(value="")
+        self.filter_search_entry = ctk.CTkEntry(
+            filtres_frame, textvariable=self.filter_search_var, height=32, fg_color=Colors.BG_INPUT,
+            border_color=Colors.BORDER, corner_radius=8, font=Fonts.body(11), placeholder_text="Nom, prénom, ref…",
+        )
+        self.filter_search_entry.grid(row=0, column=5, padx=(0, 10), pady=10, sticky="ew")
+        self.filter_search_entry.bind("<Return>", lambda e: self.apply_filters())
+
+        ctk.CTkLabel(filtres_frame, text="Tri", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=6, padx=(0, 6), pady=10, sticky="w")
+        self.sort_key = ctk.StringVar(value="Date (desc)")
+        self.sort_combo = styled.combobox(
+            filtres_frame,
+            values=["Date (desc)", "Date (asc)", "Personnel (A→Z)", "Personnel (Z→A)", "Montant (desc)", "Montant (asc)"],
+            command=lambda *_: self.apply_filters(),
+            height=32,
+            width=160,
+            variable=self.sort_key,
+        )
+        self.sort_combo.grid(row=0, column=7, padx=(0, 10), pady=10, sticky="w")
+
+        styled.button_secondary(filtres_frame, text="Réinitialiser", icon="↩", width=120, height=32, command=self.reset_filters).grid(
+            row=0, column=8, padx=(0, 12), pady=10, sticky="e"
+        )
+
+        # Card tableau
+        tree_container_frame = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        tree_container_frame.grid(row=3, column=0, padx=10, pady=(0, 6), sticky="nsew")
+        tree_container_frame.grid_columnconfigure(0, weight=1)
+        tree_container_frame.grid_rowconfigure(0, weight=1)
 
         # Treeview des avances spéciales (still ttk.Treeview)
-        self.tree = ttk.Treeview(tree_container_frame, columns=("Date", "Référence", "Observation", "Montant", "Nb Remboursement", "Paiement par Mois"), show="headings")
+        self.tree = ttk.Treeview(
+            tree_container_frame,
+            columns=("Date", "Référence", "Observation", "Montant", "Nb Remboursement", "Paiement par Mois"),
+            show="headings",
+            style="P.Treeview",
+        )
         self._configure_table_alternating_colors(self.tree)
         for col in ("Date", "Référence", "Observation", "Montant", "Nb Remboursement", "Paiement par Mois"):
-            self.tree.heading(col, text=col)
+            if col == "Date":
+                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("date"))
+            elif col == "Référence":
+                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("ref"))
+            elif col == "Observation":
+                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("obs"))
+            elif col == "Montant":
+                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("montant"))
+            else:
+                self.tree.heading(col, text=col)
             self.tree.column(col, width=120)
 
         # Configuration des scrolls (still ttk.Scrollbar)
@@ -177,35 +544,23 @@ class FenetreAvanceSpec(ctk.CTkFrame):
         hsb = ttk.Scrollbar(tree_container_frame, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        self.tree.pack(side="left", fill="both", expand=True)
-        vsb.pack(side='right', fill='y')
-        hsb.pack(side='bottom', fill='x')
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
+        vsb.grid(row=0, column=1, sticky="ns", pady=6)
+        hsb.grid(row=1, column=0, sticky="ew", padx=(6, 0))
 
         # Section des boutons
-        btn_frame = ctk.CTkFrame(self)
-        btn_frame.pack(pady=10)
+        btn_frame = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        btn_frame.grid(row=4, column=0, padx=10, pady=(0, 10), sticky="ew")
 
-        ctk.CTkButton(btn_frame, text="Enregistrer", fg_color="#2ecc71", 
-        hover_color="#27ae60", command=self.enregistrer_avance).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Modifier", command=self.modifier_avance).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Annuler", fg_color="#e74c3c",
-        hover_color="#c0392b", command=self.annuler_saisie).pack(side="left", padx=5)
-        
-        # Add Export Buttons
-        ctk.CTkButton(btn_frame, text="Exporter Excel", command=self.exporter_excel).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Exporter PDF", command=self.exporter_pdf).pack(side="left", padx=5)
+        # bouton Enregistrer déplacé dans le formulaire inline
+        styled.button_primary(btn_frame, text="Modifier", icon="✏️", width=120, height=32, command=self.modifier_avance).pack(side="left", padx=0, pady=10)
+        styled.button_danger(btn_frame, text="Annuler", icon="✖", width=120, height=32, command=self.annuler_saisie).pack(side="left", padx=10, pady=10)
+        styled.button_premium(btn_frame, text="Exporter Excel", icon="📊", width=160, height=32, command=self.exporter_excel).pack(side="right", padx=10, pady=10)
+        styled.button_premium(btn_frame, text="Exporter PDF", icon="📄", width=150, height=32, command=self.exporter_pdf).pack(side="right", padx=0, pady=10)
 
-        # Configuration du poids des colonnes pour l'étirement
-        input_frame.columnconfigure(1, weight=1)
-        input_frame.columnconfigure(3, weight=1)
-        input_frame.columnconfigure(5, weight=1)
+        # (UI) poids déjà configurés via grid_columnconfigure ci-dessus
 
     def charger_avances(self):
-        # Clear existing content
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        self._refresh_table_alternating_colors(self.tree)
-
         self.cursor.execute("""
             SELECT tap.datepmt, tap.refpmt, tap.observation, tap.mtpaye, tap.nbremboursement, p.nom, p.prenom
             FROM tb_avancespecpers tap
@@ -213,38 +568,53 @@ class FenetreAvanceSpec(ctk.CTkFrame):
             ORDER BY tap.datepmt DESC
         """)
         resultats = self.cursor.fetchall()
-
+        self._avances_raw = []
         for ligne in resultats:
             datepmt = ligne[0] if ligne[0] else datetime.now()
-            reference = ligne[1]
-            observation = ligne[2]
+            reference = ligne[1] or ""
+            observation = ligne[2] or ""
             montant = ligne[3]
-            nb_remboursement = ligne[4]
+            nb_remboursement = ligne[4] or 0
             nom_prof = ligne[5]
             prenom_prof = ligne[6]
-            
-            paiement_par_mois = montant / nb_remboursement if nb_remboursement else 0
-            
-            # Format the observation to include professor name if it's generic
-            if "AVS -" in observation and not f"{nom_prof.upper()} {prenom_prof.capitalize()}" in observation:
-                observation = self.generate_observation(nom_prof, prenom_prof)
 
-            self.tree.insert("", "end", values=(
-                datepmt.strftime("%Y-%m-%d %H:%M:%S"),
-                reference,
-                observation,
-                f"{montant:,.2f}".replace(',', ' ').replace('.', ','),
-                nb_remboursement,
-                f"{paiement_par_mois:,.2f}".replace(',', ' ').replace('.', ',')
-            ))
-        self._refresh_table_alternating_colors(self.tree)
+            try:
+                mt = float(montant) if montant is not None else 0.0
+            except Exception:
+                mt = 0.0
+
+            try:
+                nb = int(nb_remboursement) if nb_remboursement is not None else 0
+            except Exception:
+                nb = 0
+
+            paiement_par_mois = (mt / nb) if nb else 0.0
+
+            # [LOGIQUE] Observation: éviter les erreurs si prénom NULL
+            if "AVS -" in observation:
+                expected_name = self._fmt_personnel(nom_prof, prenom_prof)
+                if expected_name and expected_name.upper() not in observation.upper():
+                    observation = self.generate_observation(nom_prof, prenom_prof)
+
+            self._avances_raw.append({
+                "date_dt": datepmt,
+                "date_str": datepmt.strftime("%Y-%m-%d %H:%M:%S"),
+                "ref": reference,
+                "obs": observation,
+                "montant": mt,
+                "montant_str": f"{mt:,.2f}".replace(",", " ").replace(".", ","),
+                "nb_remb": nb,
+                "pmt_mois": paiement_par_mois,
+                "pmt_mois_str": f"{paiement_par_mois:,.2f}".replace(",", " ").replace(".", ","),
+                "personnel": self._fmt_personnel(nom_prof, prenom_prof),
+            })
+        self.apply_filters()
 
     def enregistrer_avance(self):
-        personnel_selectionne = self.personnel_var.get()
         montant = self.mtpaye_var.get().strip()
         nb_remboursement = self.nbremboursement_var.get().strip()
 
-        if not personnel_selectionne:
+        if not self.id_prof_selectionne:
             messagebox.showerror("Erreur", "Veuillez sélectionner un personnel.")
             return
         if not montant:
@@ -268,15 +638,14 @@ class FenetreAvanceSpec(ctk.CTkFrame):
                 messagebox.showerror("Erreur", "Le montant et le nombre de remboursements doivent être supérieurs à zéro.")
                 return
 
-            personnel_id = self.prof_ids.get(personnel_selectionne)
-            if not personnel_id:
-                messagebox.showerror("Erreur", "ID du personnel non trouvé. Veuillez sélectionner un personnel valide de la liste.")
-                return
+            personnel_id = self.id_prof_selectionne
 
             reference = self.generer_reference()
             # Retrieve professor name and first name for observation
             pers_info = next((p for p in self.personnel if p["id"] == personnel_id), None)
-            observation = self.generate_observation(pers_info["nom"], pers_info["prenom"])
+            nom = pers_info["nom"] if pers_info else None
+            prenom = pers_info["prenom"] if pers_info else None
+            observation = self.generate_observation(nom, prenom)
             date_actuelle = datetime.now()
 
             print(f"Enregistrement avec iduser: {self.iduser}")  # Debug
@@ -377,7 +746,8 @@ class FenetreAvanceSpec(ctk.CTkFrame):
         edit_window.grab_set()  # Make the Toplevel modal
 
     def annuler_saisie(self):
-        self.personnel_var.set("")
+        self.id_prof_selectionne = None
+        self.selected_personnel_var.set("")
         self.mtpaye_var.set("")
         self.nbremboursement_var.set("")
 

@@ -1,0 +1,244 @@
+{
+    "user_id": 26,
+    "username": "brian",
+    "fonction_id": 1,
+    "fonction_name": "Administration",
+    "menus": [
+        [
+            "Article",
+            "PageArticle"
+        ],
+        [
+            "Article Fournisseur",
+            "PageArticleFrs"
+        ],
+        [
+            "Article Liste",
+            "page_listeArticle"
+        ],
+        [
+            "Article Mouvement",
+            "PageArticleMouvement"
+        ],
+        [
+            "Autorisation",
+            "PageAutorisation"
+        ],
+        [
+            "Autorisation Admin",
+            "PageCodeAutorisation"
+        ],
+        [
+            "Avance 15e",
+            "PageAVQ"
+        ],
+        [
+            "Avance Spéciale",
+            "FenetreAvanceSpec"
+        ],
+        [
+            "Avoir",
+            "PageAvoir"
+        ],
+        [
+            "Bon de Réceptio",
+            "PageBonReception"
+        ],
+        [
+            "Caisse",
+            "PageCaisse"
+        ],
+        [
+            "Catégorie Articl",
+            "PageCategorieArticle"
+        ],
+        [
+            "Catégorie Compt",
+            "PageCategorieCompte"
+        ],
+        [
+            "CHAT INTERNE",
+            "PageChat"
+        ],
+        [
+            "Client",
+            "PageClient"
+        ],
+        [
+            "Client Crédi",
+            "PageClientCredit"
+        ],
+        [
+            "Config DB",
+            "DatabaseConfig"
+        ],
+        [
+            "Etat de Salaire",
+            "PageSalaireEtatSB"
+        ],
+        [
+            "Facture Liste",
+            "PageFactureListe"
+        ],
+        [
+            "Fonction",
+            "PageFonction"
+        ],
+        [
+            "Fournisseur",
+            "PageFournisseur"
+        ],
+        [
+            "Information Article",
+            "PageInfoArticle"
+        ],
+        [
+            "Inventaire du Jour",
+            "PageInventaireJour"
+        ],
+        [
+            "Liste Facture",
+            "PageFactureListe"
+        ],
+        [
+            "Liste mouvements",
+            "PageListeMouvement"
+        ],
+        [
+            "Liste Personnel",
+            "AppMain"
+        ],
+        [
+            "Livraison Client",
+            "PageLivraisonClient"
+        ],
+        [
+            "Magasin",
+            "PageMagasin"
+        ],
+        [
+            "Marge Commerciale",
+            "PageStock"
+        ],
+        [
+            "Menu",
+            "PageMenu"
+        ],
+        [
+            "Mouvement d'article",
+            "PageArticleMouvement"
+        ],
+        [
+            "Mouvement Stock",
+            "PageInfoMouvementStock"
+        ],
+        [
+            "Nouveau SB",
+            "PageSalaireBase"
+        ],
+        [
+            "Paiement Client",
+            "PagePmtFacture"
+        ],
+        [
+            "Paiement Fournisseur",
+            "PagePmtFrs"
+        ],
+        [
+            "Paiement Salaire",
+            "PageValidationSalaire"
+        ],
+        [
+            "Péremption d'article",
+            "PageGestionPeremption"
+        ],
+        [
+            "Prix d'article",
+            "PagePrixListe"
+        ],
+        [
+            "Prix de revient",
+            "PagePrixRevient"
+        ],
+        [
+            "Prix Liste",
+            "PagePrixListe"
+        ],
+        [
+            "Prix Saisie",
+            "PagePrixSaisie"
+        ],
+        [
+            "Proforma",
+            "PageCommandeCli"
+        ],
+        [
+            "Salaire Base",
+            "PageSalaireBase"
+        ],
+        [
+            "Salaire Horaire",
+            "PageEtatSalaireHoraire"
+        ],
+        [
+            "Sauvegarde",
+            "PageSauvegarde"
+        ],
+        [
+            "Sortie Article",
+            "PageSortie"
+        ],
+        [
+            "Stock Alerte",
+            "PageStockAlerte"
+        ],
+        [
+            "Stock Article",
+            "PageStock"
+        ],
+        [
+            "Stock Livraison",
+            "PageStockLivraison"
+        ],
+        [
+            "Suivi Commande",
+            "PageSuiviCommande"
+        ],
+        [
+            "Suivi de présence",
+            "PageSuiviPresence"
+        ],
+        [
+            "TABLEAU DE BORD",
+            "page_home"
+        ],
+        [
+            "Taux Horaire",
+            "PageTauxHoraire"
+        ],
+        [
+            "Transfert Article",
+            "PageTransfert"
+        ],
+        [
+            "Type de paiement",
+            "PageTypePmt"
+        ],
+        [
+            "Unité Articl",
+            "PageUnite"
+        ],
+        [
+            "Users",
+            "PageUsers"
+        ],
+        [
+            "Utilisateurs",
+            "PageUsers"
+        ],
+        [
+            "Ventes par Dépôt",
+            "PageVenteParMsin"
+        ]
+    ]
+}

@@ -19,6 +19,9 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
+# Thème UI iJeery (référence: page_suiviPresence.py)
+from app_theme import Colors, Fonts, Theme, styled, Layout
+
 # Assurer que le répertoire parent est dans le chemin Python pour les imports absolus
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -31,7 +34,9 @@ class PageAbsence(ctk.CTkFrame):
     """Classe principale qui hérite de CTkFrame pour l'intégration dans app_main"""
     
     def __init__(self, master, db_conn=None, session_data=None):
-        super().__init__(master)
+        # [UI] Harmonisation du fond et des composants avec app_theme (cards, header, boutons, spacing)
+        # [LOGIQUE] Aucune modification des requêtes SQL métier ; uniquement mise en forme et style table
+        super().__init__(master, fg_color=Colors.BG_PAGE)
         
         # Initialisation de la connexion directement via la nouvelle méthode
         self.conn = self.connect_db()
@@ -47,6 +52,33 @@ class PageAbsence(ctk.CTkFrame):
 
         # Initialisation des widgets
         self.create_widgets()
+
+    def _setup_treeview_style(self):
+        # [UI] Style Treeview cohérent (en-têtes Midnight + lignes alternées du thème)
+        s = ttk.Style()
+        try:
+            s.theme_use("clam")
+        except Exception:
+            pass
+        s.configure(
+            "P.Treeview",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD,
+            rowheight=26,
+            borderwidth=0,
+            font=("Segoe UI", 10),
+        )
+        s.configure(
+            "P.Treeview.Heading",
+            background=Colors.MIDNIGHT,
+            foreground=Colors.TEXT_ON_DARK,
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padding=(6, 5),
+        )
+        s.map("P.Treeview", background=[("selected", Colors.PRIMARY_LIGHT)])
+        s.map("P.Treeview.Heading", background=[("active", Colors.MIDNIGHT_LIGHT)])
 
     def connect_db(self):
         """Établit la connexion à la base de données à partir du fichier config.json"""
@@ -77,8 +109,9 @@ class PageAbsence(ctk.CTkFrame):
             return None
 
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background="#FFFFFF")
-        tree.tag_configure("row_odd", background="#D9EEED")
+        # [UI] Palette alignée au thème iJeery (évite couleurs hors thème)
+        tree.tag_configure("row_even", background=Colors.BG_CARD)
+        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):
@@ -127,72 +160,96 @@ class PageAbsence(ctk.CTkFrame):
         error_label.pack(expand=True, pady=50)
 
     def create_widgets(self):
-        # Cadre principal
-        main_frame = ctk.CTkFrame(self)
-        main_frame.pack(expand=True, fill="both", padx=10, pady=10)
+        # [UI] Header + cards (même logique visuelle que Suivi de présence)
+        self._setup_treeview_style()
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(3, weight=1)
 
-        # Cadre de saisie
-        self.input_frame = ctk.CTkFrame(main_frame)
-        self.input_frame.pack(fill="x", pady=5)
-        
-        self.input_frame.grid_columnconfigure(0, weight=1)
-        self.input_frame.grid_columnconfigure(1, weight=1)
-        self.input_frame.grid_columnconfigure(2, weight=1)
-        
-        ctk.CTkLabel(self.input_frame, text="Date de l'absence:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        self.date_entry = DateEntry(self.input_frame, width=16, background='darkblue',
-                                foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
-        self.date_entry.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
+        header.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(self.input_frame, text="Observation:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        self.observation_entry = ctk.CTkEntry(self.input_frame, width=200)
-        self.observation_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        left = styled.frame(header)
+        left.grid(row=0, column=0, padx=14, sticky="w")
+        ctk.CTkLabel(left, text="❌", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
+        inner = styled.frame(left)
+        inner.pack(side="left")
+        ctk.CTkLabel(inner, text="Absence", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
+        ctk.CTkLabel(inner, text="Saisie et suivi des absences", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
 
-        ctk.CTkLabel(self.input_frame, text="Nombre d'heures:").grid(row=1, column=2, padx=5, pady=5, sticky="e")
-        self.nbre_heure_entry = ctk.CTkEntry(self.input_frame)
-        self.nbre_heure_entry.grid(row=1, column=3, padx=5, pady=5, sticky="w")
+        # Card saisie
+        form = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        form.grid(row=1, column=0, sticky="ew", padx=10, pady=(10, 6))
+        form.grid_columnconfigure(5, weight=1)
 
-        # Cadre de recherche et boutons
-        self.search_frame = ctk.CTkFrame(main_frame)
-        self.search_frame.pack(fill="x", pady=5)
-        
-        self.search_frame.grid_columnconfigure(0, weight=1)
-        self.search_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(form, text="Date :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
+        # DateEntry est un widget Tk; on garde la logique, en ajustant les couleurs sur la palette existante.
+        self.date_entry = DateEntry(
+            form, width=14,
+            background=Colors.PRIMARY_HOVER,
+            foreground=Colors.TEXT_ON_DARK,
+            borderwidth=2,
+            date_pattern="yyyy-mm-dd",
+        )
+        self.date_entry.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="w")
 
-        self.search_entry = ctk.CTkEntry(self.search_frame, placeholder_text="Rechercher par matricule, nom ou prénom")
-        self.search_entry.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        ctk.CTkLabel(form, text="Observation :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=2, padx=(0, 6), pady=10, sticky="w")
+        self.observation_entry = ctk.CTkEntry(form, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, corner_radius=8, font=Fonts.body(11))
+        self.observation_entry.grid(row=0, column=3, padx=(0, 12), pady=10, sticky="ew")
+
+        ctk.CTkLabel(form, text="Nb heures :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=4, padx=(0, 6), pady=10, sticky="w")
+        self.nbre_heure_entry = ctk.CTkEntry(form, width=90, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, corner_radius=8, font=Fonts.body(11))
+        self.nbre_heure_entry.grid(row=0, column=5, padx=(0, 12), pady=10, sticky="w")
+
+        # Card recherche + actions principales
+        tools = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        tools.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 6))
+        tools.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(tools, text="Recherche :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
+        self.search_entry = ctk.CTkEntry(tools, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+                                         corner_radius=8, font=Fonts.body(11),
+                                         placeholder_text="Matricule, nom ou prénom…")
+        self.search_entry.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="ew")
         self.search_entry.bind("<Return>", self.search_personnel)
-        
-        self.search_button = ctk.CTkButton(self.search_frame, text="Rechercher", command=self.search_personnel)
-        self.search_button.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        
-        self.validate_button = ctk.CTkButton(self.search_frame, text="Valider", command=self.valider_absence)
-        self.validate_button.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
-        
-        # Tableaux des personnels
-        self.personnel_tree = ttk.Treeview(main_frame, columns=("ID", "Nom", "Prénom", "Matricule", "Fonction"), show="headings")
-        self.personnel_tree.heading("ID", text="ID")
-        self.personnel_tree.heading("Nom", text="Nom")
-        self.personnel_tree.heading("Prénom", text="Prénom")
-        self.personnel_tree.heading("Matricule", text="Matricule")
-        self.personnel_tree.heading("Fonction", text="Fonction")
-        self.personnel_tree.column("ID", width=50)
-        self.personnel_tree.column("Nom", width=150)
-        self.personnel_tree.column("Prénom", width=150)
-        self.personnel_tree.column("Matricule", width=100)
-        self.personnel_tree.column("Fonction", width=100)
-        self._configure_table_alternating_colors(self.personnel_tree)
-        
-        self.personnel_tree.pack(fill="both", expand=True, padx=5, pady=5)
+
+        styled.button_primary(tools, text="Rechercher", icon="🔍", width=120, height=32, command=self.search_personnel).grid(row=0, column=2, padx=(0, 8), pady=10, sticky="e")
+        styled.button_success(tools, text="Valider", icon="✅", width=110, height=32, command=self.valider_absence).grid(row=0, column=3, padx=(0, 12), pady=10, sticky="e")
+
+        # Card tableau
+        table_card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        table_card.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 6))
+        table_card.grid_columnconfigure(0, weight=1)
+        table_card.grid_rowconfigure(0, weight=1)
+
+        cols = ("ID", "Nom", "Prénom", "Matricule", "Fonction")
+        self.personnel_tree = ttk.Treeview(table_card, columns=cols, show="headings", style="P.Treeview", selectmode="browse")
+        for col, w, anc in [
+            ("ID", 60, "center"),
+            ("Nom", 180, "w"),
+            ("Prénom", 180, "w"),
+            ("Matricule", 120, "w"),
+            ("Fonction", 160, "w"),
+        ]:
+            self.personnel_tree.heading(col, text=col)
+            self.personnel_tree.column(col, width=w, anchor=anc, minwidth=50)
+        self.personnel_tree.tag_configure("row_even", background=Colors.BG_CARD)
+        self.personnel_tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
+
+        vsb = ttk.Scrollbar(table_card, orient="vertical", command=self.personnel_tree.yview)
+        self.personnel_tree.configure(yscrollcommand=vsb.set)
+        self.personnel_tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
+        vsb.grid(row=0, column=1, sticky="ns", pady=6)
         self.personnel_tree.bind("<<TreeviewSelect>>", self.on_personnel_select)
-        
-        # Boutons d'action
-        self.action_frame = ctk.CTkFrame(main_frame)
-        self.action_frame.pack(fill="x", pady=5)
-        
-        ctk.CTkButton(self.action_frame, text="Générer PDF", command=self.generer_pdf).pack(side="left", padx=5)
-        ctk.CTkButton(self.action_frame, text="Mise à jour des absences", command=self.open_update_window).pack(side="left", padx=5)
-        ctk.CTkButton(self.action_frame, text="Imprimer", command=self.imprimer).pack(side="right", padx=5)
+
+        # Card actions secondaires
+        actions = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        actions.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 10))
+
+        styled.button_premium(actions, text="Exporter PDF", icon="📄", width=140, height=32, command=self.generer_pdf).pack(side="left", padx=10, pady=10)
+        styled.button_info(actions, text="Mise à jour", icon="🛠", width=150, height=32, command=self.open_update_window).pack(side="left", padx=0, pady=10)
+        styled.button_secondary(actions, text="Imprimer", icon="🖨", width=130, height=32, command=self.imprimer).pack(side="right", padx=10, pady=10)
 
         self.personnel_selectionne_id = None
 

@@ -9,6 +9,9 @@ import json
 import sys
 from resource_utils import get_config_path, safe_file_read
 
+# Thème UI iJeery (référence: page_suiviPresence.py)
+from app_theme import Colors, Fonts, Theme, styled, Layout
+
 
 # Configuration des chemins
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -52,66 +55,125 @@ conn = db_manager.get_connection()
 
 class PagePresence(ctk.CTkFrame):
     def __init__(self, master):
-        super().__init__(master)
+        # [UI] Refonte visuelle alignée au thème iJeery (header + cards + boutons)
+        # [LOGIQUE] Aucune modification des requêtes SQL/UPSERT ; uniquement mise en forme et style
+        super().__init__(master, fg_color=Colors.BG_PAGE)
         self.pack(fill="both", expand=True)
         self.liste_personnels = {}  # { "Nom Prénom": id_prof }
         self.calendar_toplevel = None
 
-        # --- Barre supérieure (Date) ---
-        frame_top = ctk.CTkFrame(self)
-        frame_top.pack(anchor='nw', padx=10, pady=10)
+        self._setup_treeview_style()
 
-        ctk.CTkLabel(frame_top, text="Date :").pack(side="left")
+        # Layout global
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(3, weight=1)
+
+        # Header
+        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
+        header.grid_columnconfigure(1, weight=1)
+
+        left = styled.frame(header)
+        left.grid(row=0, column=0, padx=14, sticky="w")
+        ctk.CTkLabel(left, text="✅", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
+        inner = styled.frame(left)
+        inner.pack(side="left")
+        ctk.CTkLabel(inner, text="Présence", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
+        ctk.CTkLabel(inner, text="Saisie des heures de présence", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
+
+        # Card outils (date + recherche)
+        tools = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        tools.grid(row=1, column=0, sticky="ew", padx=10, pady=(10, 6))
+        tools.grid_columnconfigure(3, weight=1)
+
+        ctk.CTkLabel(tools, text="Date :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
         self.date_var = ctk.StringVar(value=datetime.today().strftime("%Y-%m-%d"))
-        
-        self.date_display_label = ctk.CTkLabel(frame_top, textvariable=self.date_var, width=120, 
-                                               fg_color="gray30", corner_radius=6, cursor="hand2")
-        self.date_display_label.pack(side="left", padx=5)
+        self.date_display_label = ctk.CTkLabel(
+            tools,
+            textvariable=self.date_var,
+            width=140,
+            fg_color=Colors.BG_INPUT,
+            text_color=Colors.TEXT_PRIMARY,
+            corner_radius=8,
+            cursor="hand2",
+        )
+        self.date_display_label.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="w")
         self.date_display_label.bind("<Button-1>", self.open_calendar_from_label)
 
-        # --- Zone de Recherche ---
-        frame_search = ctk.CTkFrame(self)
-        frame_search.pack(fill="x", padx=10, pady=5)
-
+        ctk.CTkLabel(tools, text="Recherche :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=2, padx=(0, 6), pady=10, sticky="w")
         self.search_var = ctk.StringVar()
-        self.search_entry = ctk.CTkEntry(frame_search, textvariable=self.search_var, 
-                                         placeholder_text="Rechercher un nom à ajouter...")
-        self.search_entry.pack(side="left", fill="x", expand=True, padx=5, pady=5)
+        self.search_entry = ctk.CTkEntry(
+            tools,
+            textvariable=self.search_var,
+            height=32,
+            fg_color=Colors.BG_INPUT,
+            border_color=Colors.BORDER,
+            corner_radius=8,
+            font=Fonts.body(11),
+            placeholder_text="Nom ou prénom à ajouter…",
+        )
+        self.search_entry.grid(row=0, column=3, padx=(0, 10), pady=10, sticky="ew")
         self.search_entry.bind("<Return>", self.on_enter_pressed)
 
-        btn_reset = ctk.CTkButton(frame_search, text="Réinitialiser", width=100, 
-                                  fg_color="gray", command=self.reset_search)
-        btn_reset.pack(side="left", padx=5)
+        styled.button_secondary(tools, text="Réinitialiser", icon="↺", width=130, height=32, command=self.reset_search).grid(row=0, column=4, padx=(0, 12), pady=10, sticky="e")
 
-        # --- Treeview ---
-        frame_tree = ctk.CTkFrame(self)
-        frame_tree.pack(fill="both", expand=True, padx=10, pady=10)
+        # Card table
+        table_card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        table_card.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 6))
+        table_card.grid_columnconfigure(0, weight=1)
+        table_card.grid_rowconfigure(0, weight=1)
 
         colonnes = ("Nom et Prénoms", "Nombre d'heures")
-        self.tree = ttk.Treeview(frame_tree, columns=colonnes, show="headings")
-        for col in colonnes:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=250 if col == "Nom et Prénoms" else 100, anchor="w")
+        self.tree = ttk.Treeview(table_card, columns=colonnes, show="headings", style="P.Treeview", selectmode="browse")
+        self.tree.heading("Nom et Prénoms", text="Nom et Prénoms")
+        self.tree.heading("Nombre d'heures", text="Nombre d'heures")
+        self.tree.column("Nom et Prénoms", width=320, anchor="w")
+        self.tree.column("Nombre d'heures", width=140, anchor="center")
+        self.tree.tag_configure("row_even", background=Colors.BG_CARD)
+        self.tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
 
-        self.tree.pack(side="left", fill="both", expand=True)
-        scrollbar = ttk.Scrollbar(frame_tree, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-
+        vsb = ttk.Scrollbar(table_card, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
+        vsb.grid(row=0, column=1, sticky="ns", pady=6)
         self.tree.bind("<Double-1>", self.on_double_click)
 
-        # --- Boutons d'action ---
-        btn_frame = ctk.CTkFrame(self)
-        btn_frame.pack(pady=10)
+        # Card actions
+        actions = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
+        actions.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 10))
 
-        btn_enregistrer = ctk.CTkButton(btn_frame, text="Enregistrer la présence", fg_color="#2ecc71", 
-                                        hover_color="#27ae60", command=self.enregistrer)
-        btn_enregistrer.pack(side="left", padx=10)
-
-        btn_exporter = ctk.CTkButton(btn_frame, text="Exporter Excel", command=self.exporter_excel)
-        btn_exporter.pack(side="left", padx=10)
+        styled.button_success(actions, text="Enregistrer", icon="💾", width=170, height=32, command=self.enregistrer).pack(side="left", padx=10, pady=10)
+        styled.button_premium(actions, text="Exporter Excel", icon="📊", width=160, height=32, command=self.exporter_excel).pack(side="left", padx=0, pady=10)
 
         self.update_treeview()
+
+    def _setup_treeview_style(self):
+        # [UI] Style Treeview cohérent avec les pages modernes (en-tête sombre + sélection primaire)
+        s = ttk.Style()
+        try:
+            s.theme_use("clam")
+        except Exception:
+            pass
+        s.configure(
+            "P.Treeview",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD,
+            rowheight=26,
+            borderwidth=0,
+            font=("Segoe UI", 10),
+        )
+        s.configure(
+            "P.Treeview.Heading",
+            background=Colors.MIDNIGHT,
+            foreground=Colors.TEXT_ON_DARK,
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            padding=(6, 5),
+        )
+        s.map("P.Treeview", background=[("selected", Colors.PRIMARY_LIGHT)])
+        s.map("P.Treeview.Heading", background=[("active", Colors.MIDNIGHT_LIGHT)])
 
     def open_calendar_from_label(self, event=None):
         if self.calendar_toplevel is not None and self.calendar_toplevel.winfo_exists():
@@ -177,6 +239,7 @@ class PagePresence(ctk.CTkFrame):
             presences = self.get_presence_for_date(selected_date)
             for nom, heures in presences.items():
                 self.tree.insert("", "end", values=(nom, heures))
+            self._refresh_table_alternating_colors()
         else:
             # Mode recherche : On ajoute les résultats sans vider le reste
             resultats = self.rechercher_personnel_global(nom_recherche)
@@ -189,6 +252,7 @@ class PagePresence(ctk.CTkFrame):
                     self.liste_personnels[full_name] = id_p
                     self.tree.insert("", 0, values=(full_name, ""), tags=('nouveau',))
             self.search_var.set("")
+            self._refresh_table_alternating_colors()
 
     def reset_search(self):
         """Vide la recherche et réinitialise la liste du jour."""
@@ -226,6 +290,9 @@ class PagePresence(ctk.CTkFrame):
         except Exception as e:
             conn.rollback()
             messagebox.showerror("Erreur", f"Erreur lors de l'enregistrement: {e}")
+        finally:
+            # [UI] Rafraîchit l'alternance des lignes après opérations
+            self._refresh_table_alternating_colors()
 
     def on_double_click(self, event):
         item = self.tree.identify('item', event.x, event.y)
@@ -262,6 +329,13 @@ class PagePresence(ctk.CTkFrame):
             path = os.path.join(chemin_bureau, f"Presence_{date_export}.xlsx")
             df.to_excel(path, index=False)
             messagebox.showinfo("Export", f"Fichier créé : {path}")
+
+    def _refresh_table_alternating_colors(self):
+        # [UI] Applique l’alternance de lignes selon la palette du thème
+        for idx, item in enumerate(self.tree.get_children()):
+            tag = "row_even" if idx % 2 == 0 else "row_odd"
+            existing = tuple(t for t in self.tree.item(item, "tags") if t not in ("row_even", "row_odd"))
+            self.tree.item(item, tags=(tag,) + existing)
 
 if __name__ == "__main__":
     ctk.set_appearance_mode("dark")
