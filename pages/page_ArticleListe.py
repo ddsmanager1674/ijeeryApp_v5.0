@@ -4,8 +4,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import psycopg2
 import json
+import os
 import subprocess
 import sys
+from PIL import Image, ImageTk
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from datetime import datetime
@@ -154,6 +156,9 @@ class page_listeArticle(customtkinter.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
 
         self.all_data = []
+        self.show_photo_column = tk.BooleanVar(value=False)
+        self._photo_image_refs = {}
+        self._photo_thumb_cache = {}
 
         self._build_header()
         self._build_filters()
@@ -286,6 +291,8 @@ class page_listeArticle(customtkinter.CTkFrame):
                              anchor=anchor, minwidth=0 if w == 0 else 40)
             if w == 0:
                 self.tree.column(col, width=0, stretch=False, minwidth=0)
+        self.tree.heading("#0", text="Photo")
+        self.tree.column("#0", width=0, stretch=False, minwidth=0, anchor="center")
 
         sy = customtkinter.CTkScrollbar(tbl, orientation="vertical",
                                         command=self.tree.yview)
@@ -313,6 +320,18 @@ class page_listeArticle(customtkinter.CTkFrame):
             font=self._f(10, "bold"),
             text_color=C.PRIMARY)
         self.label_count.pack(side="left")
+
+        self.chk_show_photos = customtkinter.CTkCheckBox(
+            footer,
+            text="Afficher colonne photo",
+            variable=self.show_photo_column,
+            onvalue=True,
+            offvalue=False,
+            command=self.toggle_photo_column,
+            font=self._f(10),
+            text_color=C.TEXT_SECONDARY,
+        )
+        self.chk_show_photos.pack(side="right")
 
     # ====================================================================
     # LOGIQUE MÉTIER — inchangée
@@ -382,14 +401,108 @@ class page_listeArticle(customtkinter.CTkFrame):
                 conn.close()
         return data
 
+    def _get_photos_folder(self):
+        try:
+            with open(get_config_path('config.json')) as f:
+                config = json.load(f)
+            configured_path = (
+                config.get("photos_path")
+                or config.get("photo_path")
+                or config.get("photos", {}).get("path")
+            )
+            if configured_path:
+                return configured_path
+            server_cfg = config.get("server", {})
+            server_ip = (
+                server_cfg.get("ip")
+                or config.get("server_ip")
+                or config.get("ip_server")
+                or config.get("database", {}).get("host")
+                or "localhost"
+            )
+        except Exception:
+            server_ip = "localhost"
+
+        if str(server_ip).lower() in ("localhost", "127.0.0.1"):
+            return os.path.join(os.getcwd(), "photos")
+        return rf"\\{server_ip}\photos"
+
+    def _normalize_article_id(self, article_id):
+        if article_id is None:
+            return ""
+        s = str(article_id).strip()
+        if not s:
+            return ""
+        if s.endswith(".0"):
+            s = s[:-2]
+        return s
+
+    def _find_photo_path(self, idarticle):
+        article_id = self._normalize_article_id(idarticle)
+        if not article_id:
+            return None
+        photo_dir = self._get_photos_folder()
+        for ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp"):
+            candidate = os.path.join(photo_dir, f"{article_id}{ext}")
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _get_photo_thumbnail(self, idarticle, size=(42, 42)):
+        article_id = self._normalize_article_id(idarticle)
+        if not article_id:
+            return None
+        cache_key = (article_id, size)
+        if cache_key in self._photo_thumb_cache:
+            return self._photo_thumb_cache[cache_key]
+        photo_path = self._find_photo_path(article_id)
+        if not photo_path:
+            self._photo_thumb_cache[cache_key] = None
+            return None
+        try:
+            with Image.open(photo_path) as pil_img:
+                img = pil_img.convert("RGB")
+            img.thumbnail(size, Image.Resampling.LANCZOS)
+            thumb = ImageTk.PhotoImage(img)
+        except Exception:
+            thumb = None
+        self._photo_thumb_cache[cache_key] = thumb
+        return thumb
+
+    def _to_tree_row(self, row):
+        return (row[0], row[1], row[2], row[3], row[4], row[5], row[6])
+
+    def toggle_photo_column(self):
+        if self.show_photo_column.get():
+            self.tree.configure(show=("tree", "headings"))
+            self.tree.column("#0", width=56, stretch=False, minwidth=56, anchor="center")
+            self.tree.column("#0", anchor="center")
+            ttk.Style().configure("Liste.Treeview", rowheight=48)
+        else:
+            self.tree.configure(show="headings")
+            self.tree.column("#0", width=0, stretch=False, minwidth=0)
+            ttk.Style().configure("Liste.Treeview", rowheight=24)
+            self._photo_image_refs = {}
+        self.filter_data()
+
     def _insert_rows_with_alternating_colors(self, rows):
+        self._photo_image_refs = {}
         for index, row in enumerate(rows):
             tag = "even" if index % 2 == 0 else "odd"
             # Format Quantite (4ème colonne)
-            formatted_row = list(row)
+            formatted_row = list(self._to_tree_row(row))
             if len(formatted_row) > 4:
                 formatted_row[4] = format_entier(formatted_row[4])
-            self.tree.insert('', 'end', values=formatted_row, tags=(tag,))
+
+            image = None
+            if self.show_photo_column.get():
+                image = self._get_photo_thumbnail(row[0], size=(42, 42))
+
+            if image is not None:
+                iid = self.tree.insert('', 'end', values=formatted_row, tags=(tag,), image=image)
+                self._photo_image_refs[iid] = image
+            else:
+                self.tree.insert('', 'end', values=formatted_row, tags=(tag,))
 
     def on_single_click(self, event):
         selection = self.tree.selection()
@@ -515,6 +628,7 @@ class page_listeArticle(customtkinter.CTkFrame):
     def load_data(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self._photo_thumb_cache = {}
         self.all_data = self.fetch_articles_from_db()
         if self.all_data:
             self._insert_rows_with_alternating_colors(self.all_data)
@@ -530,7 +644,8 @@ class page_listeArticle(customtkinter.CTkFrame):
             self.tree.delete(item)
         search_term = self.entry_search.get().lower().strip()
         if not search_term:
-            self.load_data()
+            self._insert_rows_with_alternating_colors(self.all_data)
+            self.update_count(len(self.all_data))
             return
         filtered_data = []
         for row in self.all_data:
@@ -592,7 +707,7 @@ class page_listeArticle(customtkinter.CTkFrame):
             for item in items:
                 values = self.tree.item(item)['values']
                 if values and values[1]:
-                    ws.append(values[1:])
+                    ws.append([values[1], values[2], values[3], values[4], values[5], values[6]])
                     valid_items_count += 1
             column_widths = [15, 40, 12, 12, 12, 20]
             for i, width in enumerate(column_widths, 1):

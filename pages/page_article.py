@@ -1,8 +1,9 @@
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import psycopg2
 import json
-from PIL import Image, ImageTk
+from PIL import Image
 import os
 import shutil
 import sys
@@ -84,10 +85,13 @@ class PageArticle(ctk.CTkFrame):
         self.parent           = parent
         self.selected_article = None
         self.photo_label      = None
+        self.photo_box        = None
         self.magasins_dict    = {}
         self.categories_dict  = {}
         self.all_articles     = []
         self.toplevel_unite   = None
+        self._config_cache    = None
+        self._photo_ctk_image = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
@@ -195,17 +199,14 @@ class PageArticle(ctk.CTkFrame):
         right = ctk.CTkFrame(card, fg_color="transparent")
         right.grid(row=0, column=2, padx=(8, 12), pady=12, sticky="n")
 
-        photo_box = ctk.CTkFrame(
+        self.photo_box = ctk.CTkFrame(
             right, width=200, height=200,
             fg_color=C.BG_INPUT, border_color=C.BORDER,
             border_width=1, corner_radius=8)
-        photo_box.pack()
-        photo_box.pack_propagate(False)
+        self.photo_box.pack()
+        self.photo_box.pack_propagate(False)
 
-        self.photo_label = ctk.CTkLabel(
-            photo_box, text="Aucune image",
-            font=self._f(9), text_color=C.TEXT_MUTED)
-        self.photo_label.pack(expand=True, fill="both", padx=5, pady=5)
+        self._create_photo_label()
 
         ctk.CTkButton(
             right, text="📸  Ajouter Photo",
@@ -294,6 +295,66 @@ class PageArticle(ctk.CTkFrame):
         except Exception as err:
             messagebox.showerror("Erreur de connexion", f"Erreur : {err}")
             return None
+
+    def _get_config(self):
+        if self._config_cache is None:
+            with open(get_config_path('config.json')) as f:
+                self._config_cache = json.load(f)
+        return self._config_cache
+
+    def _get_server_ip_from_config(self):
+        try:
+            config = self._get_config()
+        except Exception:
+            return "localhost"
+        server_cfg = config.get("server", {})
+        return (
+            server_cfg.get("ip")
+            or config.get("server_ip")
+            or config.get("ip_server")
+            or config.get("database", {}).get("host")
+            or "localhost"
+        )
+
+    def _get_photo_folder(self):
+        """Retourne le dossier centralisé /photos/ du serveur."""
+        try:
+            config = self._get_config()
+            configured_path = (
+                config.get("photos_path")
+                or config.get("photo_path")
+                or config.get("photos", {}).get("path")
+            )
+            if configured_path:
+                return configured_path
+        except Exception:
+            pass
+
+        server_ip = self._get_server_ip_from_config()
+        if str(server_ip).lower() in ("localhost", "127.0.0.1"):
+            return os.path.join(os.getcwd(), "photos")
+        return rf"\\{server_ip}\photos"
+
+    def _find_photo_path(self, idarticle):
+        article_id = self._normalize_article_id(idarticle)
+        if not article_id:
+            return None
+        photo_folder = self._get_photo_folder()
+        for ext in ('.jpg', '.jpeg', '.png', '.gif', '.bmp'):
+            p = os.path.join(photo_folder, f"{article_id}{ext}")
+            if os.path.exists(p):
+                return p
+        return None
+
+    def _normalize_article_id(self, article_id):
+        if article_id is None:
+            return ""
+        s = str(article_id).strip()
+        if not s:
+            return ""
+        if s.endswith(".0"):
+            s = s[:-2]
+        return s
 
     def filter_articles(self, event=None):
         search_term = self.entry_search.get().strip().lower()
@@ -451,31 +512,48 @@ class PageArticle(ctk.CTkFrame):
             pass
 
     def load_photo(self, idarticle):
-        if not idarticle:
+        if not self.photo_label or not self.photo_label.winfo_exists():
+            self._create_photo_label()
+        if not self.photo_label or not self.photo_label.winfo_exists():
+            return
+        normalized_id = self._normalize_article_id(idarticle)
+        if not normalized_id:
             self.clear_photo()
             return
-        photo_folder = os.path.join(os.getcwd(), "PhotoArticle")
-        photo_path   = None
-        for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
-            p = os.path.join(photo_folder, f"{idarticle}{ext}")
-            if os.path.exists(p):
-                photo_path = p
-                break
+        photo_path = self._find_photo_path(normalized_id)
         if photo_path:
             try:
-                img = Image.open(photo_path)
-                img.thumbnail((190, 190))
-                photo = ImageTk.PhotoImage(img)
-                self.photo_label.configure(image=photo, text="")
-                self.photo_label.image = photo
+                with Image.open(photo_path) as pil_img:
+                    img = pil_img.convert("RGBA")
+                img.thumbnail((190, 190), Image.Resampling.LANCZOS)
+                self._photo_ctk_image = ctk.CTkImage(
+                    light_image=img, dark_image=img, size=img.size
+                )
+                self.photo_label.configure(image=self._photo_ctk_image, text="")
             except Exception:
                 self.clear_photo()
         else:
             self.clear_photo()
 
     def clear_photo(self):
-        self.photo_label.configure(image=None, text="Aucune image")
-        self.photo_label.image = None
+        self._photo_ctk_image = None
+        self._create_photo_label()
+
+    def _create_photo_label(self):
+        if not self.photo_box or not self.photo_box.winfo_exists():
+            return
+        if self.photo_label and self.photo_label.winfo_exists():
+            try:
+                self.photo_label.destroy()
+            except tk.TclError:
+                pass
+        self.photo_label = ctk.CTkLabel(
+            self.photo_box,
+            text="Aucune image",
+            font=self._f(9),
+            text_color=C.TEXT_MUTED
+        )
+        self.photo_label.pack(expand=True, fill="both", padx=5, pady=5)
 
     def nettoyer_formulaire(self):
         self.entry_designation.delete(0, 'end')
@@ -529,14 +607,22 @@ class PageArticle(ctk.CTkFrame):
             filetypes=[("Images", "*.jpg *.png *.jpeg")])
         if file_path:
             try:
-                dest = os.path.join(os.getcwd(), "PhotoArticle")
+                article_id = self._normalize_article_id(self.selected_article)
+                if not article_id:
+                    messagebox.showwarning("Attention", "ID article invalide.")
+                    return
+                dest = self._get_photo_folder()
                 if not os.path.exists(dest):
                     os.makedirs(dest)
                 ext = os.path.splitext(file_path)[1]
+                for old_ext in ('.jpg', '.jpeg', '.png', '.gif', '.bmp'):
+                    old_path = os.path.join(dest, f"{article_id}{old_ext}")
+                    if os.path.exists(old_path):
+                        os.remove(old_path)
                 shutil.copy2(
                     file_path,
-                    os.path.join(dest, f"{self.selected_article}{ext}"))
-                self.load_photo(self.selected_article)
+                    os.path.join(dest, f"{article_id}{ext.lower()}"))
+                self.load_photo(article_id)
                 messagebox.showinfo("Succès", "Photo enregistrée.")
             except Exception as e:
                 messagebox.showerror("Erreur", str(e))

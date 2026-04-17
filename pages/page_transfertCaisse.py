@@ -12,6 +12,7 @@ from reportlab.lib.units import mm as MM
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
+from app_theme import Colors, styled, Layout
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -108,6 +109,7 @@ class PageTransfertCaisse(ctk.CTkFrame):
     def __init__(self, master, db_config=None, id_user_connecte=None):
         print(f"PageTransfertCaisse.__init__ called with master={master}, db_config={db_config}")
         super().__init__(master)
+        self.configure(fg_color=Colors.BG_PAGE)
         self.current_user_id = id_user_connecte
        
         self.db_manager = db_manager
@@ -123,41 +125,91 @@ class PageTransfertCaisse(ctk.CTkFrame):
         
         self.banque_data = {}   # Initialize banque data
         self.current_banque_solde = 0 # Initialize balance for the selected bank
+        self.selected_banque_id = None
+        self._responsive_mode = None  # "wide" | "narrow"
         self.create_widgets()
         # Load data after widget creation with error handling
         self.after(100, self.load_initial_data)  # Delay loading to ensure widgets are ready
 
     def create_widgets(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=3)
+        self.pack(fill="both", expand=True, padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
 
-        self.label_title = ctk.CTkLabel(self, text="Transfert Banque vers Caisse", font=("Arial", 20, "bold"))
-        self.label_title.grid(row=0, column=0, columnspan=2, pady=20)
+        self.container = styled.frame(self, color="transparent")
+        self.container.pack(fill="both", expand=True)
 
-        self.label_banque = ctk.CTkLabel(self, text="Sélectionner la Banque :")
-        self.label_banque.grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        # --- Titre ---
+        self.title_card = styled.card(self.container)
+        self.title_card.pack(fill="x", pady=(0, Layout.SECTION_GAP))
+        title_row = styled.frame(self.title_card, color="transparent")
+        title_row.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        styled.label_title(title_row, text="Transfert Banque vers Caisse").pack(anchor="w")
+        styled.label_muted(title_row, text="Transférer un montant depuis une banque vers la caisse.").pack(anchor="w", pady=(4, 0))
+
+        # --- Résumé (solde banque sélectionnée) ---
+        self.summary_card = styled.card(self.container)
+        self.summary_card.pack(fill="x", pady=(0, Layout.SECTION_GAP))
+        summary_row = styled.frame(self.summary_card, color="transparent")
+        summary_row.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        self.label_banque_solde = styled.badge(summary_row, text="Solde de la banque sélectionnée : Chargement...", variant="info")
+        self.label_banque_solde.pack(anchor="w")
+
+        # --- Formulaire ---
+        self.form_card = styled.card(self.container)
+        self.form_card.pack(fill="both", expand=True)
+        self.form = styled.frame(self.form_card, color="transparent")
+        self.form.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        self.form.grid_columnconfigure(0, weight=1)
+        self.form.grid_columnconfigure(1, weight=1)
+
+        # Banque
+        self.bank_block = styled.frame(self.form, color="transparent")
+        self.bank_block.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        styled.label_muted(self.bank_block, text="Banque", anchor="w").pack(anchor="w", pady=(0, 4))
         self.banque_options = []
-        self.selected_banque_name = ctk.StringVar(value="")
-        self.selected_banque_id = None
-        self.optionmenu_banque = ctk.CTkOptionMenu(self, variable=self.selected_banque_name,
-                                                     values=self.banque_options,
-                                                     command=self.on_banque_selected)
-        self.optionmenu_banque.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
+        self.combo_banque = styled.combobox(
+            self.bank_block,
+            values=self.banque_options,
+            command=self.on_banque_selected,
+            state="readonly",
+            width=420,
+        )
+        self.combo_banque.pack(fill="x")
 
-        # Add a label for current bank balance, similar to cash balance in the other window
-        self.label_banque_solde = ctk.CTkLabel(self, text="Solde de la banque sélectionnée : Chargement...", font=("Arial", 14, "bold"))
-        self.label_banque_solde.grid(row=2, column=0, columnspan=2, pady=10)
+        # Montant
+        self.amount_block = styled.frame(self.form, color="transparent")
+        self.amount_block.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 12))
+        styled.label_muted(self.amount_block, text="Montant du transfert", anchor="w").pack(anchor="w", pady=(0, 4))
+        self.entry_montant = styled.entry(self.amount_block, placeholder="Entrez le montant")
+        self.entry_montant.pack(fill="x")
 
-        self.label_montant = ctk.CTkLabel(self, text="Montant du transfert :")
-        self.label_montant.grid(row=3, column=0, padx=10, pady=10, sticky="w")
-        self.entry_montant = ctk.CTkEntry(self, placeholder_text="Entrez le montant")
-        self.entry_montant.grid(row=3, column=1, padx=10, pady=10, sticky="ew")
+        # Action
+        self.action_block = styled.frame(self.form, color="transparent")
+        self.action_block.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(0, 12))
+        styled.label_muted(self.action_block, text="Action", anchor="w").pack(anchor="w", pady=(0, 4))
+        self.button_transfert = styled.button_success(self.action_block, text="Effectuer le transfert", width=240, command=self.perform_transfert)
+        self.button_transfert.pack(anchor="e", fill="x")
 
-        self.button_transfert = ctk.CTkButton(self, text="Effectuer le Transfert", command=self.perform_transfert, fg_color="#28a745", hover_color="#218838")
-        self.button_transfert.grid(row=4, column=0, columnspan=2, pady=20)
+        # Statut
+        self.status_card = styled.frame(self.container, color="transparent")
+        self.status_card.pack(fill="x", pady=(Layout.SECTION_GAP, 0))
+        self.label_status = styled.label(self.status_card, text="", size=12, color=Colors.SUCCESS_TEXT)
+        self.label_status.pack(anchor="w")
 
-        self.label_status = ctk.CTkLabel(self, text="", text_color="green")
-        self.label_status.grid(row=5, column=0, columnspan=2, pady=10)
+        self.bind("<Configure>", lambda e: self._update_responsive_layout(e.width))
+        self._update_responsive_layout(self.winfo_width() or 700)
+
+    def _update_responsive_layout(self, width: int):
+        mode = "narrow" if width < 620 else "wide"
+        if mode == self._responsive_mode:
+            return
+        self._responsive_mode = mode
+
+        if mode == "narrow":
+            self.amount_block.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=(0, 12))
+            self.action_block.grid(row=2, column=0, columnspan=2, sticky="ew", padx=0, pady=(0, 0))
+        else:
+            self.amount_block.grid(row=1, column=0, columnspan=1, sticky="ew", padx=(0, 10), pady=(0, 12))
+            self.action_block.grid(row=1, column=1, columnspan=1, sticky="ew", padx=(10, 0), pady=(0, 12))
 
     def load_initial_data(self):
         """Charge les données initiales après la création des widgets"""
@@ -188,12 +240,12 @@ class PageTransfertCaisse(ctk.CTkFrame):
             self.banque_data = {name: id for id, name in banques}
             self.banque_options = list(self.banque_data.keys())
             if self.banque_options:
-                self.optionmenu_banque.configure(values=self.banque_options)
-                self.selected_banque_name.set(self.banque_options[0])
+                self.combo_banque.configure(values=self.banque_options)
+                self.combo_banque.set(self.banque_options[0])
                 self.on_banque_selected(self.banque_options[0])
             else:
-                self.optionmenu_banque.configure(values=["Aucune banque trouvée"])
-                self.selected_banque_name.set("Aucune banque trouvée")
+                self.combo_banque.configure(values=["Aucune banque trouvée"])
+                self.combo_banque.set("Aucune banque trouvée")
                 self.selected_banque_id = None
 
         except psycopg2.Error as e:
@@ -254,7 +306,7 @@ class PageTransfertCaisse(ctk.CTkFrame):
 
     def validate_input(self):
         montant_str = self.entry_montant.get().strip()
-        selected_banque_name = self.selected_banque_name.get()
+        selected_banque_name = self.combo_banque.get()
 
         if not montant_str:
             self.show_status("Veuillez entrer un montant.", "red")
@@ -410,7 +462,7 @@ class PageTransfertCaisse(ctk.CTkFrame):
         if mtpaye is None:
             return
 
-        selected_banque_name = self.selected_banque_name.get()
+        selected_banque_name = self.combo_banque.get()
         date_du_jour = datetime.now().strftime("%Y-%m-%d")
         reference_prefix = datetime.now().strftime("%Y%m%d%H%M%S")
 

@@ -613,7 +613,8 @@ class PageCaisse(ctk.CTkFrame):
             result = self.cursor.fetchone()
             self.montants_docs["Personnel"] = float(result[0]) if result and result[0] else 0
 
-            params = [d_str, f_str] * 9
+            # Inclure aussi les transferts caisse<->banque : ils doivent impacter la card "Espèces".
+            params = [d_str, f_str] * 10
             self.cursor.execute("""
                 SELECT COALESCE(t2.modedepaiement, 'Inconnu'),
                        SUM(CASE WHEN t1.idtypeoperation=1 THEN t1.mtpaye ELSE -t1.mtpaye END)
@@ -627,6 +628,7 @@ class PageCaisse(ctk.CTkFrame):
                     UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtsalaire WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
                     UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtavoir WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
                     UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcredit WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_transfertcaisse WHERE datepmt::date BETWEEN %s AND %s
                 ) t1
                 LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
                 GROUP BY t2.modedepaiement

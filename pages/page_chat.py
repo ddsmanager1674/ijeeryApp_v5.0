@@ -463,6 +463,7 @@ class PageChat(ctk.CTkFrame):
 
         # ── Démarrer le polling ───────────────────────────────────────────────
         self._start_refresh()
+        self.bind("<Destroy>", self._on_destroy, add="+")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 1 — CONSTRUCTION UI
@@ -1614,12 +1615,36 @@ class PageChat(ctk.CTkFrame):
 
     def _on_mousewheel(self, event):
         """Gère le scroll molette (Windows + Linux)."""
-        if event.num == 4:
-            self.msg_canvas.yview_scroll(-1, "units")
-        elif event.num == 5:
-            self.msg_canvas.yview_scroll(1, "units")
-        else:
-            self.msg_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        if not self.winfo_exists():
+            return
+        if not hasattr(self, "msg_canvas") or not self.msg_canvas.winfo_exists():
+            return
+        try:
+            if event.num == 4:
+                self.msg_canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.msg_canvas.yview_scroll(1, "units")
+            else:
+                self.msg_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except tk.TclError:
+            # Le canvas a été détruit entre-temps (changement de page rapide)
+            return
+
+    def _on_destroy(self, event=None):
+        """Nettoyage des callbacks globaux et du polling à la destruction."""
+        if event is not None and event.widget is not self:
+            return
+        try:
+            if self._refresh_job is not None:
+                self.after_cancel(self._refresh_job)
+                self._refresh_job = None
+        except Exception:
+            pass
+        for ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            try:
+                self.unbind_all(ev)
+            except Exception:
+                pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════

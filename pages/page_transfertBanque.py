@@ -11,6 +11,7 @@ from reportlab.lib.units import mm as MM
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
+from app_theme import Colors, styled, Layout
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -107,6 +108,7 @@ class PageTransfertBanque(ctk.CTkFrame):
     def __init__(self, master, db_config=None, id_user_connecte=None):
         print(f"PageTransfertBanque.__init__ called with master={master}, db_config={db_config}")
         super().__init__(master)
+        self.configure(fg_color=Colors.BG_PAGE)
         self.current_user_id = id_user_connecte
         
         self.db_manager = db_manager
@@ -122,40 +124,90 @@ class PageTransfertBanque(ctk.CTkFrame):
     
         self.current_caisse_solde = 0   
         self.banque_data = {}   
+        self.selected_banque_id = None
+        self._responsive_mode = None  # "wide" | "narrow"
         self.create_widgets()
         self.after(100, self.load_initial_data)  
 
     def create_widgets(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=3)
+        self.pack(fill="both", expand=True, padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
 
-        self.label_title = ctk.CTkLabel(self, text="Transfert Caisse vers Banque", font=("Arial", 20, "bold"))
-        self.label_title.grid(row=0, column=0, columnspan=2, pady=20)
+        self.container = styled.frame(self, color="transparent")
+        self.container.pack(fill="both", expand=True)
 
-        self.label_caisse_solde = ctk.CTkLabel(self, text="Solde de caisse actuel : Chargement...", font=("Arial", 14, "bold"))
-        self.label_caisse_solde.grid(row=1, column=0, columnspan=2, pady=10)
+        # --- Titre ---
+        self.title_card = styled.card(self.container)
+        self.title_card.pack(fill="x", pady=(0, Layout.SECTION_GAP))
+        title_row = styled.frame(self.title_card, color="transparent")
+        title_row.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        styled.label_title(title_row, text="Transfert Caisse vers Banque").pack(anchor="w")
+        styled.label_muted(title_row, text="Transférer un montant depuis la caisse vers une banque.").pack(anchor="w", pady=(4, 0))
 
-        self.label_banque = ctk.CTkLabel(self, text="Sélectionner la Banque :")
-        self.label_banque.grid(row=2, column=0, padx=10, pady=10, sticky="w")
+        # --- Résumé (solde caisse) ---
+        self.summary_card = styled.card(self.container)
+        self.summary_card.pack(fill="x", pady=(0, Layout.SECTION_GAP))
+        summary_row = styled.frame(self.summary_card, color="transparent")
+        summary_row.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        self.label_caisse_solde = styled.badge(summary_row, text="Solde de caisse actuel : Chargement...", variant="info")
+        self.label_caisse_solde.pack(anchor="w")
 
+        # --- Formulaire ---
+        self.form_card = styled.card(self.container)
+        self.form_card.pack(fill="both", expand=True)
+        self.form = styled.frame(self.form_card, color="transparent")
+        self.form.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        self.form.grid_columnconfigure(0, weight=1)
+        self.form.grid_columnconfigure(1, weight=1)
+
+        # Banque
+        self.bank_block = styled.frame(self.form, color="transparent")
+        self.bank_block.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        styled.label_muted(self.bank_block, text="Banque", anchor="w").pack(anchor="w", pady=(0, 4))
         self.banque_options = []
-        self.selected_banque_name = ctk.StringVar(value="")
-        self.selected_banque_id = None
-        self.optionmenu_banque = ctk.CTkOptionMenu(self, variable=self.selected_banque_name,
-                                                     values=self.banque_options,
-                                                     command=self.on_banque_selected)
-        self.optionmenu_banque.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
+        self.combo_banque = styled.combobox(
+            self.bank_block,
+            values=self.banque_options,
+            command=self.on_banque_selected,
+            state="readonly",
+            width=420,
+        )
+        self.combo_banque.pack(fill="x")
 
-        self.label_montant = ctk.CTkLabel(self, text="Montant du transfert :")
-        self.label_montant.grid(row=3, column=0, padx=10, pady=10, sticky="w")
-        self.entry_montant = ctk.CTkEntry(self, placeholder_text="Entrez le montant")
-        self.entry_montant.grid(row=3, column=1, padx=10, pady=10, sticky="ew")
+        # Montant
+        self.amount_block = styled.frame(self.form, color="transparent")
+        self.amount_block.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 12))
+        styled.label_muted(self.amount_block, text="Montant du transfert", anchor="w").pack(anchor="w", pady=(0, 4))
+        self.entry_montant = styled.entry(self.amount_block, placeholder="Entrez le montant")
+        self.entry_montant.pack(fill="x")
 
-        self.button_transfert = ctk.CTkButton(self, text="Effectuer le Transfert", command=self.perform_transfert, fg_color="#28a745", hover_color="#218838")
-        self.button_transfert.grid(row=4, column=0, columnspan=2, pady=20)
+        # Action
+        self.action_block = styled.frame(self.form, color="transparent")
+        self.action_block.grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(0, 12))
+        styled.label_muted(self.action_block, text="Action", anchor="w").pack(anchor="w", pady=(0, 4))
+        self.button_transfert = styled.button_success(self.action_block, text="Effectuer le transfert", width=240, command=self.perform_transfert)
+        self.button_transfert.pack(anchor="e", fill="x")
 
-        self.label_status = ctk.CTkLabel(self, text="", text_color="green")
-        self.label_status.grid(row=5, column=0, columnspan=2, pady=10)
+        # Statut
+        self.status_card = styled.frame(self.container, color="transparent")
+        self.status_card.pack(fill="x", pady=(Layout.SECTION_GAP, 0))
+        self.label_status = styled.label(self.status_card, text="", size=12, color=Colors.SUCCESS_TEXT)
+        self.label_status.pack(anchor="w")
+
+        self.bind("<Configure>", lambda e: self._update_responsive_layout(e.width))
+        self._update_responsive_layout(self.winfo_width() or 700)
+
+    def _update_responsive_layout(self, width: int):
+        mode = "narrow" if width < 620 else "wide"
+        if mode == self._responsive_mode:
+            return
+        self._responsive_mode = mode
+
+        if mode == "narrow":
+            self.amount_block.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=(0, 12))
+            self.action_block.grid(row=2, column=0, columnspan=2, sticky="ew", padx=0, pady=(0, 0))
+        else:
+            self.amount_block.grid(row=1, column=0, columnspan=1, sticky="ew", padx=(0, 10), pady=(0, 12))
+            self.action_block.grid(row=1, column=1, columnspan=1, sticky="ew", padx=(10, 0), pady=(0, 12))
 
     def load_initial_data(self):
         """Load initial data with proper error handling"""
@@ -170,43 +222,44 @@ class PageTransfertBanque(ctk.CTkFrame):
             print(f"Erreur détaillée: {e}")
 
     def load_caisse_balance(self):
-        """Load cash balance using the class connection"""
+        """Charge le solde caisse (espèces) du jour.
+
+        Doit correspondre à la card 'Espèces' dans page_caisse.py (mêmes sources).
+        """
         if not self.is_connected:
             return
         
         try:
-            # CORRECTION: Changement de ILIKE en = pour la comparaison d'entiers
-            # Si idtypeoperation est un INTEGER, utilisez = au lieu de ILIKE
+            date_du_jour = datetime.now().strftime("%Y-%m-%d")
+            params = [date_du_jour, date_du_jour] * 9
+
+            # Même union que page_caisse.calculer_montants_categories() (modes de paiement),
+            # filtré sur le mode "Espèces" et sur la date du jour.
             self.cursor.execute("""
-                SELECT COALESCE(SUM(CASE WHEN idtypeoperation = 1 THEN mtpaye ELSE 0 END), 0) - 
-                        COALESCE(SUM(CASE WHEN idtypeoperation = 2 THEN mtpaye ELSE 0 END), 0) 
+                SELECT COALESCE(SUM(CASE WHEN t1.idtypeoperation=1 THEN t1.mtpaye ELSE -t1.mtpaye END), 0)
                 FROM (
-                    SELECT idtypeoperation, mtpaye FROM tb_pmtfacture WHERE id_banque IS NULL
-                    UNION ALL 
-                    SELECT idtypeoperation, mtpaye FROM tb_pmtcom WHERE id_banque IS NULL
-                    UNION ALL 
-                    SELECT idtypeoperation, mtpaye FROM tb_encaissementbq WHERE id_banque IS NULL
-                    UNION ALL 
-                    SELECT idtypeoperation, mtpaye FROM tb_decaissementbq WHERE id_banque IS NULL
-                    UNION ALL 
-                    SELECT idtypeoperation, mtpaye FROM tb_avancepers WHERE id_banque IS NULL
-                    UNION ALL 
-                    SELECT idtypeoperation, mtpaye FROM tb_avancespecpers WHERE id_banque IS NULL
-                    UNION ALL 
-                    SELECT idtypeoperation, mtpaye FROM tb_pmtsalaire WHERE id_banque IS NULL
-                    UNION ALL 
-                    SELECT idtypeoperation, mtpaye FROM tb_transfertcaisse
-                ) AS toutes_operations_caisse
-            """) 
-            
+                    SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtfacture  WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcom     WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_encaissement WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_decaissement WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_avancepers WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_avancespecpers WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtsalaire WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtavoir  WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcredit WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
+                ) t1
+                LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
+                WHERE LOWER(COALESCE(t2.modedepaiement, '')) IN ('espèces', 'especes')
+            """, params)
+
             result = self.cursor.fetchone()
-            solde = result[0] if result and result[0] is not None else 0
-            self.label_caisse_solde.configure(text=f"Solde de caisse actuel : {self.format_montant(solde)} Ar")
+            solde = float(result[0]) if result and result[0] is not None else 0.0
+            self.label_caisse_solde.configure(text=f"Solde caisse (espèces) du jour : {self.format_montant(solde)} Ar")
             self.current_caisse_solde = solde
             
         except psycopg2.Error as e:
             messagebox.showerror("Erreur de base de données", f"Erreur lors du chargement du solde de caisse: {e}")
-            self.label_caisse_solde.configure(text="Solde de caisse actuel : Erreur")
+            self.label_caisse_solde.configure(text="Solde caisse (espèces) du jour : Erreur")
             self.current_caisse_solde = 0
 
     def format_montant(self, valeur):
@@ -226,12 +279,12 @@ class PageTransfertBanque(ctk.CTkFrame):
             self.banque_options = list(self.banque_data.keys())
             
             if self.banque_options:
-                self.optionmenu_banque.configure(values=self.banque_options)
-                self.selected_banque_name.set(self.banque_options[0])
+                self.combo_banque.configure(values=self.banque_options)
+                self.combo_banque.set(self.banque_options[0])
                 self.on_banque_selected(self.banque_options[0])
             else:
-                self.optionmenu_banque.configure(values=["Aucune banque trouvée"])
-                self.selected_banque_name.set("Aucune banque trouvée")
+                self.combo_banque.configure(values=["Aucune banque trouvée"])
+                self.combo_banque.set("Aucune banque trouvée")
                 self.selected_banque_id = None
 
         except psycopg2.Error as e:
@@ -248,7 +301,7 @@ class PageTransfertBanque(ctk.CTkFrame):
     def validate_input(self):
         """Validate user input before transfer"""
         montant_str = self.entry_montant.get().strip()
-        selected_banque_name = self.selected_banque_name.get()
+        selected_banque_name = self.combo_banque.get()
 
         if not montant_str:
             self.show_status("Veuillez entrer un montant.", "red")
@@ -420,7 +473,7 @@ class PageTransfertBanque(ctk.CTkFrame):
         if mtpaye is None:
             return
 
-        selected_banque_name = self.selected_banque_name.get()
+        selected_banque_name = self.combo_banque.get()
         date_du_jour = datetime.now().strftime("%Y-%m-%d")
         reference_prefix = datetime.now().strftime("%Y%m%d%H%M%S")
 
