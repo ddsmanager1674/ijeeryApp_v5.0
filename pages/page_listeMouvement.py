@@ -38,6 +38,7 @@ except ImportError:
 
 TYPES_MOUVEMENT = {
     "entree":      {"label": "📥  Entrées",              "icon": "📥"},
+    "entree_stock":{"label": "📦  Entrées Stock",        "icon": "📦"},
     "sortie":      {"label": "📤  Sorties",              "icon": "📤"},
     "transfert":   {"label": "🔄  Transferts",           "icon": "🔄"},
     "consommation":{"label": "⚙️   Consommation Interne", "icon": "⚙️"},
@@ -372,6 +373,7 @@ class PageListeMouvement(ctk.CTkFrame):
         # Mettre à jour le titre
         icons = {
             "entree": "Entrées d'Articles",
+            "entree_stock": "Entrées Stock (BE)",
             "sortie": "Sorties d'Articles",
             "transfert": "Transferts d'Articles",
             "consommation": "Consommation Interne",
@@ -487,6 +489,26 @@ class PageListeMouvement(ctk.CTkFrame):
                 WHERE c.deleted = 0
                 GROUP BY c.idcom, c.datecom, c.refcom, f.nomfrs, u.prenomuser, u.nomuser
                 ORDER BY c.datecom DESC
+            """,
+            "entree_stock": """
+                SELECT
+                    e.dateregistre::DATE as "Date",
+                    e.refentree as "Référence",
+                    COUNT(DISTINCT ed.idarticle) as "Nombre d'articles",
+                    COALESCE(
+                        STRING_AGG(DISTINCT ed.motif, ', ')
+                            FILTER (WHERE ed.motif IS NOT NULL AND ed.motif <> ''),
+                        e.description,
+                        'N/A'
+                    ) as "Description",
+                    CONCAT(COALESCE(u.prenomuser,''), ' ', COALESCE(u.nomuser,'')) as "Utilisateur"
+                FROM tb_entree e
+                LEFT JOIN tb_entreedetail ed ON e.id = ed.identree
+                LEFT JOIN tb_users u ON e.iduser = u.iduser
+                WHERE e.deleted = 0
+                  AND ed.deleted = 0
+                GROUP BY e.id, e.dateregistre, e.refentree, e.description, u.prenomuser, u.nomuser
+                ORDER BY e.dateregistre DESC
             """,
             "sortie": """
                 SELECT
@@ -694,6 +716,7 @@ class PageListeMouvement(ctk.CTkFrame):
         try:
             dispatch = {
                 "entree":       self.show_commande_details_by_ref,
+                "entree_stock": self.show_entree_details_by_ref,
                 "sortie":       self.show_sortie_details_by_ref,
                 "transfert":    self.show_transfert_details_by_ref,
                 "consommation": self.show_consommation_details_by_ref,
@@ -921,6 +944,41 @@ class PageListeMouvement(ctk.CTkFrame):
             cols = ("Code Article", "Désignation", "Unité", "Quantité sortie", "Motif")
             self._open_details_window(
                 f"Détails Sortie — {refsortie}", cols, details, refsortie, "sortie")
+        finally:
+            conn.close()
+
+    def show_entree_details_by_ref(self, refentree):
+        if not refentree:
+            return
+        conn = self.connect_db()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM tb_entree WHERE refentree = %s LIMIT 1", (refentree,))
+            row = cur.fetchone()
+            if not row:
+                messagebox.showinfo("Info", "Entrée stock introuvable.")
+                return
+            identree = row[0]
+            cur.execute("""
+                SELECT
+                    COALESCE(u.codearticle, '') as "Code Article",
+                    a.designation              as "Désignation",
+                    u.designationunite         as "Unité",
+                    ed.qtentree                as "Quantité entrée",
+                    COALESCE(ed.motif, 'N/A')  as "Motif"
+                FROM tb_entreedetail ed
+                LEFT JOIN tb_article a ON ed.idarticle = a.idarticle
+                LEFT JOIN tb_unite   u ON ed.idunite   = u.idunite
+                WHERE ed.identree = %s AND ed.deleted = 0
+                ORDER BY a.designation
+            """, (identree,))
+            details = cur.fetchall()
+            cols = ("Code Article", "Désignation", "Unité", "Quantité entrée", "Motif")
+            self._open_details_window(
+                f"Détails Entrée Stock — {refentree}", cols, details, refentree, "entree_stock"
+            )
         finally:
             conn.close()
 

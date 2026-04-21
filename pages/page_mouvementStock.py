@@ -9,6 +9,7 @@ from datetime import datetime # Décommenter si vous utilisez les dates DB
 import tempfile # NOUVEAU : Nécessaire pour l'aperçu avant impression
 import webbrowser # NOUVEAU : Nécessaire pour l'aperçu avant impression
 import os # NOUVEAU : Nécessaire pour l'aperçu avant impression
+import sys
 from reportlab.lib.pagesizes import A5, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet

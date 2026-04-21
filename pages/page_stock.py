@@ -372,6 +372,7 @@ class PageStock(ctk.CTkFrame):
                 FROM tb_unite WHERE deleted = 0
                 ORDER BY idarticle, qtunite ASC, idunite ASC
             ),
+            ent  AS (SELECT ed.idarticle, ed.idunite, ed.idmag, SUM(ed.qtentree)   AS quantite FROM tb_entreedetail ed WHERE ed.deleted=0 GROUP BY ed.idarticle, ed.idunite, ed.idmag),
             rec  AS (SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite FROM tb_livraisonfrs lf WHERE lf.deleted=0 GROUP BY lf.idarticle, lf.idunite, lf.idmag),
             ven  AS (SELECT vd.idarticle, vd.idunite, v.idmag,  SUM(vd.qtvente)    AS quantite FROM tb_ventedetail vd INNER JOIN tb_vente v ON vd.idvente=v.id AND v.deleted=0 AND v.statut='VALIDEE' WHERE vd.deleted=0 GROUP BY vd.idarticle, vd.idunite, v.idmag),
             tin  AS (SELECT t.idarticle,  t.idunite,  t.idmagentree  AS idmag, SUM(t.qttransfert) AS quantite FROM tb_transfertdetail t WHERE t.deleted=0 GROUP BY t.idarticle, t.idunite, t.idmagentree),
@@ -383,6 +384,7 @@ class PageStock(ctk.CTkFrame):
             ech_in  AS (SELECT dce.idarticle, dce.idunite, dce.idmagasin AS idmag, SUM(dce.quantite_entree) AS quantite FROM tb_detailchange_entree dce GROUP BY dce.idarticle, dce.idunite, dce.idmagasin),
             ech_out AS (SELECT dcs.idarticle, dcs.idunite, dcs.idmagasin AS idmag, SUM(dcs.quantite_sortie) AS quantite FROM tb_detailchange_sortie dcs GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin),
             mouvements_agreges AS (
+                SELECT idarticle, idunite, idmag, quantite, 'entree'               AS type_mouvement FROM ent   UNION ALL
                 SELECT idarticle, idunite, idmag, quantite, 'reception'            AS type_mouvement FROM rec   UNION ALL
                 SELECT idarticle, idunite, idmag, quantite, 'vente'                AS type_mouvement FROM ven   UNION ALL
                 SELECT idarticle, idunite, idmag, quantite, 'transfert_in'         AS type_mouvement FROM tin   UNION ALL
@@ -404,6 +406,7 @@ class PageStock(ctk.CTkFrame):
             solde_base_par_mag AS (
                 SELECT idarticle, idmag,
                     SUM(CASE type_mouvement
+                        WHEN 'entree'               THEN  quantite*coeff_source_vers_base
                         WHEN 'reception'            THEN  quantite*coeff_source_vers_base
                         WHEN 'transfert_in'         THEN  quantite*coeff_source_vers_base
                         WHEN 'inventaire'           THEN  quantite*coeff_source_vers_base
@@ -514,6 +517,10 @@ class PageStock(ctk.CTkFrame):
             total_stock_global_base = 0
             for idu_boucle, code_boucle, _qtunite_boucle, _niv in unites_liees:
                 coeff_source = coeffs_cumules.get(idu_boucle, 1)
+                q_ent = "SELECT COALESCE(SUM(qtentree), 0) FROM tb_entreedetail WHERE idarticle = %s AND idunite = %s AND deleted = 0"
+                p_ent = [idarticle, idu_boucle]
+                if idmag: q_ent += " AND idmag = %s"; p_ent.append(idmag)
+                cursor.execute(q_ent, p_ent); entrees = cursor.fetchone()[0] or 0
                 q_rec = "SELECT COALESCE(SUM(qtlivrefrs), 0) FROM tb_livraisonfrs WHERE idarticle = %s AND idunite = %s AND deleted = 0"
                 p_rec = [idarticle, idu_boucle]
                 if idmag: q_rec += " AND idmag = %s"; p_rec.append(idmag)
@@ -554,7 +561,7 @@ class PageStock(ctk.CTkFrame):
                 p_ech_out = [idarticle, idu_boucle]
                 if idmag: q_ech_out += " AND idmagasin = %s"; p_ech_out.append(idmag)
                 cursor.execute(q_ech_out, p_ech_out); echange_sorties = cursor.fetchone()[0] or 0
-                solde_unite = (receptions + t_in + inv + avoirs + echange_entrees
+                solde_unite = (entrees + receptions + t_in + inv + avoirs + echange_entrees
                                - ventes - sorties - t_out - consommations - echange_sorties)
                 total_stock_global_base += (solde_unite * coeff_source)
             return max(0, total_stock_global_base / qtunite_affichage)

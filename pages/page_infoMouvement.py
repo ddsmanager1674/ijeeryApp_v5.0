@@ -25,6 +25,7 @@ from reportlab.pdfgen import canvas
 # Importation des pages existantes
 from pages.page_CmdFrs import PageCommandeFrs
 from pages.page_livrFrs import PageBonReception
+from pages.page_entree import PageEntree
 from pages.page_transfert import PageTransfert
 from pages.page_sortie import PageSortie
 from pages.page_SuiviCommande import PageSuiviCommande
@@ -1631,7 +1632,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         """Créer le menu latéral"""
         self.sidebar = ctk.CTkFrame(self, width=150, corner_radius=0, fg_color="#3b82f6")
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(6, weight=1)
+        self.sidebar.grid_rowconfigure(7, weight=1)
         self.sidebar.grid_propagate(False)  # Empêcher le redimensionnement
         
         # Titre du menu
@@ -1648,6 +1649,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         menus = [
             ("🧾 Bon de commande", "PageCommandeFrs"),
             ("📥 Bon de réception", "PageBonReception"),
+            ("📥 Entrée", "PageEntree"),
             ("🔄 Transferts", "PageTransfert"),
             ("📤 Sortie/Consommation", "PageSortie"),
             ("🔁 Changements", "PageChangementArticle"),
@@ -1711,6 +1713,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         page_mapping = {
             "🧾 Bon de commande": PageCommandeFrs,
             "📥 Bon de réception": PageBonReception,
+            "📥 Entrée": PageEntree,
             "🔄 Transferts": PageTransfert,
             "📤 Sortie/Consommation": PageSortie,
             "🔁 Changements": PageChangementArticle,
@@ -1731,6 +1734,8 @@ class PageInfoMouvementStock(ctk.CTkFrame):
                 if page_class == PageCommandeFrs:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 elif page_class == PageBonReception:
+                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
+                elif page_class == PageEntree:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 elif page_class == PageTransfert:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)

@@ -1099,6 +1099,12 @@ class PageVenteParMsin(ctk.CTkFrame):
                     WHERE deleted = 0
                     ORDER BY idarticle, qtunite ASC, idunite ASC
                 ),
+                ent AS (
+                    SELECT ed.idarticle, ed.idunite, ed.idmag, SUM(ed.qtentree) AS quantite
+                    FROM tb_entreedetail ed
+                    WHERE ed.deleted = 0
+                    GROUP BY ed.idarticle, ed.idunite, ed.idmag
+                ),
                 rec AS (
                     SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite
                     FROM tb_livraisonfrs lf
@@ -1160,6 +1166,8 @@ class PageVenteParMsin(ctk.CTkFrame):
                     GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin
                 ),
                 mouvements_agreges AS (
+                    SELECT idarticle, idunite, idmag, quantite, 'entree' AS type_mouvement FROM ent
+                    UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'reception' AS type_mouvement FROM rec
                     UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'vente' AS type_mouvement FROM ven
@@ -1185,7 +1193,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                         ma.idarticle,
                         SUM(
                             CASE
-                                WHEN ma.type_mouvement IN ('reception','transfert_in','inventaire','avoir','echange_entree')
+                                WHEN ma.type_mouvement IN ('entree','reception','transfert_in','inventaire','avoir','echange_entree')
                                     THEN ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
                                 WHEN ma.type_mouvement IN ('vente','sortie','transfert_out','consommation_interne','echange_sortie')
                                     THEN - ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
@@ -1804,6 +1812,12 @@ class PageVenteParMsin(ctk.CTkFrame):
                     WHERE deleted = 0
                     ORDER BY idarticle, qtunite ASC, idunite ASC
                 ),
+                ent AS (
+                    SELECT ed.idarticle, ed.idunite, ed.idmag, SUM(ed.qtentree) AS quantite
+                    FROM tb_entreedetail ed
+                    WHERE ed.deleted = 0
+                    GROUP BY ed.idarticle, ed.idunite, ed.idmag
+                ),
                 rec AS (
                     SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite
                     FROM tb_livraisonfrs lf
@@ -1865,6 +1879,8 @@ class PageVenteParMsin(ctk.CTkFrame):
                     GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin
                 ),
                 mouvements_agreges AS (
+                    SELECT idarticle, idunite, idmag, quantite, 'entree' AS type_mouvement FROM ent
+                    UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'reception' AS type_mouvement FROM rec
                     UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'vente' AS type_mouvement FROM ven
@@ -1890,7 +1906,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                         ma.idarticle,
                         SUM(
                             CASE
-                                WHEN ma.type_mouvement IN ('reception','transfert_in','inventaire','avoir','echange_entree')
+                                WHEN ma.type_mouvement IN ('entree','reception','transfert_in','inventaire','avoir','echange_entree')
                                     THEN ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
                                 WHEN ma.type_mouvement IN ('vente','sortie','transfert_out','consommation_interne','echange_sortie')
                                     THEN - ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
