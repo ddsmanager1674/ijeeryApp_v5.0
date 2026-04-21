@@ -7,6 +7,7 @@ from datetime import datetime
 from tkcalendar import DateEntry
 import os
 from resource_utils import get_config_path, get_session_path, safe_file_read
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -193,6 +194,13 @@ class PageDetailFacture(ctk.CTkToplevel):
             ).pack(pady=4)
 
         self.charger_details(idvente)
+        try:
+            session_data = {}
+            if parent_page and hasattr(parent_page, "session_data") and isinstance(parent_page.session_data, dict):
+                session_data = parent_page.session_data
+            self._logger = AppLogger(session_data=session_data)
+        except Exception:
+            self._logger = None
 
     # ====================================================================
     # LOGIQUE MÉTIER — inchangée
@@ -328,6 +336,17 @@ class PageDetailFacture(ctk.CTkToplevel):
 
             if os.path.exists(filename):
                 os.startfile(filename)
+
+            try:
+                if self._logger:
+                    self._logger.log(
+                        action="Impression duplicata facture",
+                        element=refvente,
+                        details=f"Duplicata généré, fichier={os.path.basename(filename)}",
+                        value=filename,
+                    )
+            except Exception:
+                pass
             
             self.destroy()
 
@@ -353,6 +372,17 @@ class PageDetailFacture(ctk.CTkToplevel):
                 conn.commit()
                 messagebox.showinfo(
                     parent=self, title="Succès", message=f"La facture {self.refvente} a été annulée.")
+
+                try:
+                    if self._logger:
+                        self._logger.log(
+                            action="Annulation de facture",
+                            element=self.refvente,
+                            details="Facture annulée (statut -> ANNULE)",
+                            value="ANNULE",
+                        )
+                except Exception:
+                    pass
                 self.statut = "ANNULE"
                 if hasattr(self, 'btn_annuler'):
                     self.btn_annuler.pack_forget()
@@ -604,7 +634,7 @@ class PageListeFacture(ctk.CTkFrame):
 
     def __init__(self, parent, session_data=None):
         super().__init__(parent, fg_color=C.BG_PAGE)
-        self.session_data             = session_data
+        self.session_data             = session_data or {}
         self.id_user_connecte         = self.get_connected_user_id(parent, session_data)
         self.magasin_map              = {}
         self.user_default_magasin_nom = None
@@ -616,6 +646,7 @@ class PageListeFacture(ctk.CTkFrame):
 
         self.setup_ui()
         self.charger_donnees()
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.id_user_connecte)
 
     # ====================================================================
     # setup_ui — REFONTE DESIGN UNIQUEMENT
@@ -939,3 +970,12 @@ class PageListeFacture(ctk.CTkFrame):
             messagebox.showinfo(
                 "Export réussi",
                 f"Le fichier a été enregistré sous :\n{file_path}")
+            try:
+                self._logger.log(
+                    action="Export Excel",
+                    element="Liste Facture",
+                    details=f"export factures, lignes={len(lignes)}, fichier={os.path.basename(file_path)}",
+                    value=file_path,
+                )
+            except Exception:
+                pass

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # Configuration du chemin pour les imports
@@ -60,6 +61,8 @@ class PagePersonnel(ctk.CTkFrame):
         super().__init__(parent)
         self.parent = parent
         self.callback_ajout = callback_ajout # On stocke la fonction pour revenir
+        self.session_data = getattr(parent, "session_data", None) or {}
+        self._logger = AppLogger(conn=db_manager.conn, session_data=self.session_data)
 
         # Exemple de bouton pour revenir à la page d'ajout
         self.btn_retour = ctk.CTkButton(self, 
@@ -233,6 +236,15 @@ class PagePersonnel(ctk.CTkFrame):
                 cursor = db_manager.get_cursor()
                 cursor.execute("DELETE FROM tb_personnel WHERE matricule = %s", (matricule,))
                 db_manager.conn.commit()
+                try:
+                    self._logger.log(
+                        action="Suppression personnel",
+                        element=str(matricule),
+                        details="Suppression personnel (DELETE par matricule)",
+                        value=str(matricule),
+                    )
+                except Exception:
+                    pass
                 self.afficher_personnels_tous()
             except Exception as e:
                 messagebox.showerror("Erreur", str(e))

@@ -10,6 +10,7 @@ import sys
 from resource_utils import get_config_path, safe_file_read
 
 from app_theme import Colors, Fonts, styled, Layout
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -111,6 +112,8 @@ class PageTauxHoraire(ctk.CTkFrame):
         self.app_root = app_root
         self.conn = None
         self.cursor = None
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         self.entry_widgets = {}  # legacy (plus utilisé)
         self.selected_personnel_id: int | None = None
         self.selected_personnel_name = ctk.StringVar(value="")
@@ -460,6 +463,15 @@ class PageTauxHoraire(ctk.CTkFrame):
                 (taux_float, int(self.selected_personnel_id), now),
             )
             self.conn.commit()
+            try:
+                self._logger.log(
+                    action="Création taux horaire",
+                    element=f"idpers={self.selected_personnel_id}",
+                    details=f"Taux horaire enregistré (taux={taux_float}, date={now})",
+                    value=str(taux_float),
+                )
+            except Exception:
+                pass
             messagebox.showinfo("Succès", "Taux horaire enregistré avec succès.")
             pid = self.selected_personnel_id
             self._filter_personnel()

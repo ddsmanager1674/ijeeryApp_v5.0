@@ -18,6 +18,7 @@ import os
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled, Theme
+from log_utils import AppLogger
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,6 +55,8 @@ class PageBonReception(ctk.CTkFrame):
         _apply_treeview_style()
 
         self.iduser   = iduser
+        self.session_data = getattr(parent, "session_data", None) or {"user_id": self.iduser}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
         self.items_livraison  = []
         self.idcom_selectionne = None
         self.info_commande    = None
@@ -559,6 +562,15 @@ class PageBonReception(ctk.CTkFrame):
 
             conn.commit()
             self.derniere_reflivfrs_enregistree = self.entry_ref.get()
+            try:
+                self._logger.log(
+                    action="Création livraison fournisseur",
+                    element=str(self.derniere_reflivfrs_enregistree),
+                    details=f"Livraison fournisseur enregistrée (commande_id={self.idcom_selectionne}, magasin_id={idmag}, lignes={len(self.items_livraison)}, factfrs='{numero_facture}', a_payer={a_payer})",
+                    value=f"{len(self.items_livraison)} lignes",
+                )
+            except Exception:
+                pass
 
             messagebox.showinfo("Succès",
                 f"Enregistrement effectué avec succès.\nRéférence: {self.derniere_reflivfrs_enregistree}"

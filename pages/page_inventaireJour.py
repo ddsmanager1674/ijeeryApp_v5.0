@@ -19,6 +19,7 @@ from tkinter import ttk, messagebox, filedialog
 
 from resource_utils import get_config_path, get_session_path, safe_file_read
 from app_theme import Colors, Fonts, styled, Layout, Theme
+from log_utils import AppLogger
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -446,6 +447,7 @@ class ModalInventaire(ctk.CTkToplevel):
         self._calc_stock_fn  = calc_stock_fn   # callable(idarticle, idunite, idmag) → float
 
         self.inv_id = row_values[0] if row_values else None
+        self._logger = AppLogger(session_data={"user_id": self.current_user_id} if self.current_user_id else {})
 
         if self.readonly:
             titre = "Détails inventaire"
@@ -727,6 +729,15 @@ class ModalInventaire(ctk.CTkToplevel):
                 )
             self._commit()
             messagebox.showinfo("✅ Succès", "Inventaire enregistré.", parent=self)
+            try:
+                self._logger.log(
+                    action="Création inventaire du jour",
+                    element=art_label,
+                    details=f"Inventaire créé magasin='{mag}', qte_corrigée={qte}, qte_stock={qt_stock}, statut={statut}",
+                    value=f"qte_corrigée={qte}",
+                )
+            except Exception:
+                pass
             self._on_save()
             self.destroy()
         except Exception as e:
@@ -744,6 +755,7 @@ class ModalVerification(ctk.CTkToplevel):
         self.row_values = row_values
         self.current_user_id = current_user_id
         self._on_refresh = on_refresh
+        self._logger = AppLogger(session_data={"user_id": self.current_user_id} if self.current_user_id else {})
 
         self.title("Vérification inventaire")
         self.geometry("520x430")
@@ -845,6 +857,15 @@ class ModalVerification(ctk.CTkToplevel):
                 (statut, id_verif, datetime.now(), self.inv_id)
             )
             db_manager.conn.commit()
+            try:
+                self._logger.log(
+                    action="Validation inventaire du jour" if statut == "Vérifié" else "Dévalidation inventaire du jour",
+                    element=str(self.row_values[4]),
+                    details=f"Inventaire id={self.inv_id}, magasin='{self.row_values[1]}', statut={statut}",
+                    value=f"statut={statut}",
+                )
+            except Exception:
+                pass
             if self._on_refresh:
                 self._on_refresh()
         except Exception as e:
@@ -887,6 +908,7 @@ class PageInventaireJour(ctk.CTkFrame):
 
         self._load_filter_sources()
         self.after(0, self.load_inventaires)
+        self._logger = AppLogger(session_data={"user_id": self.current_user_id} if self.current_user_id else self.session_data)
 
     def _resolve_user_id(self, session_data):
         if isinstance(session_data, dict):
@@ -1331,6 +1353,15 @@ class PageInventaireJour(ctk.CTkFrame):
         if p:
             df.to_excel(p, index=False)
             messagebox.showinfo("✅ Succès", "Export réussi.")
+            try:
+                self._logger.log(
+                    action="Export Excel",
+                    element="Inventaire du Jour",
+                    details=f"export inventaires du jour, lignes={len(data)}, fichier={os.path.basename(p)}",
+                    value=p,
+                )
+            except Exception:
+                pass
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 

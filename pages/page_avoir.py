@@ -33,6 +33,7 @@ from decimal import Decimal, InvalidOperation
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
 from settings_utils import open_file_if_enabled
+from log_utils import AppLogger
 
 # ── Imports ReportLab (impression PDF) ───────────────────────────────────────
 from reportlab.lib.pagesizes import A5, landscape
@@ -360,6 +361,7 @@ class PageAvoir(ctk.CTkFrame):
         self.charger_client()
         self.charger_infos_societe()
         self.conn = self.connect_db()
+        self._logger = AppLogger(conn=self.conn, session_data={"user_id": self.id_user_connecte})
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 1 — CONNEXION BASE DE DONNÉES
@@ -2338,6 +2340,16 @@ class PageAvoir(ctk.CTkFrame):
             self.btn_imprimer.grid()
             self.btn_enregistrer.configure(state="disabled", text="✔ Avoir Enregistré")
             success = True
+
+            try:
+                self._logger.log(
+                    action="Avoir enregistré",
+                    element=str(ref_avoir),
+                    details=f"Avoir enregistré ref: {ref_avoir}, montant: {self.formater_nombre(montant_total_avoir)} Ar, client: {client_nom}",
+                    value=f"{self.formater_nombre(montant_total_avoir)} Ar",
+                )
+            except Exception:
+                pass
 
             # Impression automatique
             impression_a5     = self.settings.get('Avoir_ImpressionA5', 1)

@@ -665,6 +665,16 @@ class PageListeMouvement(ctk.CTkFrame):
 
             self.data_df.to_excel(path, index=False, sheet_name="Mouvements")
             messagebox.showinfo("Export Excel", f"Fichier exporté :\n{path}")
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Liste Mouvements",
+                    details=f"export mouvements '{self.type_mouvement_actif}', lignes={len(self.data_df)}, fichier={os.path.basename(path)}",
+                    value=path,
+                )
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror("Erreur Export", f"Erreur lors de l'export : {e}")
 

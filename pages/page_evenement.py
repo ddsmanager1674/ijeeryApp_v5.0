@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from resource_utils import get_config_path
 from app_theme import Colors, Fonts
+from log_utils import AppLogger
 
 
 class PageEvenement(ctk.CTkFrame):
@@ -18,6 +19,7 @@ class PageEvenement(ctk.CTkFrame):
         self.conn = self.connect_db()
         self.sort_column = "datetime"
         self.sort_desc = True
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data or {})
         self._build_ui()
         self._apply_table_style()
         self._load_users_filter()
@@ -101,7 +103,7 @@ class PageEvenement(ctk.CTkFrame):
             hover_color=Colors.PRIMARY_HOVER,
             corner_radius=6,
             height=32,
-            command=self.refresh_data,
+            command=self._refresh_with_log,
         ).grid(row=2, column=7, padx=4, pady=(0, 8), sticky="ew")
 
         ctk.CTkButton(
@@ -112,7 +114,7 @@ class PageEvenement(ctk.CTkFrame):
             hover_color=Colors.TEXT_SECONDARY,
             corner_radius=6,
             height=32,
-            command=self.reset_filters,
+            command=self._reset_with_log,
         ).grid(row=2, column=8, padx=4, pady=(0, 8), sticky="ew")
 
         table_wrap = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
@@ -211,6 +213,30 @@ class PageEvenement(ctk.CTkFrame):
         self.sort_column = "datetime"
         self.sort_desc = True
         self.refresh_data()
+
+    def _refresh_with_log(self):
+        try:
+            self._logger.log(
+                action="Consultation événements",
+                element="Événements",
+                details="Actualiser historique des actions utilisateur",
+                value="refresh",
+            )
+        except Exception:
+            pass
+        self.refresh_data()
+
+    def _reset_with_log(self):
+        try:
+            self._logger.log(
+                action="Consultation événements",
+                element="Événements",
+                details="Réinitialiser filtres historique",
+                value="reset_filters",
+            )
+        except Exception:
+            pass
+        self.reset_filters()
 
     def _build_where_clause(self):
         where_parts = []

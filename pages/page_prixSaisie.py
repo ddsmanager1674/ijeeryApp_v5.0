@@ -18,6 +18,7 @@ from format_utils import format_nombre
 from datetime import datetime
 import json
 from resource_utils import get_config_path, get_session_path, safe_file_read
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -67,6 +68,8 @@ class PagePrixSaisie(ctk.CTkFrame):
         super().__init__(parent, fg_color=C.BG_PAGE)
 
         self.iduser      = iduser
+        self.session_data = getattr(parent, "session_data", None) or {"user_id": self.iduser}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
         self.codearticle = str(codearticle) if codearticle is not None else None
         self.initial_idunite = int(idunite) if idunite is not None else None
         self.selected_id = None
@@ -520,6 +523,15 @@ class PagePrixSaisie(ctk.CTkFrame):
                 VALUES (%s, %s, %s, %s, %s, 0)
             """, (idarticle, idunite, prix, datetime.now(), self.iduser))
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Création prix article",
+                    element=str(code),
+                    details=f"Prix enregistré (idarticle={idarticle}, idunite={idunite}, prix={prix})",
+                    value=str(prix),
+                )
+            except Exception:
+                pass
             cur.close()
             conn.close()
 
@@ -553,6 +565,15 @@ class PagePrixSaisie(ctk.CTkFrame):
                 WHERE id = %s
             """, (prix, idunite, datetime.now(), self.selected_id))
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Modification prix article",
+                    element=str(code),
+                    details=f"Prix modifié (id={self.selected_id}, idunite={idunite}, prix={prix})",
+                    value=str(prix),
+                )
+            except Exception:
+                pass
             cur.close()
             conn.close()
 
@@ -584,6 +605,15 @@ class PagePrixSaisie(ctk.CTkFrame):
             cur.execute("UPDATE tb_prix SET deleted = 1 WHERE id = %s",
                         (self.selected_id,))
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Suppression prix article",
+                    element=str(code),
+                    details=f"Suppression logique prix (id={self.selected_id}, deleted=1)",
+                    value=f"id={self.selected_id}",
+                )
+            except Exception:
+                pass
             cur.close()
             conn.close()
 

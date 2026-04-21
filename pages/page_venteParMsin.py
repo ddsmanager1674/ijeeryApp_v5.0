@@ -47,6 +47,7 @@ from resource_utils import get_config_path, safe_file_read
 from settings_utils import open_file_if_enabled
 from pages.page_avoir import PageAvoir
 from pages.page_proforma import PageCommandeCli
+from log_utils import AppLogger
 
 
 # ==============================================================================
@@ -353,7 +354,12 @@ class PageVenteParMsin(ctk.CTkFrame):
       Row 4 — Barre d'actions (boutons)
     """
 
-    def __init__(self, master=None, id_user_connecte: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        master=None,
+        id_user_connecte: Optional[int] = None,
+        vente_tab_no: Optional[int] = None,
+    ) -> None:
         super().__init__(master)
 
         # ── Vérification utilisateur ──────────────────────────────────────────
@@ -363,6 +369,9 @@ class PageVenteParMsin(ctk.CTkFrame):
         else:
             self.id_user_connecte = id_user_connecte
             print(f"✅ Utilisateur connecté — ID: {self.id_user_connecte}")
+
+        self.vente_tab_no = vente_tab_no
+        self._logger = AppLogger(session_data={"user_id": self.id_user_connecte} if self.id_user_connecte else {})
 
         # ── État interne ──────────────────────────────────────────────────────
         self.conn: Optional[psycopg2.connection] = None
@@ -2189,6 +2198,59 @@ class PageVenteParMsin(ctk.CTkFrame):
 
             # ── Affichage de la confirmation ───────────────────────────────────
             total_general = sum(f['total'] for f in factures_creees)
+
+            # ── LOGS (menu "Ventes par Dépôt") — un log par facture créée ─────
+            try:
+                onglet_no = self.vente_tab_no if self.vente_tab_no is not None else "N/A"
+                # mapping idvente -> (idmag, details_mag)
+                details_mag_by_idmag = details_par_mag
+
+                for fac in factures_creees:
+                    ref_mag = fac.get("ref")
+                    idvente = fac.get("idvente")
+                    total_mag = float(fac.get("total") or 0)
+                    nom_mag = fac.get("magasin") or "N/A"
+
+                    # retrouver les détails de ce magasin pour calcul remise
+                    details_mag = None
+                    try:
+                        # on retrouve idmag via idventes_par_magasin
+                        idmag = next((k for k, v in self.idventes_par_magasin.items() if v == idvente), None)
+                        details_mag = details_mag_by_idmag.get(idmag) if idmag is not None else None
+                    except Exception:
+                        details_mag = None
+
+                    remise_total = 0.0
+                    if details_mag:
+                        try:
+                            remise_total = sum(
+                                max(0.0, float(d.get("remise", 0) or 0) * float(d.get("qtvente", 0) or 0))
+                                for d in details_mag
+                            )
+                        except Exception:
+                            remise_total = 0.0
+
+                    remise_txt = (
+                        f"avec remise {self.formater_nombre(remise_total)} Ar"
+                        if remise_total > 0
+                        else "sans remise"
+                    )
+
+                    # Description métier lisible
+                    desc = (
+                        f"Vente {onglet_no} (onglet {onglet_no}) ref: {ref_mag} "
+                        f"enregistrée d'une somme de {self.formater_nombre(total_mag)} Ar ({remise_txt}), "
+                        f"Client : {client_nom}, Magasin : {nom_mag}"
+                    )
+
+                    self._logger.log(
+                        action="Vente enregistrée",
+                        element=str(ref_mag),
+                        details=desc,
+                        value=f"{self.formater_nombre(total_mag)} Ar",
+                    )
+            except Exception:
+                pass
             if self.settings.get('Vente_ImpressionConfirmation', 1):
                 lines = "\n".join(f"• {f['ref']} ({f['magasin']}): {self.formater_nombre(f['total'])} Ar"
                                   for f in factures_creees)

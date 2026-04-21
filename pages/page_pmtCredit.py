@@ -9,6 +9,7 @@ import os
 import subprocess
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # --- BIBLIOTHÈQUES POUR LE PDF ---
@@ -42,6 +43,8 @@ class PagePmtCredit(ctk.CTkToplevel):
         self.client_nom = self.data.get('client', 'Client Inconnu')
         self.id_client_db = self.data.get('id_client_reel')
         self.iduser = iduser if iduser is not None else 1
+        self.session_data = getattr(master, "session_data", None) or {"user_id": self.iduser}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
 
         self.title(f"Paiement Crédit - Facture N° {self.refvente}")
         self.geometry("500x400")
@@ -190,6 +193,15 @@ class PagePmtCredit(ctk.CTkToplevel):
 
             cursor.execute(query, values)
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Paiement crédit client",
+                    element=str(ref_pmt),
+                    details=f"Paiement crédit enregistré (refvente={self.refvente}, client='{self.client_nom}', mode='{nom_mode}', montant={montant_verse})",
+                    value=f"{montant_verse} Ar",
+                )
+            except Exception:
+                pass
             
             # 4. Récupérer les infos pour le PDF AVANT de fermer la connexion
             username = self._get_username(cursor)

@@ -34,6 +34,7 @@ from settings_utils import open_file_if_enabled
 
 from resource_utils import get_config_path, get_session_path, safe_file_read
 from app_theme import Colors, Fonts
+from log_utils import AppLogger
 
 # ReportLab
 from reportlab.lib.pagesizes import A5, landscape
@@ -66,6 +67,8 @@ class PageSortie(ctk.CTkFrame):
         super().__init__(master, fg_color=Colors.BG_PAGE, **kwargs)
 
         self.id_user_connecte = id_user_connecte
+        self.session_data = getattr(master, "session_data", None) or {"user_id": self.id_user_connecte}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.id_user_connecte)
         self.conn: Optional[psycopg2.extensions.connection] = None
         self.article_selectionne      = None
         self.detail_sortie: list      = []
@@ -1588,6 +1591,15 @@ class PageSortie(ctk.CTkFrame):
             )
 
         conn.commit()
+        try:
+            self._logger.log(
+                action="Création bon de sortie",
+                element=str(ref_sortie),
+                details=f"Bon de sortie enregistré (idsortie={idsortie}, magasin='{designationmag}', lignes={len(self.detail_sortie)})",
+                value=f"idsortie={idsortie}",
+            )
+        except Exception:
+            pass
         messagebox.showinfo("Succès", f"Sortie N°{ref_sortie} enregistrée.")
         self.derniere_idsortie_enregistree = idsortie
         self.generer_pdf_sortie_paysage(ref_sortie, idsortie)
@@ -1629,6 +1641,15 @@ class PageSortie(ctk.CTkFrame):
             )
 
         conn.commit()
+        try:
+            self._logger.log(
+                action="Création consommation interne",
+                element=str(ref_sortie),
+                details=f"Consommation interne enregistrée (id={idconsommation}, magasin='{designationmag}', lignes={len(self.detail_sortie)}, total={montant_total})",
+                value=f"{montant_total} Ar",
+            )
+        except Exception:
+            pass
         messagebox.showinfo("Succès", f"Consommation N°{ref_sortie} enregistrée.")
         self.generer_pdf_consommation_interne_paysage(ref_sortie, idconsommation)
         self.reset_form()

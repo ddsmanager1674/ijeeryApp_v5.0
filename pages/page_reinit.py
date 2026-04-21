@@ -2,6 +2,7 @@ import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
 from psycopg2 import sql # Recommandé pour composer des requêtes SQL de manière sûre
+from log_utils import AppLogger
 
 class DBInitializerApp(ctk.CTkToplevel):
     def __init__(self, master=None):
@@ -11,6 +12,8 @@ class DBInitializerApp(ctk.CTkToplevel):
 
         self.db_connection = None
         self.table_names = []
+        self.session_data = getattr(master, "session_data", None) if master else {}
+        self._logger = AppLogger(session_data=self.session_data or {})
         self.create_widgets()
 
     def create_widgets(self):
@@ -158,6 +161,15 @@ class DBInitializerApp(ctk.CTkToplevel):
 
         if not confirm:
             self.log_message("Initialisation annulée par l'utilisateur.")
+            try:
+                self._logger.log(
+                    action="Init DB",
+                    element="Initialisation DB",
+                    details="Initialisation annulée par l'utilisateur",
+                    value="cancel",
+                )
+            except Exception:
+                pass
             return
 
         cursor = self.db_connection.cursor()
@@ -185,10 +197,28 @@ class DBInitializerApp(ctk.CTkToplevel):
 
             self.db_connection.commit() # Important: Valider toutes les opérations TRUNCATE
             self.log_message("Base de données initialisée avec succès (contenu vidé).")
+            try:
+                self._logger.log(
+                    action="Init DB",
+                    element="Initialisation DB",
+                    details=f"Initialisation OK, tables_vidées={len(tables_to_truncate)}, cascade={bool(self.cascade_var.get())}",
+                    value=",".join(tables_to_truncate[:50]),
+                )
+            except Exception:
+                pass
 
         except Exception as e:
             self.log_message(f"Erreur générale lors de l'initialisation: {e}")
             self.db_connection.rollback() # Annuler toutes les troncatures en cas d'erreur globale
+            try:
+                self._logger.log(
+                    action="Init DB",
+                    element="Initialisation DB",
+                    details="Erreur générale lors de l'initialisation",
+                    value=str(e),
+                )
+            except Exception:
+                pass
         finally:
             cursor.close()
 

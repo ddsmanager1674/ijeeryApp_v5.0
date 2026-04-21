@@ -6,6 +6,7 @@ import os
 import sys
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, styled, Layout
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -31,6 +32,8 @@ class PageBanqueNv(ctk.CTkFrame):
         if self.conn:  # Seulement si la connexion a réussi
             self.create_widgets()
             self.afficher_banque()  # Afficher les données après la création des widgets
+            self.session_data = getattr(parent, "session_data", None) or {}
+            self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         else:
             # Afficher un message d'erreur si la connexion échoue
             error_label = ctk.CTkLabel(self, text="Erreur: Impossible de se connecter à la base de données", 
@@ -236,6 +239,15 @@ class PageBanqueNv(ctk.CTkFrame):
             )
             self.conn.commit()
             messagebox.showinfo("Succès", "Banque ajoutée avec succès.")
+            try:
+                self._logger.log(
+                    action="Création banque",
+                    element=nombanque,
+                    details=f"Banque créée, adresse='{adresse}', compte='{numcompte}'",
+                    value="aucune valeur",
+                )
+            except Exception:
+                pass
             self.clear_entry_fields()
             self.afficher_banque()
         except psycopg2.Error as err:
@@ -266,12 +278,28 @@ class PageBanqueNv(ctk.CTkFrame):
             return
 
         try:
+            old_name = ""
+            try:
+                self.cursor.execute("SELECT nombanque FROM tb_banque WHERE id_banque=%s", (banque_id,))
+                r = self.cursor.fetchone()
+                old_name = r[0] if r and r[0] else ""
+            except Exception:
+                old_name = ""
             self.cursor.execute(
                 "UPDATE tb_banque SET nombanque = %s, adresse = %s, numcompte = %s WHERE id_banque = %s",
                 (new_nombanque, new_adresse, new_numcompte, banque_id)
             )
             self.conn.commit()
             messagebox.showinfo("Succès", "Banque modifiée avec succès.")
+            try:
+                self._logger.log(
+                    action="Modification banque",
+                    element=old_name or f"id_banque={banque_id}",
+                    details=f"Banque modifiée en '{new_nombanque}', adresse='{new_adresse}', compte='{new_numcompte}'",
+                    value=f"id_banque={banque_id}",
+                )
+            except Exception:
+                pass
             self.clear_entry_fields()
             self.afficher_banque()
         except psycopg2.Error as err:
@@ -300,6 +328,15 @@ class PageBanqueNv(ctk.CTkFrame):
                 self.cursor.execute("DELETE FROM tb_banque WHERE id_banque = %s", (banque_id,))
                 self.conn.commit()
                 messagebox.showinfo("Succès", "Banque supprimée avec succès.")
+                try:
+                    self._logger.log(
+                        action="Suppression banque",
+                        element=nom_banque,
+                        details="Suppression banque",
+                        value=f"id_banque={banque_id}",
+                    )
+                except Exception:
+                    pass
                 self.clear_entry_fields()
                 self.afficher_banque()
             except psycopg2.Error as err:

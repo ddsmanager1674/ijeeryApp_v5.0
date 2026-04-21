@@ -10,6 +10,7 @@ import json
 import os
 import sys
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -149,6 +150,8 @@ def page_salaireAvance(master):
             return frame
             
         cursor = conn.cursor()
+        session_data = getattr(master, "session_data", None) or {}
+        _logger = AppLogger(conn=conn, session_data=session_data)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tb_avanceprof (
                 id SERIAL PRIMARY KEY,
@@ -236,6 +239,15 @@ def page_salaireAvance(master):
                 enregistrements_valides += 1
                 
             conn.commit()
+            try:
+                _logger.log(
+                    action="Création avance",
+                    element="Avance prof",
+                    details=f"Avances enregistrées (lignes={enregistrements_valides})",
+                    value=f"{enregistrements_valides} lignes",
+                )
+            except Exception:
+                pass
             if enregistrements_valides > 0:
                 messagebox.showinfo("Succes", f"{enregistrements_valides} avance(s) enregistree(s) avec succes !")
                 charger_professeurs()

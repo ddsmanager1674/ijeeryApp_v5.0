@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts
 from settings_utils import open_file_if_enabled
+from log_utils import AppLogger
 
 # Imports pour génération PDF
 from reportlab.lib.pagesizes import A5, landscape
@@ -102,6 +103,8 @@ class PageChangementArticle(ctk.CTkFrame):
         super().__init__(master, fg_color=Colors.BG_PAGE, **kwargs)
 
         self.iduser = iduser
+        self.session_data = getattr(master, "session_data", None) or {"user_id": self.iduser}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
         self.magasins: Dict[str, int] = {}
         self.idchg_charge              = None
         self.mode_modification         = False
@@ -1187,6 +1190,15 @@ class PageChangementArticle(ctk.CTkFrame):
                 )
 
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Création changement stock",
+                    element=str(refchg),
+                    details=f"Changement enregistré ref={refchg} (sorties={len(self.articles_sortie)}, entrées={len(self.articles_entree)})",
+                    value=f"idchg={idchg}",
+                )
+            except Exception:
+                pass
 
             messagebox.showinfo(
                 "Succès",

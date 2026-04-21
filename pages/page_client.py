@@ -26,6 +26,7 @@ except ImportError:
 
 
 from .page_clientCrédit import PageClientCrédit
+from log_utils import AppLogger
 
 
 try:
@@ -100,6 +101,8 @@ class PageClient(ctk.CTkFrame):
         if self.conn:
             self.cursor = self.conn.cursor()
             self.create_table()
+
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data, fallback_user_id=self.id_user_connecte)
         
         self.sort_column = "Crédit en cours"
         self.sort_ascending = False
@@ -360,6 +363,15 @@ class PageClient(ctk.CTkFrame):
             self.load_client()
             self.clear_fields()
             messagebox.showinfo("Succès", "Client ajouté !")
+            try:
+                self._logger.log(
+                    action="Création du client",
+                    element=nomcli,
+                    details="Création client (CRUD Client)",
+                    value="aucune valeur",
+                )
+            except Exception:
+                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur : {err}")
@@ -367,6 +379,13 @@ class PageClient(ctk.CTkFrame):
     def modify_client(self):
         if not self.selected_cli_id: return
         try:
+            old_name = ""
+            try:
+                self.cursor.execute("SELECT nomcli FROM tb_client WHERE idclient=%s", (self.selected_cli_id,))
+                r = self.cursor.fetchone()
+                old_name = r[0] if r and r[0] else ""
+            except Exception:
+                old_name = ""
             id_type = self.type_mapping.get(self.type_combo.get())
             self.cursor.execute("""
                 UPDATE tb_client 
@@ -377,6 +396,16 @@ class PageClient(ctk.CTkFrame):
             self.conn.commit()
             self.load_client()
             messagebox.showinfo("Succès", "Client modifié !")
+            try:
+                new_name = self.nomCli_entry.get()
+                self._logger.log(
+                    action="Modification du client",
+                    element=old_name or f"idclient={self.selected_cli_id}",
+                    details=f"Client modifié en '{new_name}'",
+                    value=f"idclient={self.selected_cli_id}",
+                )
+            except Exception:
+                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur : {err}")
@@ -385,10 +414,26 @@ class PageClient(ctk.CTkFrame):
         if not self.selected_cli_id: return
         if messagebox.askyesno("Confirmation", "Supprimer ce client ?"):
             try:
+                cli_name = ""
+                try:
+                    self.cursor.execute("SELECT nomcli FROM tb_client WHERE idclient=%s", (self.selected_cli_id,))
+                    r = self.cursor.fetchone()
+                    cli_name = r[0] if r and r[0] else ""
+                except Exception:
+                    cli_name = ""
                 self.cursor.execute("DELETE FROM tb_client WHERE idclient = %s", (self.selected_cli_id,))
                 self.conn.commit()
                 self.load_client()
                 self.clear_fields()
+                try:
+                    self._logger.log(
+                        action="Suppression du client",
+                        element=cli_name or f"idclient={self.selected_cli_id}",
+                        details="Suppression client (CRUD Client)",
+                        value=f"idclient={self.selected_cli_id}",
+                    )
+                except Exception:
+                    pass
             except psycopg2.Error as err:
                 messagebox.showerror("Erreur", f"Erreur : {err}")
 
@@ -1169,6 +1214,17 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 """, (date_pmt, montant_global, observation, 1, idclient, None, idmode_sel_global, None, ref_ticket, None, 1))
                 
                 self.conn.commit()
+
+                try:
+                    client_nom = self._get_client_name(idclient)
+                    self._logger.log(
+                        action="Paiement crédit client",
+                        element=client_nom or f"idclient={idclient}",
+                        details=f"Paiement global crédit client, ref={ref_ticket}, mode={selected_mode_global or 'N/A'}",
+                        value=f"{montant_global} Ar",
+                    )
+                except Exception:
+                    pass
                 
                 messagebox.showinfo("Succès", f"Paiement global de {self._formater_nombre(float(montant_global))} Ar enregistré avec succès!")
 
@@ -2009,6 +2065,17 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     VALUES (%s, %s, %s, %s)
                 """, (idclient, datetime.now(), num_fact, montant))
                 self.conn.commit()
+
+                try:
+                    client_nom = self._get_client_name(idclient)
+                    self._logger.log(
+                        action="Création de créance client",
+                        element=client_nom or f"idclient={idclient}",
+                        details=f"Créance manuelle ref='{num_fact}'",
+                        value=f"{montant} Ar",
+                    )
+                except Exception:
+                    pass
                 
                 messagebox.showinfo("Succès", f"Créance de {self._formater_nombre(montant)} Ar enregistrée avec succès!")
                 

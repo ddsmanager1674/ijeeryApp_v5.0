@@ -14,6 +14,7 @@ import sys
 from resource_utils import get_config_path, safe_file_read
 
 from app_theme import Colors, Fonts, styled, Layout
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -143,6 +144,8 @@ class PageEtatSalaireHoraire(ctk.CTkFrame):
         super().__init__(parent, fg_color=Colors.BG_PAGE)
         self.conn = conn
         self.cursor = cursor
+        self.session_data = getattr(parent, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
 
         self.current_export_data = []
         self.selected_personnel_id = None
@@ -513,6 +516,15 @@ class PageEtatSalaireHoraire(ctk.CTkFrame):
                 (int(self.selected_personnel_id), nb, dt),
             )
             self.conn.commit()
+            try:
+                self._logger.log(
+                    action="Création présence (heures)",
+                    element=f"idpers={self.selected_personnel_id}",
+                    details=f"Heures enregistrées (nbheure={nb}, date={dt.date()})",
+                    value=str(nb),
+                )
+            except Exception:
+                pass
             messagebox.showinfo("Succès", "Heures enregistrées.")
             self.hours_var.set("")
             self.load_hours_history()

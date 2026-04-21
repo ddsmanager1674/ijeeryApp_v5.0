@@ -27,6 +27,8 @@ try:
 except ImportError:
     _T = False
 
+from log_utils import AppLogger
+
 # ── Constantes de police (cohérence globale) ─────────────────────────────────
 _FONT_FAMILY  = "Roboto" if _T else "Segoe UI"
 _FONT_SIZE_SM = 10   # labels secondaires, infos
@@ -90,6 +92,8 @@ class PageFournisseur(ctk.CTkFrame):
         if self.conn:
             self.cursor = self.conn.cursor()
             self.create_table()
+
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data, fallback_user_id=self.id_user_connecte)
 
         self.sort_column = "Dette en cours"
         self.sort_ascending = False
@@ -309,6 +313,15 @@ class PageFournisseur(ctk.CTkFrame):
             self.load_fournisseur()
             self.clear_fields()
             messagebox.showinfo("Succès", "Fournisseur ajouté !")
+            try:
+                self._logger.log(
+                    action="Création du fournisseur",
+                    element=nomfrs,
+                    details="Création fournisseur (CRUD Fournisseur)",
+                    value="aucune valeur",
+                )
+            except Exception:
+                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur : {err}")
@@ -318,6 +331,13 @@ class PageFournisseur(ctk.CTkFrame):
             messagebox.showwarning("Attention", "Veuillez sélectionner un fournisseur.")
             return
         try:
+            old_name = ""
+            try:
+                self.cursor.execute("SELECT nomfrs FROM tb_fournisseur WHERE idfrs=%s", (self.selected_frs_id,))
+                r = self.cursor.fetchone()
+                old_name = r[0] if r and r[0] else ""
+            except Exception:
+                old_name = ""
             self.cursor.execute("""
                 UPDATE tb_fournisseur
                 SET nomfrs=%s, contactfrs=%s, adressefrs=%s, niffrs=%s, statfrs=%s, ciffrs=%s
@@ -328,6 +348,16 @@ class PageFournisseur(ctk.CTkFrame):
             self.conn.commit()
             self.load_fournisseur()
             messagebox.showinfo("Succès", "Fournisseur modifié !")
+            try:
+                new_name = self.nomFrs_entry.get().strip()
+                self._logger.log(
+                    action="Modification du fournisseur",
+                    element=old_name or f"idfrs={self.selected_frs_id}",
+                    details=f"Fournisseur modifié en '{new_name}'",
+                    value=f"idfrs={self.selected_frs_id}",
+                )
+            except Exception:
+                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur : {err}")
@@ -337,10 +367,26 @@ class PageFournisseur(ctk.CTkFrame):
             return
         if messagebox.askyesno("Confirmation", "Supprimer ce fournisseur ?"):
             try:
+                frs_name = ""
+                try:
+                    self.cursor.execute("SELECT nomfrs FROM tb_fournisseur WHERE idfrs=%s", (self.selected_frs_id,))
+                    r = self.cursor.fetchone()
+                    frs_name = r[0] if r and r[0] else ""
+                except Exception:
+                    frs_name = ""
                 self.cursor.execute("DELETE FROM tb_fournisseur WHERE idfrs = %s", (self.selected_frs_id,))
                 self.conn.commit()
                 self.load_fournisseur()
                 self.clear_fields()
+                try:
+                    self._logger.log(
+                        action="Suppression du fournisseur",
+                        element=frs_name or f"idfrs={self.selected_frs_id}",
+                        details="Suppression fournisseur (CRUD Fournisseur)",
+                        value=f"idfrs={self.selected_frs_id}",
+                    )
+                except Exception:
+                    pass
             except psycopg2.Error as err:
                 messagebox.showerror("Erreur", f"Erreur : {err}")
 
@@ -1085,6 +1131,16 @@ class PageFournisseur(ctk.CTkFrame):
                       None, idmode_sel, None, ref_ticket, None, iduser))
                 self.conn.commit()
 
+                try:
+                    self._logger.log(
+                        action="Paiement dette fournisseur",
+                        element=frs_nom or f"idfrs={idfrs}",
+                        details=f"Paiement global dette fournisseur, ref={ref_ticket}, mode={selected_mode or 'N/A'}",
+                        value=f"{montant_global} Ar",
+                    )
+                except Exception:
+                    pass
+
                 messagebox.showinfo("Succès", f"Paiement de {self._formater_nombre(montant_global)} Ar enregistré avec succès!")
 
                 societe_data = self._get_societe_info()
@@ -1211,6 +1267,17 @@ class PageFournisseur(ctk.CTkFrame):
                     VALUES (%s, %s, %s, %s)
                 """, (idfrs, datetime.now(), num_fact, montant))
                 self.conn.commit()
+
+                try:
+                    frs_nom = self._get_frs_name(idfrs)
+                    self._logger.log(
+                        action="Création de dette fournisseur",
+                        element=frs_nom or f"idfrs={idfrs}",
+                        details=f"Dette manuelle ref='{num_fact}'",
+                        value=f"{montant} Ar",
+                    )
+                except Exception:
+                    pass
 
                 messagebox.showinfo("Succès", f"Dette de {self._formater_nombre(montant)} Ar enregistrée avec succès!")
 

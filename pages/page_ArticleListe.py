@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from datetime import datetime
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -145,7 +146,8 @@ class page_listeArticle(customtkinter.CTkFrame):
         super().__init__(master, fg_color=C.BG_PAGE, **kwargs)
 
         self.db_conn      = db_conn
-        self.session_data = session_data
+        self.session_data = session_data or {}
+        self._logger = AppLogger(conn=self.db_conn, session_data=self.session_data)
 
         try:
             configure_treeview_style(master)
@@ -720,6 +722,15 @@ class page_listeArticle(customtkinter.CTkFrame):
             messagebox.showinfo(
                 "Export réussi",
                 f"Les données ont été exportées avec succès vers:\n{filename}")
+            try:
+                self._logger.log(
+                    action="Export Excel",
+                    element="Articles",
+                    details=f"export liste articles, lignes={valid_items_count}, fichier={os.path.basename(filename)}",
+                    value=filename,
+                )
+            except Exception:
+                pass
         except PermissionError:
             messagebox.showerror(
                 "Erreur d'accès",

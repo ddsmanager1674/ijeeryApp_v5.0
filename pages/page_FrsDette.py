@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # IMPORTER LA CLASSE DE PAIEMENT
@@ -26,6 +27,8 @@ class PageFrsDette(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         self.data_df = pd.DataFrame() 
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(session_data=self.session_data)
         
         # --- 1. Interface de Recherche et Export ---
         self.search_frame = ctk.CTkFrame(self)
@@ -182,6 +185,15 @@ class PageFrsDette(ctk.CTkFrame):
                 "idfrs": row_data["ID Fournisseur"]
             }
             root = self.winfo_toplevel()
+            try:
+                self._logger.log(
+                    action="Paiement fournisseur (ouverture)",
+                    element=str(paiement_data.get("refcom")),
+                    details=f"Ouverture paiement fournisseur refcom: {paiement_data.get('refcom')}, fournisseur: {paiement_data.get('fournisseur')}, solde: {paiement_data.get('montant_total')} Ar",
+                    value=paiement_data.get("montant_total"),
+                )
+            except Exception:
+                pass
             self.popup_paiement = PagePmtFrs(root, paiement_data)
             root.wait_window(self.popup_paiement)
             self.load_all_dettes()
@@ -320,6 +332,16 @@ class PageFrsDette(ctk.CTkFrame):
             filename = f"Dettes_Fournisseurs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             export_df.to_excel(filename, index=False)
             messagebox.showinfo("Succès", f"Exporté dans: {filename}")
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Fournisseur à Payer",
+                    details=f"export dettes fournisseurs, lignes={len(export_df)}, fichier={os.path.basename(filename)}",
+                    value=filename,
+                )
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror("Erreur Export", str(e))
 

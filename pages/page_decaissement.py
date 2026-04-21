@@ -12,6 +12,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -45,6 +46,8 @@ class PageDecaissement(ctk.CTkToplevel):
         else:
             self.current_user = username
         self.current_user_id = loaded_user_id
+        self.session_data = getattr(master, "session_data", None) or {"user_id": self.current_user_id, "username": self.current_user}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.current_user_id)
 
         self.categories = {}
         # Protection contre les double-clics
@@ -500,6 +503,15 @@ class PageDecaissement(ctk.CTkToplevel):
             self.cursor.execute(query, (reference, idcc, mtpaye, observation, typeoperation_id, datepmt, iduser, 1))
         
             self.conn.commit()
+            try:
+                self._logger.log(
+                    action="Décaissement",
+                    element=str(reference),
+                    details=f"Décaissement enregistré ref: {reference}, catégorie: {categorie_nom}, montant: {mtpaye:.0f} Ar",
+                    value=f"{mtpaye:.0f} Ar",
+                )
+            except Exception:
+                pass
             self._finalized = True  # Marquer comme finalisé
             
             # --- GÉNÉRATION DU TICKET PDF ---

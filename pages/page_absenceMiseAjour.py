@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -43,6 +44,8 @@ class PageAbsenceMJ(ctk.CTkToplevel):
                 self.cursor = None
                 self.own_connection = True
                 # Le message d'erreur est déjà géré dans connect_db
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
 
         # Stocker le mapping fonction_designation -> fonction_id
         self.fonction_map = {}
@@ -310,6 +313,15 @@ class PageAbsenceMJ(ctk.CTkToplevel):
                 VALUES (%s, %s, %s, %s)
             """, absences_to_insert)
             self.conn.commit()
+            try:
+                self._logger.log(
+                    action="Création absence (lot)",
+                    element="Absences",
+                    details=f"Absences enregistrées en lot (date={date_obj}, lignes={len(absences_to_insert)})",
+                    value=f"{len(absences_to_insert)} lignes",
+                )
+            except Exception:
+                pass
             messagebox.showinfo("Succès", f"{len(absences_to_insert)} absence(s) enregistrée(s) avec succès.")
             self.load_personnel()
         except Exception as e:

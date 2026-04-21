@@ -10,6 +10,7 @@ import sys
 from resource_utils import get_config_path, safe_file_read
 
 from app_theme import Colors, Fonts, styled, Layout
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -123,6 +124,9 @@ class PageSalaireBase(ctk.CTkFrame):
         # [UI] Fond et structure alignés sur app_theme (Nouveau SB)
         super().__init__(master, fg_color=Colors.BG_PAGE)
         self.pack(fill="both", expand=True)
+
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=getattr(self, "conn", None), session_data=self.session_data)
 
         self.app_root = app_root
 
@@ -547,6 +551,15 @@ class PageSalaireBase(ctk.CTkFrame):
 
         if not error_occurred:
             self.conn.commit() # Commit all changes if no errors occurred
+            try:
+                self._logger.log(
+                    action="Création salaire de base",
+                    element=f"idpers={self.selected_personnel_id}",
+                    details=f"Salaire de base enregistré (montant={montant_float}, date={now})",
+                    value=str(montant_float),
+                )
+            except Exception:
+                pass
             if success_count > 0:
                 messagebox.showinfo("Succès", f"{success_count} salaires de base enregistrés avec succès.")
             else:

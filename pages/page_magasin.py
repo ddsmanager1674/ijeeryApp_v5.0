@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -77,6 +78,8 @@ class PageMagasin(ctk.CTkFrame):
             self.create_table()
 
         self.selected_mag_id = None
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
 
         _apply_tree_style()
 
@@ -263,6 +266,15 @@ class PageMagasin(ctk.CTkFrame):
             self.load_magasin()
             self.clear_fields()
             messagebox.showinfo("Succès", "Dépôt ajouté avec succès!")
+            try:
+                self._logger.log(
+                    action="Création du dépôt/magasin",
+                    element=designationmag,
+                    details=f"Ajout dépôt, adresse='{adressemag}'",
+                    value="aucune valeur",
+                )
+            except Exception:
+                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur lors de l'ajout : {err}")
@@ -276,6 +288,13 @@ class PageMagasin(ctk.CTkFrame):
                                    "Veuillez sélectionner un dépôt à modifier.")
             return
         try:
+            old_name = ""
+            try:
+                self.cursor.execute("SELECT designationmag FROM tb_magasin WHERE idmag=%s", (self.selected_mag_id,))
+                r = self.cursor.fetchone()
+                old_name = r[0] if r and r[0] else ""
+            except Exception:
+                old_name = ""
             designationmag = self.designationmag_entry.get()
             adressemag     = self.adressemag_entry.get()
             if not all([designationmag, adressemag]):
@@ -290,6 +309,15 @@ class PageMagasin(ctk.CTkFrame):
             self.load_magasin()
             self.clear_fields()
             messagebox.showinfo("Succès", "Dépôt modifié avec succès!")
+            try:
+                self._logger.log(
+                    action="Modification du dépôt/magasin",
+                    element=old_name or f"idmag={self.selected_mag_id}",
+                    details=f"Dépôt modifié en '{designationmag}', adresse='{adressemag}'",
+                    value=f"idmag={self.selected_mag_id}",
+                )
+            except Exception:
+                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur lors de la modification : {err}")
@@ -306,6 +334,13 @@ class PageMagasin(ctk.CTkFrame):
                                     "Voulez-vous vraiment supprimer ce dépôt ?"):
             return
         try:
+            mag_name = ""
+            try:
+                self.cursor.execute("SELECT designationmag FROM tb_magasin WHERE idmag=%s", (self.selected_mag_id,))
+                r = self.cursor.fetchone()
+                mag_name = r[0] if r and r[0] else ""
+            except Exception:
+                mag_name = ""
             self.cursor.execute(
                 "DELETE FROM tb_magasin WHERE idmag = %s",
                 (self.selected_mag_id,))
@@ -313,6 +348,15 @@ class PageMagasin(ctk.CTkFrame):
             self.load_magasin()
             self.clear_fields()
             messagebox.showinfo("Succès", "Dépôt supprimé avec succès!")
+            try:
+                self._logger.log(
+                    action="Suppression du dépôt/magasin",
+                    element=mag_name or f"idmag={self.selected_mag_id}",
+                    details="Suppression dépôt (CRUD Magasin)",
+                    value=f"idmag={self.selected_mag_id}",
+                )
+            except Exception:
+                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur lors de la suppression : {err}")

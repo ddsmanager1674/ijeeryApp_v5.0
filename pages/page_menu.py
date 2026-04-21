@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 class PageMenu(ctk.CTkFrame):
@@ -16,6 +17,9 @@ class PageMenu(ctk.CTkFrame):
         if self.conn:
             self.cursor = self.conn.cursor()
             self.create_table()
+
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         
         self.setup_ui()
         
@@ -185,6 +189,15 @@ class PageMenu(ctk.CTkFrame):
             self.load_menu()
             self.clear_fields()
             messagebox.showinfo("Succès", "Menu ajouté avec succès!")
+            try:
+                self._logger.log(
+                    action="Création menu",
+                    element=designationmenu,
+                    details=f"Menu créé page='{page}'",
+                    value="aucune valeur",
+                )
+            except Exception:
+                pass
             
         except psycopg2.Error as err:
             self.conn.rollback()
@@ -200,6 +213,13 @@ class PageMenu(ctk.CTkFrame):
             return
             
         try:
+            old_design = ""
+            try:
+                self.cursor.execute("SELECT designationmenu FROM tb_menu WHERE id=%s", (self.selected_men_id,))
+                r = self.cursor.fetchone()
+                old_design = r[0] if r and r[0] else ""
+            except Exception:
+                old_design = ""
             designationmenu = self.designationmenu_entry.get()
             page = self.page_entry.get()
             
@@ -217,6 +237,15 @@ class PageMenu(ctk.CTkFrame):
             self.load_menu()
             self.clear_fields()
             messagebox.showinfo("Succès", "Menu modifié avec succès!")
+            try:
+                self._logger.log(
+                    action="Modification menu",
+                    element=old_design or f"id={self.selected_men_id}",
+                    details=f"Menu modifié en '{designationmenu}', page='{page}'",
+                    value=f"id={self.selected_men_id}",
+                )
+            except Exception:
+                pass
             
         except psycopg2.Error as err:
             self.conn.rollback()
@@ -235,6 +264,13 @@ class PageMenu(ctk.CTkFrame):
             return
             
         try:
+            old_design = ""
+            try:
+                self.cursor.execute("SELECT designationmenu FROM tb_menu WHERE id=%s", (self.selected_men_id,))
+                r = self.cursor.fetchone()
+                old_design = r[0] if r and r[0] else ""
+            except Exception:
+                old_design = ""
             # Note: Si 'deleted' est utilisé, il faudrait faire un UPDATE:
             # self.cursor.execute("UPDATE tb_magasin SET deleted = 1 WHERE idmag = %s", (self.selected_mag_id,))
             # Ici, on utilise DELETE comme dans votre code initial.
@@ -243,6 +279,15 @@ class PageMenu(ctk.CTkFrame):
             self.load_menu()
             self.clear_fields()
             messagebox.showinfo("Succès", "Menu supprimé avec succès!")
+            try:
+                self._logger.log(
+                    action="Suppression menu",
+                    element=old_design or f"id={self.selected_men_id}",
+                    details="Suppression menu",
+                    value=f"id={self.selected_men_id}",
+                )
+            except Exception:
+                pass
             
         except psycopg2.Error as err:
             self.conn.rollback()

@@ -11,6 +11,7 @@ import json
 import sys
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled, Layout
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -44,6 +45,8 @@ class PageBanque(ctk.CTkFrame):
             return
         
         self.cursor = self.conn.cursor()
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         
         # CORRECTION PRINCIPALE : Appeler setup_ui() dans __init__
         self.setup_ui()
@@ -403,6 +406,16 @@ class PageBanque(ctk.CTkFrame):
             nom = f"Banque_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             df.to_excel(nom, index=False)
             messagebox.showinfo("Succès", f"Exporté vers {nom}")
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Banque",
+                    details=f"export banque, lignes={len(self.donnees_export)}, fichier={os.path.basename(nom)}",
+                    value=nom,
+                )
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror("Erreur", str(e))
 
@@ -410,6 +423,15 @@ class PageBanque(ctk.CTkFrame):
         if not self.selected_bank_id:
             messagebox.showwarning("Attention", "Veuillez sélectionner une banque")
             return
+        try:
+            self._logger.log(
+                action="Ouverture décaissement bancaire",
+                element=f"id_banque={self.selected_bank_id}",
+                details="Ouverture page Décaissement Bq",
+                value=f"id_banque={self.selected_bank_id}",
+            )
+        except Exception:
+            pass
         from pages.page_decaissementBq import PageDecaissementBq
         win = PageDecaissementBq(self.master, bank_id=self.selected_bank_id)
         win.grab_set()
@@ -420,6 +442,15 @@ class PageBanque(ctk.CTkFrame):
         if not self.selected_bank_id:
             messagebox.showwarning("Attention", "Veuillez sélectionner une banque")
             return
+        try:
+            self._logger.log(
+                action="Ouverture encaissement bancaire",
+                element=f"id_banque={self.selected_bank_id}",
+                details="Ouverture page Encaissement Bq",
+                value=f"id_banque={self.selected_bank_id}",
+            )
+        except Exception:
+            pass
         from pages.page_encaissementBq import PageEncaissementBq
         win = PageEncaissementBq(self.master, bank_id=self.selected_bank_id)
         win.grab_set()

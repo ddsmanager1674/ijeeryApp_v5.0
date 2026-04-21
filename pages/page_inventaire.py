@@ -7,6 +7,7 @@ from datetime import datetime
 from resource_utils import get_config_path, safe_file_read
 import traceback
 from app_theme import Theme, Colors, Fonts, Layout, styled
+from log_utils import AppLogger
 
 
 class PageInventaire(ctk.CTkToplevel):
@@ -18,6 +19,8 @@ class PageInventaire(ctk.CTkToplevel):
         self.article_data = article_data
         self.magasins_dict = {}
         self.unites_dict = {}
+        self.session_data = getattr(master, "session_data", None) or {"user_id": self.iduser}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
 
         self.attributes('-topmost', True)
         Theme.apply_toplevel(self)
@@ -743,6 +746,28 @@ class PageInventaire(ctk.CTkToplevel):
             # ── COMMIT ────────────────────────────────────────────────────────
             conn.commit()
             self._log_step("20", "COMMIT effectué")
+            try:
+                details_parts = [
+                    f"Article={designation} (code={code_article})",
+                    f"Magasin={mag_nom} (idmag={idmag})",
+                    f"Unité saisie={unite_label} (idunite={idunite_saisie})",
+                    f"Qt saisie={nouveau}",
+                    f"Obs={obs}",
+                ]
+                # On évite de dépasser : prendre seulement quelques lignes
+                if unites_mises_a_jour:
+                    details_parts.append("Maj unités: " + " | ".join(unites_mises_a_jour[:3]))
+                    if len(unites_mises_a_jour) > 3:
+                        details_parts.append(f"...(+{len(unites_mises_a_jour) - 3} autres)")
+
+                self._logger.log(
+                    action="Ajustement inventaire",
+                    element=f"{designation} ({code_article})",
+                    details="; ".join(details_parts),
+                    value=f"idmag={idmag}, iduser={self.iduser}",
+                )
+            except Exception:
+                pass
 
             rapport.append("▶ ÉTAPE 5 — COMMIT TRANSACTION")
             rapport.append(sep)

@@ -28,6 +28,7 @@ from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
 
 from app_theme import Colors, Fonts
+from log_utils import AppLogger
 
 # ── Import page paiement ──────────────────────────────────────────────────────
 try:
@@ -79,6 +80,9 @@ class PageFactureListe(ctk.CTkFrame):
         self._build_filter_band()   # Row 0
         self._build_treeview()      # Row 1
         self._build_totals_band()   # Row 2
+
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(session_data=self.session_data)
 
         self.load_all_credit()
 
@@ -334,6 +338,15 @@ class PageFactureListe(ctk.CTkFrame):
         self.tree.item(selected_item, tags=())
 
         selected_refvente = str(paiement_data.get("refvente", "")).strip()
+        try:
+            self._logger.log(
+                action="Paiement facture (ouverture)",
+                element=selected_refvente,
+                details=f"Ouverture paiement facture ref: {selected_refvente}, client: {paiement_data.get('client')}, solde: {paiement_data.get('montant_total')} Ar",
+                value=paiement_data.get("montant_total"),
+            )
+        except Exception:
+            pass
         pay_win = PagePmtFacture(self.master, paiement_data)
 
         def _after_payment_closed(event=None):
@@ -616,6 +629,16 @@ class PageFactureListe(ctk.CTkFrame):
             ]].copy()
             export_df.to_excel(filepath, index=False, sheet_name="Factures")
             messagebox.showinfo("Succès", f"Export réussi vers :\n{filepath}")
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Client à Payer",
+                    details=f"export factures clients, lignes={len(export_df)}, fichier={os.path.basename(filepath)}",
+                    value=filepath,
+                )
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'export: {str(e)}")
 

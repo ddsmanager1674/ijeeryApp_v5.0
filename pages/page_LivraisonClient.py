@@ -12,6 +12,7 @@ from tkcalendar import DateEntry
 
 from app_theme import Colors, Fonts, styled, Theme
 from EtatsPDF_Mouvements import EtatPDFMouvements
+from log_utils import AppLogger
 
 
 def _apply_treeview_style():
@@ -375,6 +376,8 @@ class PageLivraisonClient(ctk.CTkFrame):
         _apply_treeview_style()
 
         self.user_id = id_user_connecte
+        self.session_data = getattr(master, "session_data", None) or {"user_id": self.user_id}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.user_id)
         if self.user_id is None:
             messagebox.showerror("Erreur", "Aucun utilisateur connecté. Veuillez vous reconnecter.")
 
@@ -1440,6 +1443,15 @@ class PageLivraisonClient(ctk.CTkFrame):
                     (self.user_id, refvente),
                 )
                 conn.commit()
+                try:
+                    self._logger.log(
+                        action="Annulation livraison (attente)",
+                        element=str(refvente),
+                        details="Annulation de toutes les attentes BL pour la facture",
+                        value="statut=ANNULEE",
+                    )
+                except Exception:
+                    pass
                 cur.close()
                 conn.close()
                 self.load_history()
@@ -2344,6 +2356,15 @@ class PageLivraisonClient(ctk.CTkFrame):
                 )
 
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Création livraison client",
+                    element=str(refliv),
+                    details=f"BL créé pour refvente={self.selected_ref_vente} (lignes={len(lignes)}, client_id={idcli})",
+                    value=str(refliv),
+                )
+            except Exception:
+                pass
 
             # PDF A5 paysage (modèle mouvements)
             try:

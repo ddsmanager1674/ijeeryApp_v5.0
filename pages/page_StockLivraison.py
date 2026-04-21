@@ -1011,6 +1011,16 @@ class PageStockLivraison(ctk.CTkFrame):
                 "Succès",
                 f"Export réussi !\n\n{len(items_visibles)} lignes exportées vers:\n{fichier}"
             )
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Stock Livraison",
+                    details=f"export stock livraison, lignes={len(items_visibles)}, fichier={os.path.basename(fichier)}",
+                    value=fichier,
+                )
+            except Exception:
+                pass
             
         except ImportError:
             messagebox.showerror(

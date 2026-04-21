@@ -6,6 +6,7 @@ import tkinter as tk
 import os
 import json
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 class PageAutorisation(ctk.CTkFrame):
@@ -20,6 +21,8 @@ class PageAutorisation(ctk.CTkFrame):
             self.cursor = self.conn.cursor()
         
         self.selected_fonction_id = None
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         self.setup_ui()
         self.configure_style()
         
@@ -345,12 +348,14 @@ class PageAutorisation(ctk.CTkFrame):
                               (self.selected_fonction_id,))
             
             # Insérer les nouvelles autorisations
+            authorized = 0
             for item in self.menu_tree.get_children():
                 values = self.menu_tree.item(item)['values']
                 menu_id = values[0]
                 is_authorized = values[2] == "Oui"
                 
                 if is_authorized:
+                    authorized += 1
                     self.cursor.execute("""
                         INSERT INTO tb_autorisation (idfonction, idmenu)
                         VALUES (%s, %s)
@@ -358,6 +363,15 @@ class PageAutorisation(ctk.CTkFrame):
             
             self.conn.commit()
             messagebox.showinfo("Succès", "Autorisations enregistrées avec succès!")
+            try:
+                self._logger.log(
+                    action="Modification autorisations",
+                    element=f"idfonction={self.selected_fonction_id}",
+                    details=f"Autorisations menus enregistrées, autorisées={authorized}",
+                    value=f"autorisees={authorized}",
+                )
+            except Exception:
+                pass
             
         except psycopg2.Error as err:
             self.conn.rollback()

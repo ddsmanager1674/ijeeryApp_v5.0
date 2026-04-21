@@ -6,6 +6,7 @@ from datetime import datetime
 import threading
 from tkinter import ttk
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -94,6 +95,7 @@ class PageStock(ctk.CTkFrame):
         self.setup_ui()
         self.charger_magasins()
         self.charger_stocks()
+        self._logger = AppLogger(conn=db_conn, session_data=session_data or {"user_id": self.iduser}, fallback_user_id=self.iduser)
 
     # ── helper font ──────────────────────────────────────────────────────────
     def _f(self, size=11, weight="normal"):
@@ -609,6 +611,15 @@ class PageStock(ctk.CTkFrame):
                 'idarticle': idarticle,
                 'idunite': idunite
             }
+            try:
+                self._logger.log(
+                    action="Vérification inventaire spécifique",
+                    element=f"{designation}",
+                    details=f"Ouverture inventaire spécifique (code={code_article})",
+                    value=f"idarticle={idarticle}, idunite={idunite}",
+                )
+            except Exception:
+                pass
             PageInventaire(self, article_data, self.iduser)
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'ouverture : {str(e)}")
@@ -676,6 +687,15 @@ class PageStock(ctk.CTkFrame):
                 for item in self.tree.get_children():
                     writer.writerow(self.tree.item(item)['values'])
             messagebox.showinfo("Succès", f"Stocks exportés vers :\n{fichier}")
+            try:
+                self._logger.log(
+                    action="Export",
+                    element="Stock Article",
+                    details=f"Export stocks (CSV), lignes={len(self.tree.get_children())}, fichier={os.path.basename(fichier)}",
+                    value=fichier,
+                )
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'export: {str(e)}")
 
@@ -737,6 +757,15 @@ class PageStock(ctk.CTkFrame):
             mode="verification",
         )
         page.pack(fill="both", expand=True, padx=10, pady=10)
+        try:
+            self._logger.log(
+                action="Vérification inventaire du jour",
+                element="Inventaire du Jour",
+                details="Ouverture mode vérification inventaire du jour",
+                value="mode=verification",
+            )
+        except Exception:
+            pass
 
 
 # ── Test standalone ───────────────────────────────────────────────────────────

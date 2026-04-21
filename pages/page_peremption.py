@@ -14,6 +14,7 @@ from tkinter import ttk, messagebox, StringVar, BooleanVar
 import psycopg2, psycopg2.extras, json
 from datetime import datetime, timedelta
 from resource_utils import get_config_path
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -249,6 +250,7 @@ class PageGestionPeremption(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
 
         self.iduser       = iduser
+        self._logger      = AppLogger(session_data={"user_id": self.iduser} if self.iduser else {})
         self.all_rows     = []
         self.item_meta    = {}
         self.magasins     = []
@@ -869,6 +871,19 @@ class PageGestionPeremption(ctk.CTkFrame):
                      datetime.today().date(),
                      var_note.get() or None))
                 conn.commit()
+                try:
+                    self._logger.log(
+                        action="Création lot péremption",
+                        element=str(row.get("designationarticle") or row.get("codearticle") or "Article"),
+                        details=(
+                            f"Création lot péremption magasin='{mag_nom}', "
+                            f"qt={qt:,.2f} {row.get('unite','')}, "
+                            f"date_peremption={dp.strftime('%d/%m/%Y')}"
+                        ),
+                        value=f"qt={qt}",
+                    )
+                except Exception:
+                    pass
                 messagebox.showinfo(
                     "Succès",
                     f"Lot créé avec succès.\n"
@@ -1027,6 +1042,15 @@ class PageGestionPeremption(ctk.CTkFrame):
                 "UPDATE tb_lot_peremption SET note=%s WHERE id=%s",
                     (var_note.get(), row['id_lot'])):
                 messagebox.showinfo("Succès", "Note enregistrée.")
+                try:
+                    self._logger.log(
+                        action="Modification péremption",
+                        element=f"lot#{row.get('id_lot')}",
+                        details=f"Mise à jour note lot péremption (magasin='{mag_nom}')",
+                        value=var_note.get() or "",
+                    )
+                except Exception:
+                    pass
 
         def do_supprimer():
             if not messagebox.askyesno(
@@ -1038,6 +1062,15 @@ class PageGestionPeremption(ctk.CTkFrame):
                 "UPDATE tb_lot_peremption SET deleted=1 WHERE id=%s",
                     (row['id_lot'],)):
                 messagebox.showinfo("Succès", "Lot supprimé.")
+                try:
+                    self._logger.log(
+                        action="Suppression lot péremption",
+                        element=f"lot#{row.get('id_lot')}",
+                        details=f"Suppression lot péremption magasin='{mag_nom}'",
+                        value=f"id_lot={row.get('id_lot')}",
+                    )
+                except Exception:
+                    pass
                 win.destroy()
                 self.charger_donnees()
 
@@ -1098,6 +1131,19 @@ class PageGestionPeremption(ctk.CTkFrame):
                          f"Split lot #{row['id_lot']} part {label}"))
                 conn.commit()
                 messagebox.showinfo("Succès", "Lot divisé avec succès.")
+                try:
+                    self._logger.log(
+                        action="Modification péremption",
+                        element=f"lot#{row.get('id_lot')}",
+                        details=(
+                            f"Split lot péremption magasin='{mag_nom}', "
+                            f"A: qt={qa} date={da.strftime('%d/%m/%Y')}, "
+                            f"B: qt={qb} date={db_.strftime('%d/%m/%Y')}"
+                        ),
+                        value=f"qa={qa}, qb={qb}",
+                    )
+                except Exception:
+                    pass
                 win.destroy()
                 self.charger_donnees()
             except Exception as e:

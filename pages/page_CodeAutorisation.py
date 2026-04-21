@@ -4,6 +4,7 @@ import psycopg2
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 class PageCodeAutorisation(ctk.CTkFrame):
@@ -58,6 +59,8 @@ class PageCodeAutorisation(ctk.CTkFrame):
 
         # Charger les données au démarrage
         self.afficher_donnees()
+        self.session_data = getattr(parent, "session_data", None) or {}
+        self._logger = AppLogger(session_data=self.session_data)
 
     def connect_db(self):
         try:
@@ -118,6 +121,15 @@ class PageCodeAutorisation(ctk.CTkFrame):
                 conn.commit()
                 conn.close()
                 messagebox.showinfo("Succès", "Code enregistré avec succès !")
+                try:
+                    self._logger.log(
+                        action="Création code autorisation admin",
+                        element=str(code),
+                        details="Code d'autorisation admin enregistré",
+                        value=str(code),
+                    )
+                except Exception:
+                    pass
                 self.entry_code.delete(0, 'end')
                 self.afficher_donnees()
             except Exception as e:
@@ -145,6 +157,15 @@ class PageCodeAutorisation(ctk.CTkFrame):
                 conn.commit()
                 conn.close()
                 messagebox.showinfo("Succès", "Code modifié avec succès !")
+                try:
+                    self._logger.log(
+                        action="Modification code autorisation admin",
+                        element=f"id={self.selected_id}",
+                        details="Code d'autorisation admin modifié",
+                        value=str(code),
+                    )
+                except Exception:
+                    pass
                 self.selected_id = None
                 self.entry_code.delete(0, 'end')
                 self.afficher_donnees()

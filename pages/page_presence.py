@@ -329,6 +329,16 @@ class PagePresence(ctk.CTkFrame):
             path = os.path.join(chemin_bureau, f"Presence_{date_export}.xlsx")
             df.to_excel(path, index=False)
             messagebox.showinfo("Export", f"Fichier créé : {path}")
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Présence",
+                    details=f"export présence (date={date_export}), lignes={len(df)}, fichier={os.path.basename(path)}",
+                    value=path,
+                )
+            except Exception:
+                pass
 
     def _refresh_table_alternating_colors(self):
         # [UI] Applique l’alternance de lignes selon la palette du thème

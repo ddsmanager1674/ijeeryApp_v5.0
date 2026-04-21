@@ -27,6 +27,7 @@ from resource_utils import get_config_path, safe_file_read
 from settings_utils import is_global_print_enabled, open_file_if_enabled
 
 from app_theme import Colors, Fonts
+from log_utils import AppLogger
 
 # ── ReportLab ────────────────────────────────────────────────────────────────
 from reportlab.pdfgen import canvas
@@ -91,6 +92,8 @@ class PagePmtFacture(ctk.CTkToplevel):
         self.montant_total_str  = self.data.get('montant_total', '0,00')
         self.client             = self.data.get('client', 'Client Inconnu')
         self.iduser             = iduser if iduser is not None else 1
+        self.session_data       = getattr(master, "session_data", None) or {"user_id": self.iduser}
+        self._logger            = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
 
         try:
             montant_nettoyé         = str(self.montant_total_str).replace(' ', '').replace(',', '.')
@@ -1198,6 +1201,19 @@ class PagePmtFacture(ctk.CTkToplevel):
                 print(f"\n{'='*70}")
                 print(f"✅ VALIDATION RÉUSSIE - Tous les changements sont validés")
                 print(f"{'='*70}\n")
+                try:
+                    self._logger.log(
+                        action="Paiement facture client",
+                        element=str(self.refvente),
+                        details=(
+                            f"Paiement ref: {refpmt} pour facture {self.refvente}, "
+                            f"client: {self.client}, mode: {nom_mode_pmt}, "
+                            f"montant: {montant_saisi:.0f} Ar"
+                        ),
+                        value=f"{montant_saisi:.0f} Ar",
+                    )
+                except Exception:
+                    pass
 
             except Exception as e:
                 conn.rollback()

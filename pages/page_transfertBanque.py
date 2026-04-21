@@ -12,6 +12,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, styled, Layout
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -110,6 +111,8 @@ class PageTransfertBanque(ctk.CTkFrame):
         super().__init__(master)
         self.configure(fg_color=Colors.BG_PAGE)
         self.current_user_id = id_user_connecte
+        self.session_data = getattr(master, "session_data", None) or {"user_id": self.current_user_id}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.current_user_id)
         
         self.db_manager = db_manager
         self.conn = self.db_manager.get_connection()
@@ -495,6 +498,15 @@ class PageTransfertBanque(ctk.CTkFrame):
             )
 
             self.conn.commit()
+            try:
+                self._logger.log(
+                    action="Transfert Caisse vers Banque",
+                    element=str(reference_caisse),
+                    details=f"Transfert caisse -> banque '{selected_banque_name}', montant={mtpaye:.0f} Ar (ref={reference_caisse})",
+                    value=f"{mtpaye:.0f} Ar",
+                )
+            except Exception:
+                pass
             
             # Générer le ticket de caisse PDF
             pdf_path = self.generer_ticket_banque_pdf(reference_caisse, mtpaye, date_du_jour, selected_banque_name)

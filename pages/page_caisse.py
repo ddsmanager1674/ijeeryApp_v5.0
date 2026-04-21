@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 # Imports ReportLab pour le PDF
 from reportlab.lib import colors
@@ -129,6 +130,9 @@ class PageCaisse(ctk.CTkFrame):
         self._build_table_actions()
         self._build_footer()
 
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
+
         self.charger_modes_paiement()
         self.appliquer_filtres()
 
@@ -220,7 +224,7 @@ class PageCaisse(ctk.CTkFrame):
 
         ctk.CTkButton(
             inner, text="Valider",
-            command=self.appliquer_filtres,
+            command=self._apply_filters_with_log,
             fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
             text_color="#FFFFFF", height=28, width=80, font=_f(10, "bold")
         ).pack(side="left", padx=(0, 4))
@@ -663,6 +667,22 @@ class PageCaisse(ctk.CTkFrame):
         self.calculer_montants_categories(date_d, date_f)
         self.charger_donnees(date_d, date_f, mode_id, type_doc)
 
+    def _apply_filters_with_log(self):
+        try:
+            type_doc = self.filtre_doc_actif if self.filtre_doc_actif else "Tous"
+            mode_ui = self.filtre_mode_actif if self.filtre_mode_actif else "Tous"
+            d = self.entry_debut.get_date()
+            f = self.entry_fin.get_date()
+            self._logger.log(
+                action="Consultation caisse",
+                element="Caisse",
+                details=f"Filtre caisse (du={d}, au={f}, doc={type_doc}, mode={mode_ui})",
+                value="filtre",
+            )
+        except Exception:
+            pass
+        self.appliquer_filtres()
+
     def charger_donnees(self, date_d, date_f, mode_id=None, type_doc="Tous"):
         if not self.conn: return
         d_str, f_str = date_d.strftime('%Y-%m-%d'), date_f.strftime('%Y-%m-%d')
@@ -839,6 +859,17 @@ class PageCaisse(ctk.CTkFrame):
                 styles['Italic']))
             doc.build(elements)
             os.startfile(nom_fichier)
+            try:
+                filtre_doc  = self.filtre_doc_actif  or "Tous"
+                filtre_mode = self.filtre_mode_actif or "Tous"
+                self._logger.log(
+                    action="Impression",
+                    element="État de caisse",
+                    details=f"PDF état de caisse (du={self.entry_debut.get()}, au={self.entry_fin.get()}, mode={filtre_mode}, doc={filtre_doc})",
+                    value=nom_fichier,
+                )
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror("Erreur PDF", f"Détails : {e}")
 
@@ -847,6 +878,15 @@ class PageCaisse(ctk.CTkFrame):
             from page_decaissement import PageDecaissement
         except ImportError:
             from pages.page_decaissement import PageDecaissement
+        try:
+            self._logger.log(
+                action="Ouverture décaissement",
+                element="Décaissement",
+                details="Ouverture fenêtre décaissement depuis caisse",
+                value="open",
+            )
+        except Exception:
+            pass
         win = PageDecaissement(self.master, username="VotreUsername")
         self.master.wait_window(win)
         self.appliquer_filtres()
@@ -856,6 +896,15 @@ class PageCaisse(ctk.CTkFrame):
             from page_encaissement import PageEncaissement
         except ImportError:
             from pages.page_encaissement import PageEncaissement
+        try:
+            self._logger.log(
+                action="Ouverture encaissement",
+                element="Encaissement",
+                details="Ouverture fenêtre encaissement depuis caisse",
+                value="open",
+            )
+        except Exception:
+            pass
         win = PageEncaissement(self.master, username="VotreUsername")
         self.master.wait_window(win)
         self.appliquer_filtres()

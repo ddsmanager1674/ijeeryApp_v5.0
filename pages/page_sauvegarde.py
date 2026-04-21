@@ -8,6 +8,7 @@ import threading
 import json
 import sys
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -94,6 +95,9 @@ class PageSauvegarde(ctk.CTkFrame):
         # Chemins complets vers pg_dump et pg_restore
         self.pg_dump_path = r"C:\Program Files\PostgreSQL\16\bin\pg_dump.exe"
         self.pg_restore_path = r"C:\Program Files\PostgreSQL\16\bin\pg_restore.exe"
+
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(session_data=self.session_data)
 
         self.setup_ui()
 
@@ -195,8 +199,26 @@ class PageSauvegarde(ctk.CTkFrame):
                 self.DB_NAME
             ], check=True)
             messagebox.showinfo("Succès", f"Sauvegarde effectuée avec succès :\n{os.path.basename(file_path)}")
+            try:
+                self._logger.log(
+                    action="Sauvegarde base de données",
+                    element=self.DB_NAME,
+                    details=f"Sauvegarde créée: {os.path.basename(file_path)}",
+                    value=file_path,
+                )
+            except Exception:
+                pass
         except subprocess.CalledProcessError as e:
             messagebox.showerror("Erreur", f"Erreur lors de la sauvegarde :\n{e}")
+            try:
+                self._logger.log(
+                    action="Sauvegarde base de données",
+                    element=self.DB_NAME,
+                    details=f"Échec sauvegarde: {os.path.basename(file_path)}",
+                    value=str(e),
+                )
+            except Exception:
+                pass
         except FileNotFoundError:
             messagebox.showerror("Erreur", f"pg_dump introuvable à :\n{self.pg_dump_path}")
         finally:
@@ -291,10 +313,37 @@ class PageSauvegarde(ctk.CTkFrame):
                     self.progress_bar.set(1.0)
                     self.lbl_progression.configure(text="Terminé.")
                     messagebox.showinfo("Succès", "Restauration terminée avec succès.")
+                    try:
+                        self._logger.log(
+                            action="Restauration base de données",
+                            element=self.DB_NAME,
+                            details=f"Restauration OK depuis {os.path.basename(file_path)}",
+                            value=file_path,
+                        )
+                    except Exception:
+                        pass
                 else:
                     messagebox.showerror("Erreur", f"Détails :\n{stderr}")
+                    try:
+                        self._logger.log(
+                            action="Restauration base de données",
+                            element=self.DB_NAME,
+                            details=f"Échec restauration depuis {os.path.basename(file_path)}",
+                            value=stderr,
+                        )
+                    except Exception:
+                        pass
             except Exception as e:
                 messagebox.showerror("Erreur", str(e))
+                try:
+                    self._logger.log(
+                        action="Restauration base de données",
+                        element=self.DB_NAME,
+                        details=f"Exception restauration depuis {os.path.basename(file_path)}",
+                        value=str(e),
+                    )
+                except Exception:
+                    pass
             finally:
                 if 'PGPASSWORD' in os.environ:
                     del os.environ['PGPASSWORD']

@@ -647,6 +647,16 @@ class PageSuiviPresence(ctk.CTkFrame):
         if p:
             df.to_excel(p, index=False)
             messagebox.showinfo("Succès", "Export réussi.")
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Suivi de présence",
+                    details=f"export suivi présence (mise à jour), lignes={len(df)}, fichier={os.path.basename(p)}",
+                    value=p,
+                )
+            except Exception:
+                pass
 
     def _update_stats(self):
         stats = {k: 0 for k in STATE_ORDER}

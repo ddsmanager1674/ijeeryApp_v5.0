@@ -761,6 +761,16 @@ class PageAVQ(ctk.CTkFrame):
             df = pd.DataFrame(results, columns=["Nom", "Prénom", "Référence", "Montant", "Date", "Observation"])
             df.to_excel("avances_personnel.xlsx", index=False)
             messagebox.showinfo("Exportation", "Exportation Excel réussie !")
+            try:
+                from log_utils import AppLogger
+                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                    action="Export Excel",
+                    element="Avance 15e",
+                    details=f"export avances personnel, lignes={len(df)}, fichier=avances_personnel.xlsx",
+                    value="avances_personnel.xlsx",
+                )
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'exportation Excel : {e}")
 

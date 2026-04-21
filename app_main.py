@@ -30,6 +30,7 @@ import customtkinter as ctk
 from PIL import Image
 from tkinter import messagebox
 import psycopg2
+from log_utils import AppLogger
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(os.path.abspath(__file__))
@@ -781,7 +782,11 @@ class VenteTabManager(ctk.CTkToplevel):
         # Chargement différé de PageVenteParMsin (évite import circulaire)
         try:
             from pages.page_venteParMsin import PageVenteParMsin
-            page = PageVenteParMsin(content_frame, id_user_connecte=self._id_user)
+            page = PageVenteParMsin(
+                content_frame,
+                id_user_connecte=self._id_user,
+                vente_tab_no=tab_id,
+            )
             page.pack(fill="both", expand=True)
         except Exception as e:
             # Afficher l'erreur dans le cadre sans crasher toute l'appli
@@ -915,6 +920,7 @@ class App(ctk.CTk):
         self.session_data     = session_data
         self.id_user_connecte = session_data.get("user_id")
         self._vente_tab_mgr   = None
+        self._logger          = AppLogger(session_data=session_data, fallback_user_id=self.id_user_connecte)
 
         # Connexion DB
         self.db_manager = DatabaseManager()
@@ -1095,6 +1101,7 @@ class App(ctk.CTk):
                 session_data={
                     "iduser":   self.id_user_connecte,
                     "username": self.session_data.get("username", "Utilisateur"),
+                    "computer_name": os.environ.get("COMPUTERNAME", "PC-Inconnu"),
                 },
             )
 
@@ -1139,6 +1146,12 @@ class App(ctk.CTk):
         if not messagebox.askyesno("Déconnexion", "Voulez-vous vraiment vous déconnecter ?"):
             return
         try:
+            self._logger.log(
+                action="Déconnexion",
+                element="Session utilisateur",
+                details="fermeture de session",
+                value="logout",
+            )
             session_file = os.path.join(_BASE, "session.json")
             if os.path.exists(session_file):
                 os.remove(session_file)

@@ -9,6 +9,7 @@ import sys
 import os
 import json
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 
 # Importations spécifiques pour le PDF
@@ -46,6 +47,8 @@ class PageAbsence(ctk.CTkFrame):
             return
             
         self.cursor = self.conn.cursor()
+        self.session_data = session_data or getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
 
         # Charger les informations de la société
         self.info_societe = self.get_info_societe()
@@ -312,6 +315,15 @@ class PageAbsence(ctk.CTkFrame):
             """, (self.personnel_selectionne_id, date_absence, observation, nbre_heure))
             
             self.conn.commit()
+            try:
+                self._logger.log(
+                    action="Création absence",
+                    element=f"idpers={self.personnel_selectionne_id}",
+                    details=f"Absence enregistrée (date={date_absence}, heures={nbre_heure}, observation='{observation}')",
+                    value=f"{nbre_heure} h",
+                )
+            except Exception:
+                pass
             messagebox.showinfo("Succès", "Absence enregistrée avec succès.")
             self.clear_input_fields()
 

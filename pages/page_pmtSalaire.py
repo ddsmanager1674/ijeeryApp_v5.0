@@ -284,6 +284,16 @@ class PageValidationSalaire(ctk.CTkFrame):
         path = os.path.join(os.path.expanduser("~"), "Desktop", "Salaires.xlsx")
         df.to_excel(path, index=False)
         subprocess.Popen([path], shell=True)
+        try:
+            from log_utils import AppLogger
+            AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
+                action="Export Excel",
+                element="Paiement Salaire",
+                details=f"export salaires, lignes={len(df)}, fichier={os.path.basename(path)}",
+                value=path,
+            )
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     app = ctk.CTk()

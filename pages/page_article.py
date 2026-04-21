@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -83,6 +84,8 @@ class PageArticle(ctk.CTkFrame):
     def __init__(self, parent):
         super().__init__(parent, fg_color=C.BG_PAGE)
         self.parent           = parent
+        self.session_data     = getattr(parent, "session_data", None) or {}
+        self._logger          = AppLogger(session_data=self.session_data)
         self.selected_article = None
         self.photo_label      = None
         self.photo_box        = None
@@ -395,6 +398,15 @@ class PageArticle(ctk.CTkFrame):
                     cursor.execute(query,
                                    (designation, idca, idmag, alert, alertdepot))
                     conn.commit()
+                    try:
+                        self._logger.log(
+                            action="Création article",
+                            element=designation,
+                            details=f"Article créé (categorie_id={idca}, magasin_id={idmag}, alert={alert}, alertdepot={alertdepot})",
+                            value="aucune valeur",
+                        )
+                    except Exception:
+                        pass
                 except psycopg2.IntegrityError as ie:
                     conn.rollback()
                     msg = str(ie).lower()
@@ -420,6 +432,15 @@ class PageArticle(ctk.CTkFrame):
                                     (designation, idca, idmag,
                                      alert, alertdepot))
                                 conn.commit()
+                                try:
+                                    self._logger.log(
+                                        action="Création article",
+                                        element=designation,
+                                        details=f"Article créé après correction séquence (categorie_id={idca}, magasin_id={idmag}, alert={alert}, alertdepot={alertdepot})",
+                                        value="aucune valeur",
+                                    )
+                                except Exception:
+                                    pass
                             else:
                                 raise ie
                         except Exception as fix_e:
@@ -579,6 +600,15 @@ class PageArticle(ctk.CTkFrame):
                     "WHERE idarticle=%s",
                     (designation, idca, idmag, self.selected_article))
                 conn.commit()
+                try:
+                    self._logger.log(
+                        action="Modification article",
+                        element=f"idarticle={self.selected_article}",
+                        details=f"Article modifié en '{designation}' (categorie_id={idca}, magasin_id={idmag})",
+                        value=f"idarticle={self.selected_article}",
+                    )
+                except Exception:
+                    pass
                 self.load_articles()
                 messagebox.showinfo("Succès", "Article mis à jour.")
             finally:
@@ -595,6 +625,15 @@ class PageArticle(ctk.CTkFrame):
                     "UPDATE tb_article SET deleted=1 WHERE idarticle=%s",
                     (self.selected_article,))
                 conn.commit()
+                try:
+                    self._logger.log(
+                        action="Suppression article",
+                        element=f"idarticle={self.selected_article}",
+                        details="Suppression logique (deleted=1)",
+                        value=f"idarticle={self.selected_article}",
+                    )
+                except Exception:
+                    pass
                 conn.close()
                 self.load_articles()
                 self.nettoyer_formulaire()
@@ -624,6 +663,15 @@ class PageArticle(ctk.CTkFrame):
                     os.path.join(dest, f"{article_id}{ext.lower()}"))
                 self.load_photo(article_id)
                 messagebox.showinfo("Succès", "Photo enregistrée.")
+                try:
+                    self._logger.log(
+                        action="Modification article (photo)",
+                        element=f"idarticle={article_id}",
+                        details=f"Photo article ajoutée/modifiée (fichier='{os.path.basename(file_path)}')",
+                        value=f"idarticle={article_id}",
+                    )
+                except Exception:
+                    pass
             except Exception as e:
                 messagebox.showerror("Erreur", str(e))
 

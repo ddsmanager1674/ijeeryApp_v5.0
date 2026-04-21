@@ -4,6 +4,7 @@ from tkinter import messagebox, ttk
 import psycopg2
 import json
 from resource_utils import get_config_path, safe_file_read
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -124,6 +125,8 @@ class PageUnite(ctk.CTkFrame):
 
         self.id_article   = initial_idarticle
         self.db_connector = db_connector
+        self.session_data = getattr(master, "session_data", None) or {}
+        self._logger = AppLogger(session_data=self.session_data)
 
         _apply_tree_style()
 
@@ -358,6 +361,15 @@ class PageUnite(ctk.CTkFrame):
             """, (self.id_article, designation, niveau,
                   qtunite, poids, codearticle))
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Création unité",
+                    element=str(designation),
+                    details=f"Unité créée (idarticle={self.id_article}, codearticle={codearticle}, niveau={niveau}, qtunite={qtunite}, poids={poids})",
+                    value=f"idarticle={self.id_article}",
+                )
+            except Exception:
+                pass
             messagebox.showinfo("Succès",
                                 f"Unité ajoutée !\nCode : {codearticle}")
             self.charger_unites()
@@ -410,6 +422,15 @@ class PageUnite(ctk.CTkFrame):
                 WHERE idunite=%s
             """, (designation, qtunite, poids, id_unite))
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Modification unité",
+                    element=f"idunite={id_unite}",
+                    details=f"Unité modifiée en '{designation}' (qtunite={qtunite}, poids={poids})",
+                    value=f"idunite={id_unite}",
+                )
+            except Exception:
+                pass
             messagebox.showinfo("Succès",
                                 f"Unité ID {id_unite} modifiée.")
             self.charger_unites()
@@ -445,6 +466,15 @@ class PageUnite(ctk.CTkFrame):
                 "UPDATE tb_unite SET deleted=1 WHERE idunite=%s",
                 (id_unite,))
             conn.commit()
+            try:
+                self._logger.log(
+                    action="Suppression unité",
+                    element=f"idunite={id_unite}",
+                    details=f"Suppression logique unité '{designation}' (deleted=1)",
+                    value=f"idunite={id_unite}",
+                )
+            except Exception:
+                pass
             messagebox.showinfo("Succès",
                                 f"Unité ID {id_unite} supprimée.")
             self.charger_unites()
