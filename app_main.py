@@ -1146,12 +1146,16 @@ class App(ctk.CTk):
         if not messagebox.askyesno("Déconnexion", "Voulez-vous vraiment vous déconnecter ?"):
             return
         try:
-            self._logger.log(
-                action="Déconnexion",
-                element="Session utilisateur",
-                details="fermeture de session",
-                value="logout",
-            )
+            try:
+                self._logger.log(
+                    action="Déconnexion",
+                    element="Session utilisateur",
+                    details="fermeture de session",
+                    value="logout",
+                )
+            except Exception:
+                # Ne jamais bloquer la déconnexion à cause du log
+                pass
             session_file = os.path.join(_BASE, "session.json")
             if os.path.exists(session_file):
                 os.remove(session_file)

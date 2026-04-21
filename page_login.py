@@ -38,6 +38,7 @@ from configDataBase import ConfigDataBase
 from user_settings_window import UserSettingsWindow
 from resource_utils import (get_resource_path, get_config_path,
                              get_session_path, safe_file_read)
+from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -724,6 +725,15 @@ class LoginWindow(ctk.CTk):
                     "menus":         [(m[0], m[1]) for m in menus],
                 }
                 self.save_user_session(user, menus)
+                try:
+                    AppLogger(session_data=session_data).log(
+                        action="Connexion",
+                        element=user[1],
+                        details=f"Connexion réussie (fonction='{user[3]}')",
+                        value="login_ok",
+                    )
+                except Exception:
+                    pass
 
                 # Remember Me
                 if self._rem_var.get():
@@ -738,6 +748,15 @@ class LoginWindow(ctk.CTk):
                     session_data))
             else:
                 self._show_error("Identifiants incorrects.")
+                try:
+                    AppLogger(session_data={"username": username}).log(
+                        action="Connexion",
+                        element=username or "Inconnu",
+                        details="Connexion échouée (identifiants incorrects ou compte inactif)",
+                        value="login_failed",
+                    )
+                except Exception:
+                    pass
                 self._shake()
 
         except psycopg2.Error as err:
