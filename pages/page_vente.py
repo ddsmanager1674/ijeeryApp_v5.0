@@ -11,6 +11,7 @@ import sys # Ajouté pour open_file sur Linux/macOS
 import textwrap # Ajouté pour le formatage du ticket de caisse
 from resource_utils import get_config_path, safe_file_read
 from settings_utils import open_file_if_enabled
+from stock_snapshot import StockSnapshot, format_nombre_auto
 
 
 # --- NOUVELLES IMPORTATIONS POUR L'IMPRESSION ---
@@ -218,6 +219,7 @@ class PageVente(ctk.CTkFrame):
         self.id_user_connecte = id_user_connecte 
         self.conn: Optional[psycopg2.connection] = None
         self.article_selectionne = None
+        self._stock_snapshot_cache: dict[int, StockSnapshot] = {}
         self.detail_vente = []
         self.index_ligne_selectionnee = None
         self.magasin_map = {}
@@ -269,14 +271,8 @@ class PageVente(ctk.CTkFrame):
     
     # --- FONCTIONS DE FORMATAGE ET DE CALCUL DE STOCK ---
     def formater_nombre(self, nombre):
-        """Formate un nombre avec séparateur de milliers (1.000.000,00)"""
-        try:
-            nombre = float(nombre) 
-            # Utilise un formatage pour avoir des séparateurs de milliers
-            formatted = "{:,.2f}".format(nombre).replace(',', '_TEMP_').replace('.', ',').replace('_TEMP_', '.')
-            return formatted
-        except:
-            return "0,00"
+        """Format auto: 2 décimales sauf si ,00 => entier."""
+        return format_nombre_auto(nombre)
     
     def parser_nombre(self, texte):
         """Convertit un nombre formaté (1.000.000,00) en float"""
@@ -333,30 +329,23 @@ class PageVente(ctk.CTkFrame):
                 cursor.close()
 
     
+    def _get_stock_snapshot(self, id_mag: int) -> StockSnapshot:
+        """Snapshot stock (StockManager) mis en cache par magasin."""
+        id_mag = int(id_mag)
+        snap = self._stock_snapshot_cache.get(id_mag)
+        if snap is None:
+            snap = StockSnapshot.build(id_mag)
+            self._stock_snapshot_cache[id_mag] = snap
+        return snap
+
     def calculer_stock_article(self, id_art, id_uni, id_mag):
-        """Calcule le stock actuel pour un article, une unité et un magasin précis."""
-        conn = self.connect_db()
-        stock_total = 0
-        if conn:
-            try:
-                cursor = conn.cursor()
-                query = """
-                SELECT 
-                    (SELECT COALESCE(SUM(quantite), 0) FROM tb_entree_stock 
-                     WHERE idarticle = %s AND idunite = %s AND idmagasin = %s) -
-                                        (SELECT COALESCE(SUM(quantite), 0) FROM tb_ligne_vente lv
-                                         JOIN tb_vente v ON lv.idvente = v.idvente
-                                         WHERE lv.idarticle = %s AND lv.idunite = %s AND v.idmagasin = %s
-                                             AND v.statut = 'VALIDEE')
-            """
-                cursor.execute(query, (id_art, id_uni, id_mag, id_art, id_uni, id_mag))
-                res = cursor.fetchone()
-                stock_total = res[0] if res else 0
-                cursor.close()
-                conn.close()
-            except Exception as e:
-                print(f"Erreur calcul stock: {e}")
-        return stock_total
+        """Calcule le stock via StockManager (sans clamp) pour article/unité/magasin."""
+        try:
+            snap = self._get_stock_snapshot(int(id_mag))
+            return float(snap.stock_unite(int(id_art), int(id_uni)))
+        except Exception as e:
+            print(f"Erreur calcul stock (StockManager): {e}")
+            return 0.0
     
     def charger_stocks(self):
         """Charge tous les stocks dans le Treeview"""
@@ -954,6 +943,9 @@ class PageVente(ctk.CTkFrame):
         """Remplit le tableau avec les calculs de stock par magasin."""
         for item in self.tree_art.get_children():
             self.tree_art.delete(item)
+
+        # Invalider le cache si la liste des magasins change (sécurité)
+        # (le cache est par idmagasin; la liste self.magasins ne doit pas changer souvent)
 
         search_query = self.entry_search_art.get().lower()
         conn = self.connect_db()

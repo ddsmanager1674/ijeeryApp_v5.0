@@ -34,6 +34,7 @@ from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
+from stock_snapshot import StockSnapshot
 
 # ── Imports ReportLab (impression PDF) ───────────────────────────────────────
 from reportlab.lib.pagesizes import A5, landscape
@@ -346,6 +347,7 @@ class PageAvoir(ctk.CTkFrame):
 
         # ── Paramètres d'impression (settings.json) ───────────────────────────
         self.settings = self._load_settings()
+        self._stock_snapshot_cache: dict[int, StockSnapshot] = {}
 
         # ── Layout principal : 6 rows ─────────────────────────────────────────
         self.grid_columnconfigure(0, weight=1)
@@ -923,109 +925,22 @@ class PageAvoir(ctk.CTkFrame):
 
     def calculer_stock_article(self, idarticle, idunite_cible, idmag=None) -> float:
         """
-        Calcule le stock consolidé d'un article dans l'unité cible.
-        Prend en compte : livraisons, ventes, avoirs, sorties, transferts.
-        *** LOGIQUE MÉTIER — NE PAS MODIFIER ***
+        Calcule le stock d'un article dans l'unité cible via StockManager.
+        Conserve les valeurs négatives (pas de clamp à 0).
         """
-        conn = self.connect_db()
-        if not conn:
-            return 0
-
         try:
-            cursor = conn.cursor()
+            idmag_int = int(idmag) if idmag else 0
+            if idmag_int == 0:
+                return 0.0
 
-            cursor.execute(
-                """
-                SELECT idunite, COALESCE(qtunite, 1) AS qtunite
-                FROM tb_unite WHERE idarticle = %s ORDER BY idunite ASC
-                """,
-                (idarticle,),
-            )
-            unites_article = cursor.fetchall()
+            snap = self._stock_snapshot_cache.get(idmag_int)
+            if snap is None:
+                snap = StockSnapshot.build(idmag_int)
+                self._stock_snapshot_cache[idmag_int] = snap
 
-            if not unites_article:
-                return 0
-
-            facteurs_conversion: dict = {}
-            facteur_cumul = 1.0
-            for i, (id_unite, qt_unite) in enumerate(unites_article):
-                if i == 0:
-                    facteurs_conversion[id_unite] = 1.0
-                else:
-                    facteur_cumul *= qt_unite
-                    facteurs_conversion[id_unite] = facteur_cumul
-
-            facteur_cible = facteurs_conversion.get(idunite_cible, 1.0)
-            if facteur_cible == 0:
-                return 0
-
-            clause_mag = "AND idmag = %s" if idmag else ""
-            params_mag = [idmag] if idmag else []
-
-            stock_en_unite_base = 0.0
-
-            for idunite_source, _ in unites_article:
-                def qry(sql, params):
-                    cursor.execute(sql, params)
-                    return cursor.fetchone()[0] or 0
-
-                total_livraison = qry(
-                    f"SELECT COALESCE(SUM(qtlivrefrs),0) FROM tb_livraisonfrs "
-                    f"WHERE idarticle=%s AND idunite=%s {clause_mag}",
-                    [idarticle, idunite_source] + params_mag,
-                )
-                total_vente = qry(
-                    f"SELECT COALESCE(SUM(qtvente),0) FROM tb_ventedetail "
-                    f"WHERE idarticle=%s AND idunite=%s {clause_mag}",
-                    [idarticle, idunite_source] + params_mag,
-                )
-                total_avoir = qry(
-                    f"SELECT COALESCE(SUM(qtavoir),0) FROM tb_avoirdetail "
-                    f"WHERE idarticle=%s AND idunite=%s {clause_mag}",
-                    [idarticle, idunite_source] + params_mag,
-                )
-                total_sortie = qry(
-                    f"SELECT COALESCE(SUM(qtsortie),0) FROM tb_sortiedetail sd "
-                    f"INNER JOIN tb_sortie s ON sd.idsortie=s.id "
-                    f"WHERE sd.idarticle=%s AND sd.idunite=%s AND s.deleted=0 {clause_mag}",
-                    [idarticle, idunite_source] + params_mag,
-                )
-
-                p_ts = [idarticle, idunite_source]
-                q_ts = ("SELECT COALESCE(SUM(td.qttransfertsortie),0) "
-                        "FROM tb_transfertdetail td "
-                        "INNER JOIN tb_transfert t ON td.reftransfert=t.reftransfert "
-                        "WHERE td.idarticle=%s AND td.idunite=%s AND t.deleted=0")
-                if idmag:
-                    q_ts += " AND t.idmagsortie=%s"
-                    p_ts.append(idmag)
-                total_transfert_sortie = qry(q_ts, p_ts)
-
-                p_te = [idarticle, idunite_source]
-                q_te = ("SELECT COALESCE(SUM(td.qttransfertentree),0) "
-                        "FROM tb_transfertdetail td "
-                        "INNER JOIN tb_transfert t ON td.reftransfert=t.reftransfert "
-                        "WHERE td.idarticle=%s AND td.idunite=%s AND t.deleted=0")
-                if idmag:
-                    q_te += " AND t.idmagentree=%s"
-                    p_te.append(idmag)
-                total_transfert_entree = qry(q_te, p_te)
-
-                stock_source = (
-                    total_livraison + total_avoir + total_transfert_entree
-                    - total_vente - total_sortie - total_transfert_sortie
-                )
-                stock_en_unite_base += stock_source * facteurs_conversion.get(idunite_source, 1.0)
-
-            return stock_en_unite_base / facteur_cible
-
+            return float(snap.stock_unite(int(idarticle), int(idunite_cible)))
         except Exception:
-            return 0
-        finally:
-            if 'cursor' in locals() and cursor:
-                cursor.close()
-            if conn:
-                conn.close()
+            return 0.0
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 6 — CHARGEMENTS INITIAUX

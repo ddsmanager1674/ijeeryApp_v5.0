@@ -48,6 +48,7 @@ from settings_utils import open_file_if_enabled
 from pages.page_avoir import PageAvoir
 from pages.page_proforma import PageCommandeCli
 from log_utils import AppLogger
+from stock_snapshot import StockSnapshot
 
 
 # ==============================================================================
@@ -1018,49 +1019,28 @@ class PageVenteParMsin(ctk.CTkFrame):
     def calculer_stock_article(self, idarticle: int, idunite_cible: int,
                                 idmag: Optional[int] = None) -> float:
         """
-        Calcul consolidé du stock (identique à page_stock.py).
-        Réservoir commun converti via qtunite, filtrable par magasin.
+        Stock via StockManager (StockSnapshot), converti dans l'unité cible.
+        Conserve les valeurs négatives (pas de clamp à 0).
         """
-        conn = self._get_conn()
-        if not conn: return 0
         try:
-            cur = conn.cursor()
-            # Récupération de toutes les unités liées
-            cur.execute("""
-                SELECT idunite, codearticle, COALESCE(qtunite,1)
-                FROM tb_unite WHERE idarticle=%s
-            """, (idarticle,))
-            unites = cur.fetchall()
-            qt_affichage = next((qt for uid, _, qt in unites
-                                  if uid == idunite_cible and qt > 0), 1)
-            reservoir = 0
-            for uid, code, qt_u in unites:
-                def _sum(sql, params):
-                    cur.execute(sql, params)
-                    return cur.fetchone()[0] or 0
+            if not idmag:
+                return 0.0
 
-                p = [idarticle, uid]
-                pm = p + ([idmag] if idmag else [])
-                mag_clause = " AND idmag=%s" if idmag else ""
+            cache = getattr(self, "_stock_snapshot_cache", None)
+            if cache is None:
+                cache = {}
+                setattr(self, "_stock_snapshot_cache", cache)
 
-                rec  = _sum(f"SELECT COALESCE(SUM(qtlivrefrs),0) FROM tb_livraisonfrs WHERE idarticle=%s AND idunite=%s AND deleted=0{mag_clause}", pm)
-                ven  = _sum(f"SELECT COALESCE(SUM(qtvente),0) FROM tb_ventedetail vd INNER JOIN tb_vente v ON vd.idvente=v.id WHERE vd.idarticle=%s AND vd.idunite=%s AND v.deleted=0 AND v.statut='VALIDEE'{' AND v.idmag=%s' if idmag else ''}", pm)
-                tin  = _sum(f"SELECT COALESCE(SUM(qttransfert),0) FROM tb_transfertdetail WHERE idarticle=%s AND idunite=%s AND deleted=0{' AND idmagentree=%s' if idmag else ''}", pm)
-                tout = _sum(f"SELECT COALESCE(SUM(qttransfert),0) FROM tb_transfertdetail WHERE idarticle=%s AND idunite=%s AND deleted=0{' AND idmagsortie=%s' if idmag else ''}", pm)
+            idmag_int = int(idmag)
+            snap = cache.get(idmag_int)
+            if snap is None:
+                snap = StockSnapshot.build(idmag_int)
+                cache[idmag_int] = snap
 
-                # Inventaire (via codearticle)
-                pi = [code] + ([idmag] if idmag else [])
-                inv = _sum(f"SELECT COALESCE(SUM(qtinventaire),0) FROM tb_inventaire WHERE codearticle=%s{' AND idmag=%s' if idmag else ''}", pi)
-
-                reservoir += (rec + tin + inv - ven - tout) * qt_u
-
-            return max(0, reservoir / qt_affichage)
+            return float(snap.stock_unite(int(idarticle), int(idunite_cible)))
         except Exception as e:
-            print(f"Erreur calcul stock: {e}")
-            return 0
-        finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            print(f"Erreur calcul stock (StockManager): {e}")
+            return 0.0
 
     def calculer_stock_magasin_precis(self, idarticle: int, idunite: int, idmag: int) -> float:
         """

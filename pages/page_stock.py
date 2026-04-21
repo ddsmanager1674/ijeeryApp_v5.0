@@ -5,8 +5,10 @@ import json
 from datetime import datetime
 import threading
 from tkinter import ttk
+import os
 from resource_utils import get_config_path, safe_file_read
 from log_utils import AppLogger
+from stock_manager import StockManager
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -209,11 +211,29 @@ class PageStock(ctk.CTkFrame):
             return None
 
     def formater_nombre(self, nombre):
-        """Formate les nombres pour l'affichage (ex: 1.250,00)"""
+        """Formate les nombres pour l'affichage.
+
+        Standard:
+        - 2 chiffres après virgule
+        - mais si la partie décimale vaut ,00 => afficher uniquement l'entier
+        - séparateur de milliers: '.'
+        - séparateur décimal: ','
+        """
         try:
-            return f"{float(nombre):,.2f}".replace(',', ' ').replace('.', ',').replace(' ', '.')
-        except:
-            return "0,00"
+            x = float(nombre or 0.0)
+
+            # Afficher sans décimales si entier (ou quasi-entier)
+            if abs(x - round(x)) < 1e-9:
+                return f"{int(round(x)):,}".replace(",", ".")
+
+            return (
+                f"{x:,.2f}"
+                .replace(",", " ")
+                .replace(".", ",")
+                .replace(" ", ".")
+            )
+        except Exception:
+            return "0"
 
     def creer_treeview(self):
         """Initialise le tableau avec colonnes larges et barres de défilement"""
@@ -348,138 +368,145 @@ class PageStock(ctk.CTkFrame):
             self.after(0, lambda: messagebox.showerror("Erreur de chargement", f"Détails : {str(e)}"))
 
     def _calculer_all_data_stocks(self):
-        """Exécute la requête consolidée et prépare all_data."""
+        """
+        Calcule les stocks via `StockManager` (logique métier unique),
+        puis convertit le stock de l'unité de base vers chaque unité affichée.
+
+        Stratégie performance:
+        - 1 requête pour la liste des unités (articles + prix)
+        - 1 requête récursive pour les facteurs de conversion de TOUTES les unités
+        - N requêtes (N = nb magasins) pour le stock base par article via StockManager
+        """
         conn = self.connect_db()
         if not conn:
             return []
+
+        sm = None
+        cursor = None
         try:
+            # 1) Charger toutes les unités à afficher + dernier prix (par idunite)
             cursor = conn.cursor()
-            query_optimisee = """
-            WITH unite_hierarchie AS (
-                SELECT idarticle, idunite, niveau, qtunite, designationunite
-                FROM tb_unite WHERE deleted = 0
-            ),
-            unite_coeff AS (
-                SELECT idarticle, idunite, niveau, qtunite, designationunite,
-                    exp(sum(ln(NULLIF(CASE WHEN qtunite > 0 THEN qtunite ELSE 1 END, 0)))
-                        OVER (PARTITION BY idarticle ORDER BY niveau
-                              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
-                    ) as coeff_hierarchique
-                FROM unite_hierarchie
-            ),
-            base_unite_par_article AS (
-                SELECT DISTINCT ON (idarticle) idarticle, idunite
-                FROM tb_unite WHERE deleted = 0
-                ORDER BY idarticle, qtunite ASC, idunite ASC
-            ),
-            ent  AS (SELECT ed.idarticle, ed.idunite, ed.idmag, SUM(ed.qtentree)   AS quantite FROM tb_entreedetail ed WHERE ed.deleted=0 GROUP BY ed.idarticle, ed.idunite, ed.idmag),
-            rec  AS (SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite FROM tb_livraisonfrs lf WHERE lf.deleted=0 GROUP BY lf.idarticle, lf.idunite, lf.idmag),
-            ven  AS (SELECT vd.idarticle, vd.idunite, v.idmag,  SUM(vd.qtvente)    AS quantite FROM tb_ventedetail vd INNER JOIN tb_vente v ON vd.idvente=v.id AND v.deleted=0 AND v.statut='VALIDEE' WHERE vd.deleted=0 GROUP BY vd.idarticle, vd.idunite, v.idmag),
-            tin  AS (SELECT t.idarticle,  t.idunite,  t.idmagentree  AS idmag, SUM(t.qttransfert) AS quantite FROM tb_transfertdetail t WHERE t.deleted=0 GROUP BY t.idarticle, t.idunite, t.idmagentree),
-            tout AS (SELECT t.idarticle,  t.idunite,  t.idmagsortie  AS idmag, SUM(t.qttransfert) AS quantite FROM tb_transfertdetail t WHERE t.deleted=0 GROUP BY t.idarticle, t.idunite, t.idmagsortie),
-            sor  AS (SELECT sd.idarticle, sd.idunite, sd.idmag,                SUM(sd.qtsortie)   AS quantite FROM tb_sortiedetail sd GROUP BY sd.idarticle, sd.idunite, sd.idmag),
-            inv  AS (SELECT bu.idarticle, bu.idunite, i.idmag,                 SUM(i.qtinventaire) AS quantite FROM tb_inventaire i INNER JOIN tb_unite u ON i.codearticle=u.codearticle INNER JOIN base_unite_par_article bu ON bu.idarticle=u.idarticle AND bu.idunite=u.idunite GROUP BY bu.idarticle, bu.idunite, i.idmag),
-            avo  AS (SELECT ad.idarticle, ad.idunite, ad.idmag,                SUM(ad.qtavoir)    AS quantite FROM tb_avoir a INNER JOIN tb_avoirdetail ad ON a.id=ad.idavoir WHERE a.deleted=0 AND ad.deleted=0 GROUP BY ad.idarticle, ad.idunite, ad.idmag),
-            conso AS (SELECT cd.idarticle, cd.idunite, cd.idmag,               SUM(cd.qtconsomme) AS quantite FROM tb_consommationinterne_details cd GROUP BY cd.idarticle, cd.idunite, cd.idmag),
-            ech_in  AS (SELECT dce.idarticle, dce.idunite, dce.idmagasin AS idmag, SUM(dce.quantite_entree) AS quantite FROM tb_detailchange_entree dce GROUP BY dce.idarticle, dce.idunite, dce.idmagasin),
-            ech_out AS (SELECT dcs.idarticle, dcs.idunite, dcs.idmagasin AS idmag, SUM(dcs.quantite_sortie) AS quantite FROM tb_detailchange_sortie dcs GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin),
-            mouvements_agreges AS (
-                SELECT idarticle, idunite, idmag, quantite, 'entree'               AS type_mouvement FROM ent   UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'reception'            AS type_mouvement FROM rec   UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'vente'                AS type_mouvement FROM ven   UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'transfert_in'         AS type_mouvement FROM tin   UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'transfert_out'        AS type_mouvement FROM tout  UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'sortie'               AS type_mouvement FROM sor   UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'inventaire'           AS type_mouvement FROM inv   UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'avoir'                AS type_mouvement FROM avo   UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'consommation_interne' AS type_mouvement FROM conso UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'echange_entree'       AS type_mouvement FROM ech_in  UNION ALL
-                SELECT idarticle, idunite, idmag, quantite, 'echange_sortie'       AS type_mouvement FROM ech_out
-            ),
-            mouvements_bruts AS (
-                SELECT ma.idarticle, ma.idmag,
-                       COALESCE(uc.coeff_hierarchique,1) as coeff_source_vers_base,
-                       ma.quantite, ma.type_mouvement
-                FROM mouvements_agreges ma
-                LEFT JOIN unite_coeff uc ON uc.idarticle=ma.idarticle AND uc.idunite=ma.idunite
-            ),
-            solde_base_par_mag AS (
-                SELECT idarticle, idmag,
-                    SUM(CASE type_mouvement
-                        WHEN 'entree'               THEN  quantite*coeff_source_vers_base
-                        WHEN 'reception'            THEN  quantite*coeff_source_vers_base
-                        WHEN 'transfert_in'         THEN  quantite*coeff_source_vers_base
-                        WHEN 'inventaire'           THEN  quantite*coeff_source_vers_base
-                        WHEN 'avoir'                THEN  quantite*coeff_source_vers_base
-                        WHEN 'echange_entree'       THEN  quantite*coeff_source_vers_base
-                        WHEN 'vente'                THEN -quantite*coeff_source_vers_base
-                        WHEN 'sortie'               THEN -quantite*coeff_source_vers_base
-                        WHEN 'transfert_out'        THEN -quantite*coeff_source_vers_base
-                        WHEN 'consommation_interne' THEN -quantite*coeff_source_vers_base
-                        WHEN 'echange_sortie'       THEN -quantite*coeff_source_vers_base
-                        ELSE 0 END
-                    ) as solde_base
-                FROM mouvements_bruts GROUP BY idarticle, idmag
-            ),
-            dernier_prix AS (
-                SELECT idunite, prix
-                FROM (
-                    SELECT idunite, prix,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY idunite
-                               ORDER BY dateregistre DESC
-                           ) AS rn
-                    FROM tb_prix
-                    WHERE deleted = 0
-                ) p
-                WHERE p.rn = 1
+            cursor.execute("""
+                WITH dernier_prix AS (
+                    SELECT idunite, prix
+                    FROM (
+                        SELECT idunite, prix,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY idunite
+                                   ORDER BY dateregistre DESC
+                               ) AS rn
+                        FROM tb_prix
+                        WHERE deleted = 0
+                    ) p
+                    WHERE p.rn = 1
+                )
+                SELECT
+                    u.codearticle,
+                    a.designation,
+                    u.designationunite,
+                    COALESCE(dp.prix, 0) AS prix,
+                    u.idarticle,
+                    u.idunite
+                FROM tb_unite u
+                INNER JOIN tb_article a ON u.idarticle = a.idarticle
+                LEFT JOIN dernier_prix dp ON dp.idunite = u.idunite
+                WHERE a.deleted = 0 AND COALESCE(u.deleted, 0) = 0
+                ORDER BY a.designation ASC, u.codearticle ASC
+            """)
+            unite_rows = cursor.fetchall()
+
+            # 2) Facteurs de conversion de toutes les unités -> base
+            cursor.execute("""
+                WITH RECURSIVE facteur_conversion AS (
+                    SELECT
+                        u.idunite,
+                        u.idarticle,
+                        u.niveau,
+                        1.0::double precision AS facteur_vers_base
+                    FROM tb_unite u
+                    WHERE u.niveau = 0
+                      AND u.deleted = 0
+                    UNION ALL
+                    SELECT
+                        u.idunite,
+                        u.idarticle,
+                        u.niveau,
+                        fc.facteur_vers_base * u.qtunite AS facteur_vers_base
+                    FROM tb_unite u
+                    JOIN facteur_conversion fc
+                      ON fc.idarticle = u.idarticle
+                     AND fc.niveau    = u.niveau - 1
+                    WHERE u.deleted = 0
+                )
+                SELECT idunite, facteur_vers_base
+                FROM facteur_conversion
+            """)
+            facteurs = {int(idu): float(f) for (idu, f) in cursor.fetchall()}
+
+            # 3) Calcul des stocks en unité de base par article et par magasin via StockManager
+            with open(get_config_path('config.json')) as f:
+                config = json.load(f)
+                db_config = config['database']
+
+            sm = StockManager(
+                host=db_config['host'],
+                port=db_config['port'],
+                dbname=db_config['database'],
+                user=db_config['user'],
+                password=db_config['password'],
             )
-            SELECT u.codearticle, a.designation, u.designationunite,
-                COALESCE(dp.prix, 0) AS prix,
-                u.idarticle, u.idunite, m.idmag,
-                COALESCE(sb.solde_base,0) / NULLIF(COALESCE(uc.coeff_hierarchique,1),0) as stock
-            FROM tb_unite u
-            INNER JOIN tb_article a ON u.idarticle=a.idarticle
-            CROSS JOIN tb_magasin m
-            LEFT JOIN solde_base_par_mag sb ON sb.idarticle=u.idarticle AND sb.idmag=m.idmag
-            LEFT JOIN unite_coeff uc ON uc.idarticle=u.idarticle AND uc.idunite=u.idunite
-            LEFT JOIN dernier_prix dp ON dp.idunite = u.idunite
-            WHERE a.deleted=0 AND m.deleted=0
-            ORDER BY a.designation ASC, u.codearticle ASC
-            """
-            cursor.execute(query_optimisee)
-            resultats = cursor.fetchall()
-            articles_dict = {}
-            for code, desig, unite, prix, idarticle, idunite, idmag, stock in resultats:
-                key = (code, idunite)
-                if key not in articles_dict:
-                    articles_dict[key] = {
-                        'code': code,
-                        'designation': desig,
-                        'unite': unite,
-                        'prix': prix,
-                        'stocks': {},
-                        'total': 0
-                    }
-                if idmag:
-                    nom_mag   = next((m[1] for m in self.magasins if m[0] == idmag), f"Mag{idmag}")
-                    stock_val = max(0, stock or 0)
-                    articles_dict[key]['stocks'][nom_mag] = stock_val
-                    articles_dict[key]['total'] += stock_val
+
+            stock_base_par_article_mag: dict[int, dict[int, float]] = {}
+            for idmag, _nom_mag in self.magasins:
+                lignes = sm.get_stock_tous_articles(idmagasin=int(idmag), date_fin=None)
+                stock_base_par_article_mag[int(idmag)] = {
+                    int(l['idarticle']): float(l.get('stock_en_base', 0) or 0)
+                    for l in lignes
+                }
+
+            # 4) Construire all_data (1 ligne par unité)
             all_data = []
-            for _idx, (_key, data) in enumerate(articles_dict.items()):
-                valeurs = [data['code'], data['designation'], data['unite'], self.formater_nombre(data['prix'])]
-                for _, nom_mag in self.magasins:
-                    valeurs.append(self.formater_nombre(data['stocks'].get(nom_mag, 0)))
-                valeurs.append(self.formater_nombre(data['total']))
-                all_data.append((valeurs, data['total']))
+            for code, desig, unite, prix, idarticle, idunite in unite_rows:
+                facteur = facteurs.get(int(idunite), 1.0) or 1.0
+
+                valeurs = [
+                    code,
+                    desig,
+                    unite,
+                    self.formater_nombre(prix),
+                ]
+
+                total = 0.0
+                for idmag, nom_mag in self.magasins:
+                    stock_base = stock_base_par_article_mag.get(int(idmag), {}).get(int(idarticle), 0.0)
+                    stock_unite = (stock_base / facteur) if facteur else 0.0
+                    stock_unite = float(stock_unite or 0.0)
+                    valeurs.append(self.formater_nombre(stock_unite))
+                    total += stock_unite
+
+                valeurs.append(self.formater_nombre(total))
+                all_data.append((valeurs, total))
+
             return all_data
+
         except Exception as e:
-            print(f"ERREUR DÉTAILLÉE: {e}")
+            print(f"ERREUR DÉTAILLÉE (StockManager): {e}")
             return []
         finally:
-            cursor.close()
-            conn.close()
+            try:
+                if sm:
+                    sm.fermer_connexion()
+            except Exception:
+                pass
+            try:
+                if cursor:
+                    cursor.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _appliquer_all_data_calculee(self, all_data_calculee):
         """Applique les stocks calculés et rafraîchit le Treeview."""
@@ -493,84 +520,43 @@ class PageStock(ctk.CTkFrame):
             text=f"Actualisé : {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
     def calculer_stock_article(self, idarticle, idunite_cible, idmag=None):
-        conn = self.connect_db()
-        if not conn: return 0
+        """
+        Calcul de stock via StockManager (utilisé pour la sync vers tb_stock).
+        Retourne le stock dans l'unité cible, en appliquant la conversion depuis l'unité de base.
+        """
+        sm = None
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT idunite, codearticle, COALESCE(qtunite, 1), COALESCE(niveau, 0)
-                FROM tb_unite WHERE idarticle = %s
-                ORDER BY COALESCE(niveau, 0) ASC, idunite ASC
-            """, (idarticle,))
-            unites_liees = cursor.fetchall()
-            coeffs_cumules = {}
-            coeff_courant  = 1.0
-            for idu, _code, qt_u, _niv in unites_liees:
-                qt_safe = qt_u if qt_u and qt_u > 0 else 1
-                coeff_courant *= qt_safe
-                coeffs_cumules[idu] = coeff_courant
-            qtunite_affichage = 1
-            for idu, _code, _qt_u, _niv in unites_liees:
-                if idu == idunite_cible:
-                    qtunite_affichage = coeffs_cumules.get(idu, 1)
-                    break
-            total_stock_global_base = 0
-            for idu_boucle, code_boucle, _qtunite_boucle, _niv in unites_liees:
-                coeff_source = coeffs_cumules.get(idu_boucle, 1)
-                q_ent = "SELECT COALESCE(SUM(qtentree), 0) FROM tb_entreedetail WHERE idarticle = %s AND idunite = %s AND deleted = 0"
-                p_ent = [idarticle, idu_boucle]
-                if idmag: q_ent += " AND idmag = %s"; p_ent.append(idmag)
-                cursor.execute(q_ent, p_ent); entrees = cursor.fetchone()[0] or 0
-                q_rec = "SELECT COALESCE(SUM(qtlivrefrs), 0) FROM tb_livraisonfrs WHERE idarticle = %s AND idunite = %s AND deleted = 0"
-                p_rec = [idarticle, idu_boucle]
-                if idmag: q_rec += " AND idmag = %s"; p_rec.append(idmag)
-                cursor.execute(q_rec, p_rec); receptions = cursor.fetchone()[0] or 0
-                q_ven = "SELECT COALESCE(SUM(qtvente), 0) FROM tb_ventedetail WHERE idarticle = %s AND idunite = %s AND deleted = 0"
-                p_ven = [idarticle, idu_boucle]
-                if idmag: q_ven += " AND idmag = %s"; p_ven.append(idmag)
-                cursor.execute(q_ven, p_ven); ventes = cursor.fetchone()[0] or 0
-                q_sort = "SELECT COALESCE(SUM(qtsortie), 0) FROM tb_sortiedetail WHERE idarticle = %s AND idunite = %s"
-                p_sort = [idarticle, idu_boucle]
-                if idmag: q_sort += " AND idmag = %s"; p_sort.append(idmag)
-                cursor.execute(q_sort, p_sort); sorties = cursor.fetchone()[0] or 0
-                cursor.execute("SELECT COALESCE(SUM(qttransfert), 0) FROM tb_transfertdetail WHERE idarticle = %s AND idunite = %s AND deleted = 0" + (" AND idmagentree = %s" if idmag else ""), ([idarticle, idu_boucle, idmag] if idmag else [idarticle, idu_boucle]))
-                t_in = cursor.fetchone()[0] or 0
-                cursor.execute("SELECT COALESCE(SUM(qttransfert), 0) FROM tb_transfertdetail WHERE idarticle = %s AND idunite = %s AND deleted = 0" + (" AND idmagsortie = %s" if idmag else ""), ([idarticle, idu_boucle, idmag] if idmag else [idarticle, idu_boucle]))
-                t_out = cursor.fetchone()[0] or 0
-                q_inv = "SELECT COALESCE(SUM(qtinventaire), 0) FROM tb_inventaire WHERE codearticle = %s"
-                p_inv = [code_boucle]
-                if idmag: q_inv += " AND idmag = %s"; p_inv.append(idmag)
-                cursor.execute(q_inv, p_inv); inv = cursor.fetchone()[0] or 0
-                q_avoir = """
-                    SELECT COALESCE(SUM(ad.qtavoir), 0)
-                    FROM tb_avoirdetail ad INNER JOIN tb_avoir a ON ad.idavoir = a.id
-                    WHERE ad.idarticle = %s AND ad.idunite = %s AND a.deleted = 0 AND ad.deleted = 0
-                """
-                p_avoir = [idarticle, idu_boucle]
-                if idmag: q_avoir += " AND ad.idmag = %s"; p_avoir.append(idmag)
-                cursor.execute(q_avoir, p_avoir); avoirs = cursor.fetchone()[0] or 0
-                q_conso = "SELECT COALESCE(SUM(qtconsomme), 0) FROM tb_consommationinterne_details WHERE idarticle = %s AND idunite = %s"
-                p_conso = [idarticle, idu_boucle]
-                if idmag: q_conso += " AND idmag = %s"; p_conso.append(idmag)
-                cursor.execute(q_conso, p_conso); consommations = cursor.fetchone()[0] or 0
-                q_ech_in = "SELECT COALESCE(SUM(quantite_entree), 0) FROM tb_detailchange_entree WHERE idarticle = %s AND idunite = %s"
-                p_ech_in = [idarticle, idu_boucle]
-                if idmag: q_ech_in += " AND idmagasin = %s"; p_ech_in.append(idmag)
-                cursor.execute(q_ech_in, p_ech_in); echange_entrees = cursor.fetchone()[0] or 0
-                q_ech_out = "SELECT COALESCE(SUM(quantite_sortie), 0) FROM tb_detailchange_sortie WHERE idarticle = %s AND idunite = %s"
-                p_ech_out = [idarticle, idu_boucle]
-                if idmag: q_ech_out += " AND idmagasin = %s"; p_ech_out.append(idmag)
-                cursor.execute(q_ech_out, p_ech_out); echange_sorties = cursor.fetchone()[0] or 0
-                solde_unite = (entrees + receptions + t_in + inv + avoirs + echange_entrees
-                               - ventes - sorties - t_out - consommations - echange_sorties)
-                total_stock_global_base += (solde_unite * coeff_source)
-            return max(0, total_stock_global_base / qtunite_affichage)
+            with open(get_config_path('config.json')) as f:
+                config = json.load(f)
+                db_config = config['database']
+
+            sm = StockManager(
+                host=db_config['host'],
+                port=db_config['port'],
+                dbname=db_config['database'],
+                user=db_config['user'],
+                password=db_config['password'],
+            )
+
+            idmagasin = int(idmag) if idmag else 0
+            stock_base = sm.get_stock_article_base(
+                idarticle=int(idarticle),
+                idmagasin=idmagasin,
+                date_fin=None,
+            )
+            base_val = float(stock_base.get('stock_en_base', 0.0) or 0.0)
+            facteur = float(sm.get_facteur_conversion(int(idunite_cible)) or 1.0)
+            stock_unite = (base_val / facteur) if facteur else 0.0
+            return float(stock_unite or 0.0)
         except Exception as e:
-            print(f"Erreur calcul stock consolidé : {e}")
-            return 0
+            print(f"Erreur calcul stock StockManager : {e}")
+            return 0.0
         finally:
-            cursor.close()
-            conn.close()
+            try:
+                if sm:
+                    sm.fermer_connexion()
+            except Exception:
+                pass
 
     def charger_magasins(self):
         """Charge la liste des magasins depuis la base de données"""
@@ -649,7 +635,7 @@ class PageStock(ctk.CTkFrame):
         if filtered_data:
             for idx, (valeurs, total) in enumerate(filtered_data):
                 zebra = "even" if idx % 2 == 0 else "odd"
-                tag   = (f"stock_zero_{zebra}" if abs(float(total)) < 1e-9 else zebra)
+                tag   = (f"stock_zero_{zebra}" if float(total) <= 1e-9 else zebra)
                 self.tree.insert("", "end", values=valeurs, tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(filtered_data)}")
         else:
@@ -669,7 +655,7 @@ class PageStock(ctk.CTkFrame):
         if self.all_data:
             for idx, (valeurs, total) in enumerate(self.all_data):
                 zebra = "even" if idx % 2 == 0 else "odd"
-                tag   = (f"stock_zero_{zebra}" if abs(float(total)) < 1e-9 else zebra)
+                tag   = (f"stock_zero_{zebra}" if float(total) <= 1e-9 else zebra)
                 self.tree.insert("", "end", values=valeurs, tags=(tag,))
             self.label_total_articles.configure(text=f"Total articles : {len(self.all_data)}")
         else:
