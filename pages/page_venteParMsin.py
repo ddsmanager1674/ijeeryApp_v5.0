@@ -1918,7 +1918,8 @@ class PageVenteParMsin(ctk.CTkFrame):
                 """, (idmag, f"%{filtre}%", f"%{filtre}%"))
 
                 for idx, row in enumerate(cur.fetchall()):
-                    stk = max(0, row[7])
+                    # Stock réel (peut être négatif) — ne pas forcer à 0
+                    stk = float(row[7] or 0)
                     tags = ("even" if idx % 2 == 0 else "odd",)
                     if stk <= 0: tags = tags + ("stock_nul",)
                     tree.insert("", "end", values=(
