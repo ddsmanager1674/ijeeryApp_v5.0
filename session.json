@@ -1,8 +1,8 @@
 {
-    "user_id": 26,
-    "username": "brian",
-    "fonction_id": 1,
-    "fonction_name": "Administration",
+    "user_id": 9,
+    "username": "tolence",
+    "fonction_id": 8,
+    "fonction_name": "Controlleur",
     "menus": [
         [
             "Absence",
@@ -29,19 +29,11 @@
             "PageArticleMouvement"
         ],
         [
-            "Autorisation",
-            "PageAutorisation"
-        ],
-        [
-            "Autorisation Admin",
-            "PageCodeAutorisation"
-        ],
-        [
             "Avance 15e",
             "PageAVQ"
         ],
         [
-            "Avance Spéciale",
+            "Avance Spécial",
             "FenetreAvanceSpec"
         ],
         [
@@ -93,11 +85,11 @@
             "DatabaseConfig"
         ],
         [
-            "Decaissement",
+            "Décaissemen",
             "PageDecaissement"
         ],
         [
-            "DecaissementBq",
+            "Décaissement Banqu",
             "PageDecaissementBq"
         ],
         [
@@ -105,7 +97,7 @@
             "PageEncaissement"
         ],
         [
-            "EncaissementBq",
+            "Encaissement Banque",
             "PageEncaissementBq"
         ],
         [
@@ -113,12 +105,8 @@
             "PageSalaireEtatSB"
         ],
         [
-            "Evenements",
-            "PageEvenement"
-        ],
-        [
-            "Facturation",
-            "PageFacturation"
+            "Etat de Salaire Horaire",
+            "PageEtatSalaireHoraire"
         ],
         [
             "Facture Liste",
@@ -137,20 +125,12 @@
             "PageFrsDette"
         ],
         [
-            "Gérer Personnels",
-            "PagePersonnelCRUD"
-        ],
-        [
             "Information Article",
             "PageInfoArticle"
         ],
         [
-            "Init DB",
+            "Init",
             "DBInitializerApp"
-        ],
-        [
-            "Inventaire du Jour",
-            "PageInventaireJour"
         ],
         [
             "Liste Facture",
@@ -165,20 +145,8 @@
             "AppMain"
         ],
         [
-            "Livraison Client",
-            "PageLivraisonClient"
-        ],
-        [
             "Magasin",
             "PageMagasin"
-        ],
-        [
-            "Marge Commerciale",
-            "PageStock"
-        ],
-        [
-            "Menu",
-            "PageMenu"
         ],
         [
             "Mouvement d'article",
@@ -205,24 +173,8 @@
             "PageValidationSalaire"
         ],
         [
-            "Péremption d'article",
-            "PageGestionPeremption"
-        ],
-        [
-            "Présence",
-            "PagePresence"
-        ],
-        [
-            "Présence Personnel",
-            "PagePresencePersonnel"
-        ],
-        [
             "Prix d'article",
             "PagePrixListe"
-        ],
-        [
-            "Prix de revient",
-            "PagePrixRevient"
         ],
         [
             "Prix Liste",
@@ -241,10 +193,6 @@
             "PageSalaireBase"
         ],
         [
-            "Salaire Horaire",
-            "PageEtatSalaireHoraire"
-        ],
-        [
             "Sauvegarde",
             "PageSauvegarde"
         ],
@@ -253,24 +201,12 @@
             "PageSortie"
         ],
         [
-            "Stock Alerte",
-            "PageStockAlerte"
-        ],
-        [
             "Stock Article",
             "PageStock"
         ],
         [
             "Stock Livraison",
             "PageStockLivraison"
-        ],
-        [
-            "Suivi Commande",
-            "PageSuiviCommande"
-        ],
-        [
-            "Suivi de présence",
-            "PageSuiviPresence"
         ],
         [
             "TABLEAU DE BORD",
@@ -307,10 +243,6 @@
         [
             "Utilisateurs",
             "PageUsers"
-        ],
-        [
-            "Ventes",
-            "PageVente"
         ],
         [
             "Ventes par Dépôt",
