@@ -1244,7 +1244,8 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
                     refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
                     observation=observation, date_paiement=date_pmt,
-                    open_after=open_a5, output_format="A5"
+                    open_after=open_a5, output_format="A5",
+                    open_setting_key="Client_PmtCredit_OpenA5", open_setting_default=0,
                 )
                 if facture_path:
                     messagebox.showinfo("Confirmation", "La facture PDF de paiement A5 a été générée.")
@@ -1254,7 +1255,8 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                         montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
                         refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
                         observation=observation, date_paiement=date_pmt,
-                        open_after=open_ticket, output_format="ticket80"
+                        open_after=open_ticket, output_format="ticket80",
+                        open_setting_key="Client_PmtCredit_OpenTicket80", open_setting_default=0,
                     )
                     if open_ticket and ticket_path:
                         messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
@@ -1652,7 +1654,25 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             messagebox.showerror("Erreur", f"Erreur génération PDF créance: {e}")
             return None
 
-    def _generer_ticket_pdf_paiement_credit(self, societe, username, articles, montant, mode_nom, refpmt, idclient, client_nom, observation, date_paiement, open_after=False, output_format="A5", operation_title="PAIEMENT DE CREDIT", info_title="Infos Paiement Credit"):
+    def _generer_ticket_pdf_paiement_credit(
+        self,
+        societe,
+        username,
+        articles,
+        montant,
+        mode_nom,
+        refpmt,
+        idclient,
+        client_nom,
+        observation,
+        date_paiement,
+        open_after=False,
+        output_format="A5",
+        operation_title="PAIEMENT DE CREDIT",
+        info_title="Infos Paiement Credit",
+        open_setting_key: str | None = None,
+        open_setting_default: int = 0,
+    ):
         try:
             client_adresse = "-"
             client_contact = "-"
@@ -1766,8 +1786,8 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     open_file_if_enabled(
                         path,
                         operation="open",
-                        setting_key="Client_PmtCredit_OpenTicket80",
-                        setting_default=0,
+                        setting_key=(open_setting_key or "Client_PmtCredit_OpenTicket80"),
+                        setting_default=open_setting_default,
                     )
                 return path
 
@@ -1926,8 +1946,8 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 open_file_if_enabled(
                     path,
                     operation="open",
-                    setting_key="Client_PmtCredit_OpenA5",
-                    setting_default=0,
+                    setting_key=(open_setting_key or "Client_PmtCredit_OpenA5"),
+                    setting_default=open_setting_default,
                 )
             return path
         except Exception as e:
@@ -2119,7 +2139,8 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                         idclient=idclient, client_nom=self._get_client_name(idclient),
                         observation=observation, date_paiement=datetime.now(),
                         open_after=open_a5, output_format="A5",
-                        operation_title="VALIDATION CREANCE", info_title="Infos Créance"
+                        operation_title="VALIDATION CREANCE", info_title="Infos Créance",
+                        open_setting_key="Client_Creance_OpenA5", open_setting_default=0,
                     )
                     if open_a5 and facture_a5_path:
                         messagebox.showinfo("Confirmation", "La facture PDF A5 de créance a été générée.")

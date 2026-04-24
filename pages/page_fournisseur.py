@@ -1159,7 +1159,8 @@ class PageFournisseur(ctk.CTkFrame):
                     montant=float(montant_global), mode_nom=selected_mode or "Espèces",
                     refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
                     observation=observation_full, date_paiement=date_pmt,
-                    open_after=open_a5, output_format="A5"
+                    open_after=open_a5, output_format="A5",
+                    open_setting_key="Fournisseur_PmtDette_OpenA5", open_setting_default=0,
                 )
                 if facture_path:
                     messagebox.showinfo("Confirmation", "Le PDF de paiement a été généré.")
@@ -1169,7 +1170,8 @@ class PageFournisseur(ctk.CTkFrame):
                         montant=float(montant_global), mode_nom=selected_mode or "Espèces",
                         refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
                         observation=observation_full, date_paiement=date_pmt,
-                        open_after=open_ticket, output_format="ticket80"
+                        open_after=open_ticket, output_format="ticket80",
+                        open_setting_key="Fournisseur_PmtDette_OpenTicket80", open_setting_default=0,
                     )
                     if open_ticket and ticket_path:
                         messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
@@ -1305,7 +1307,8 @@ class PageFournisseur(ctk.CTkFrame):
                         idfrs=idfrs, frs_nom=self._get_frs_name(idfrs),
                         observation=observation, date_paiement=datetime.now(),
                         open_after=open_a5, output_format="A5",
-                        operation_title="VALIDATION DETTE FOURNISSEUR", info_title="Infos Dette Fournisseur"
+                        operation_title="VALIDATION DETTE FOURNISSEUR", info_title="Infos Dette Fournisseur",
+                        open_setting_key="Fournisseur_Dette_OpenA5", open_setting_default=0,
                     )
                     if open_a5 and facture_a5_path:
                         messagebox.showinfo("Confirmation", "La facture PDF A5 de dette a été générée.")
@@ -1333,11 +1336,25 @@ class PageFournisseur(ctk.CTkFrame):
     # GÉNÉRATION PDF — inchangée
     # ──────────────────────────────────────────────────────────────────
 
-    def _generer_ticket_pdf_paiement_dette(self, societe, username, articles, montant,
-                                           mode_nom, refpmt, idfrs, frs_nom,
-                                           observation, date_paiement, open_after=False,
-                                           output_format="A5", operation_title="PAIEMENT DETTE FOURNISSEUR",
-                                           info_title="Infos Paiement Dette Fournisseur"):
+    def _generer_ticket_pdf_paiement_dette(
+        self,
+        societe,
+        username,
+        articles,
+        montant,
+        mode_nom,
+        refpmt,
+        idfrs,
+        frs_nom,
+        observation,
+        date_paiement,
+        open_after=False,
+        output_format="A5",
+        operation_title="PAIEMENT DETTE FOURNISSEUR",
+        info_title="Infos Paiement Dette Fournisseur",
+        open_setting_key: str | None = None,
+        open_setting_default: int = 0,
+    ):
         try:
             frs_adresse = "-"; frs_contact = "-"
             try:
@@ -1580,8 +1597,8 @@ class PageFournisseur(ctk.CTkFrame):
                 open_file_if_enabled(
                     path,
                     operation="open",
-                    setting_key="Fournisseur_PmtDette_OpenA5",
-                    setting_default=0,
+                    setting_key=(open_setting_key or "Fournisseur_PmtDette_OpenA5"),
+                    setting_default=open_setting_default,
                 )
             return path
 

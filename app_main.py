@@ -560,6 +560,9 @@ class Sidebar(ctk.CTkFrame):
 
     def _is_authorized(self, cfg: dict) -> bool:
         """Retourne True si au moins un élément du groupe est autorisé."""
+        bloc_key = self._bloc_key(cfg)
+        if bloc_key and bloc_key not in self._authorized:
+            return False
         # Pages directes
         if cfg.get("auth"):
             return cfg["auth"] in self._authorized
@@ -568,6 +571,21 @@ class Sidebar(ctk.CTkFrame):
             if sub[1] in self._authorized:
                 return True
         return False
+
+    def _bloc_key(self, cfg: dict) -> str | None:
+        """
+        Clé d'autorisation qui contrôle la visibilité du bloc (menu principal).
+        Correspond aux entrées créées dans tb_menu par PageAutorisation.
+        """
+        mapping = {
+            "DASHBOARD":  "BLOC: TABLEAU DE BORD",
+            "CHAT":       "BLOC: CHAT INTERNE",
+            "COMMERCIALE":"BLOC: COMMERCIALE",
+            "PERSONNEL":  "BLOC: PERSONNEL",
+            "TRESORERIE": "BLOC: TRÉSORERIE",
+            "DATABASE":   "BLOC: BASE DE DONNÉES",
+        }
+        return mapping.get(cfg.get("id"))
 
     def _build_logout(self):
         self._btn_logout = ctk.CTkButton(
