@@ -1681,7 +1681,7 @@ class PageSortie(ctk.CTkFrame):
         """Ouvre un fichier avec l'application par défaut du système."""
         try:
             if os.name == 'nt':
-                open_file_if_enabled(filename, operation="open")
+                open_file_if_enabled(filename, operation="open", setting_key="Sortie_OpenA5", setting_default=1)
             elif sys.platform == 'darwin':
                 subprocess.call(['open', filename])
             else:
@@ -1746,7 +1746,7 @@ class PageSortie(ctk.CTkFrame):
                 except Exception: pass
 
                 if result and sys.platform == 'win32':
-                    try: open_file_if_enabled(filename, operation="open")
+                    try: open_file_if_enabled(filename, operation="open", setting_key="Sortie_OpenA5", setting_default=1)
                     except Exception: pass
 
                 return result
@@ -1822,7 +1822,7 @@ class PageSortie(ctk.CTkFrame):
                 except Exception: pass
 
                 if result and sys.platform == 'win32':
-                    try: open_file_if_enabled(filename, operation="open")
+                    try: open_file_if_enabled(filename, operation="open", setting_key="Consommation_OpenA5", setting_default=1)
                     except Exception: pass
 
                 return result
@@ -2076,7 +2076,7 @@ class PageSortie(ctk.CTkFrame):
 
             try:
                 if sys.platform == 'win32':
-                    open_file_if_enabled(filename, operation="print")
+                    open_file_if_enabled(filename, operation="print", setting_key="Sortie_OpenA5", setting_default=1)
                 else:
                     subprocess.Popen(['lp', filename])
             except Exception:

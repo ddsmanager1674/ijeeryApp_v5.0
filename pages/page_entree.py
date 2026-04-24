@@ -1174,7 +1174,7 @@ class PageEntree(ctk.CTkFrame):
     def open_file(self, filename):
         try:
             if os.name == 'nt':
-                open_file_if_enabled(filename, operation="open")
+                open_file_if_enabled(filename, operation="open", setting_key="Entree_OpenA5", setting_default=1)
             elif sys.platform == 'darwin':
                 subprocess.call(['open', filename])
             else:
@@ -1260,7 +1260,7 @@ class PageEntree(ctk.CTkFrame):
 
             if result and sys.platform == 'win32':
                 try:
-                    open_file_if_enabled(filename, operation="open")
+                    open_file_if_enabled(filename, operation="open", setting_key="Entree_OpenA5", setting_default=1)
                 except Exception:
                     pass
             return result

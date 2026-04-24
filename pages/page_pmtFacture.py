@@ -1481,7 +1481,12 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             if imprimer_ticket == 1:
                 try:
-                    open_file_if_enabled(output_path, operation="open")
+                    open_file_if_enabled(
+                        output_path,
+                        operation="open",
+                        setting_key="Credit_Acceptation_OpenA5",
+                        setting_default=1,
+                    )
                     print(f"✅ État crédit ouvert : {output_path}")
                 except Exception as e:
                     print(f"⚠️ Erreur ouverture état crédit : {e}")
@@ -1629,7 +1634,12 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             if imprimer_ticket == 1:
                 try:
-                    open_file_if_enabled(filename, operation="open")
+                    open_file_if_enabled(
+                        filename,
+                        operation="open",
+                        setting_key="Facture_Paiement_OpenTicket80Pdf",
+                        setting_default=1,
+                    )
                     print(f"✅ Ticket de caisse ouvert : {filename}")
                 except Exception as e:
                     print(f"⚠️ Erreur lors de l'ouverture du PDF : {e}")

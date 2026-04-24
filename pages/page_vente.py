@@ -1722,12 +1722,18 @@ class PageVente(ctk.CTkFrame):
         if result == "A5 PDF (Paysage)":
             filename = f"Facture_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             self.generate_pdf_a5(data, filename)
-            self.open_file(filename)
+            try:
+                open_file_if_enabled(filename, operation="open", setting_key="Vente_ImpressionA5", setting_default=1)
+            except Exception:
+                self.open_file(filename)
             messagebox.showinfo("Impression PDF", f"Le fichier PDF '{filename}' a été généré avec succès.")
         elif result == "Ticket 80mm":
             filename = f"Ticket_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
             self.generate_ticket_80mm(data, filename)
-            self.open_file(filename)
+            try:
+                open_file_if_enabled(filename, operation="open", setting_key="Vente_ImpressionTicket", setting_default=0)
+            except Exception:
+                self.open_file(filename)
             messagebox.showinfo("Impression Ticket", f"Le fichier Ticket '{filename}' (texte brut) a été généré avec succès.")
         else:
             messagebox.showinfo("Annulation", "Impression annulée.")
@@ -1736,7 +1742,16 @@ class PageVente(ctk.CTkFrame):
     def open_file(self, filename):
         """Ouvre le fichier généré avec le programme par défaut."""
         try:
-            open_file_if_enabled(filename, operation="open")
+            setting_key = None
+            try:
+                base = os.path.basename(str(filename)).lower()
+                if base.startswith("facture_"):
+                    setting_key = "Vente_ImpressionA5"
+                elif base.startswith("ticket_"):
+                    setting_key = "Vente_ImpressionTicket"
+            except Exception:
+                setting_key = None
+            open_file_if_enabled(filename, operation="open", setting_key=setting_key, setting_default=1)
         except Exception as e:
             pass # Ignorer les erreurs d'ouverture de fichier
 

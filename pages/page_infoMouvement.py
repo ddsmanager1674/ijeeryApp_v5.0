@@ -1474,7 +1474,7 @@ class PageChangementArticle(ctk.CTkFrame):
             doc.build(elements)
             print(f"✅ PDF généré : {output_path}")
             if sys.platform == 'win32':
-                open_file_if_enabled(output_path, operation="open")
+                open_file_if_enabled(output_path, operation="open", setting_key="Changement_OpenA5", setting_default=1)
             return output_path
         except Exception as e:
             print(f"❌ Erreur PDF : {e}")

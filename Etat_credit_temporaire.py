@@ -41,7 +41,7 @@ class EtatCreditTemporaire:
                     except Exception:
                         continue
 
-            open_file_if_enabled(abs_path, operation="open")
+            open_file_if_enabled(abs_path, operation="open", setting_key="Credit_Temporaire_OpenA5", setting_default=0)
         except Exception as e:
             print(f"Impossible d'ouvrir le PDF automatiquement: {e}")
 

@@ -1641,7 +1641,12 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             c.showPage()
             c.save()
             if open_after:
-                open_file_if_enabled(path, operation="open")
+                open_file_if_enabled(
+                    path,
+                    operation="open",
+                    setting_key="Client_Creance_OpenTicketPdf",
+                    setting_default=0,
+                )
             return path
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération PDF créance: {e}")
@@ -1758,7 +1763,12 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 c.save()
 
                 if open_after:
-                    open_file_if_enabled(path, operation="open")
+                    open_file_if_enabled(
+                        path,
+                        operation="open",
+                        setting_key="Client_PmtCredit_OpenTicket80",
+                        setting_default=0,
+                    )
                 return path
 
             path = os.path.join(temp_dir, f"Paiement_Credit_{refpmt}_{timestamp}.pdf")
@@ -1913,7 +1923,12 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
 
             doc.build(elements)
             if open_after:
-                open_file_if_enabled(path, operation="open")
+                open_file_if_enabled(
+                    path,
+                    operation="open",
+                    setting_key="Client_PmtCredit_OpenA5",
+                    setting_default=0,
+                )
             return path
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération PDF paiement crédit: {e}")

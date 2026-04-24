@@ -58,7 +58,13 @@ def is_global_print_enabled(settings: dict[str, Any] | None = None, default: int
     return _to_int_bool(settings.get(GLOBAL_PRINT_KEY, default), default=default) == 1
 
 
-def open_file_if_enabled(path: str, operation: str = "open", settings: dict[str, Any] | None = None) -> bool:
+def open_file_if_enabled(
+    path: str,
+    operation: str = "open",
+    settings: dict[str, Any] | None = None,
+    setting_key: str | None = None,
+    setting_default: int = 1,
+) -> bool:
     """
     operation:
       - "open"  : ouvre le fichier avec l'app par défaut
@@ -69,6 +75,14 @@ def open_file_if_enabled(path: str, operation: str = "open", settings: dict[str,
 
     if not is_global_print_enabled(settings=settings, default=1):
         return False
+
+    if setting_key:
+        try:
+            if not is_setting_enabled(setting_key, default=setting_default, settings=(settings or load_settings())):
+                return False
+        except Exception:
+            # En cas d'erreur de lecture settings, on garde le comportement historique (autoriser)
+            pass
 
     try:
         abs_path = os.path.abspath(path)

@@ -2358,7 +2358,14 @@ class PageVenteParMsin(ctk.CTkFrame):
                     top.lower()
                 except Exception:
                     pass
-                open_file_if_enabled(os.path.abspath(filename), operation="open")
+                abs_path = os.path.abspath(filename)
+                setting_key = None
+                base = os.path.basename(abs_path).lower()
+                if base.startswith("facture_"):
+                    setting_key = "Vente_ImpressionA5"
+                elif base.startswith("ticket_"):
+                    setting_key = "Vente_ImpressionTicket"
+                open_file_if_enabled(abs_path, operation="open", setting_key=setting_key, setting_default=1)
             elif sys.platform == 'darwin':
                 os.system(f'open "{filename}"')
             else:

@@ -1446,7 +1446,12 @@ class PageFournisseur(ctk.CTkFrame):
                 c.save()
 
                 if open_after:
-                    open_file_if_enabled(path, operation="open")
+                    open_file_if_enabled(
+                        path,
+                        operation="open",
+                        setting_key="Fournisseur_PmtDette_OpenTicket80",
+                        setting_default=0,
+                    )
                 return path
 
             path = os.path.join(temp_dir,
@@ -1572,7 +1577,12 @@ class PageFournisseur(ctk.CTkFrame):
             doc.build(elements)
 
             if open_after:
-                open_file_if_enabled(path, operation="open")
+                open_file_if_enabled(
+                    path,
+                    operation="open",
+                    setting_key="Fournisseur_PmtDette_OpenA5",
+                    setting_default=0,
+                )
             return path
 
         except Exception as e:
@@ -1640,7 +1650,12 @@ class PageFournisseur(ctk.CTkFrame):
             c.showPage(); c.save()
 
             if open_after:
-                open_file_if_enabled(path, operation="open")
+                open_file_if_enabled(
+                    path,
+                    operation="open",
+                    setting_key="Fournisseur_Dette_OpenTicketPdf",
+                    setting_default=0,
+                )
             return path
 
         except Exception as e:

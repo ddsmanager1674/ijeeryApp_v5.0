@@ -2750,7 +2750,7 @@ class PageAvoir(ctk.CTkFrame):
         """Ouvre un fichier avec l'application par défaut du système."""
         try:
             if sys.platform == 'win32':
-                open_file_if_enabled(filename, operation="open")
+                open_file_if_enabled(filename, operation="open", setting_key="Avoir_ImpressionA5", setting_default=1)
             elif sys.platform == 'darwin':
                 os.system(f'open "{filename}"')
             else:

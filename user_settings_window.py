@@ -166,28 +166,63 @@ class UserSettingsWindow(ctk.CTkToplevel):
         scroll.grid_columnconfigure(0, weight=1)
 
         # Clés existantes (granularité)
-        self._print_keys = [
+        self._print_keys_a5 = [
             ("Vente - Confirmation", "Vente_ImpressionConfirmation", 1),
-            ("Vente - A5", "Vente_ImpressionA5", 1),
-            ("Vente - Ticket", "Vente_ImpressionTicket", 0),
+            ("Vente - Facture A5 (PDF)", "Vente_ImpressionA5", 1),
             ("Avoir - Confirmation", "Avoir_ImpressionConfirmation", 1),
-            ("Avoir - A5", "Avoir_ImpressionA5", 1),
-            ("Avoir - Ticket", "Avoir_ImpressionTicket", 0),
-            ("Client à payer - Ticket", "ClientAPayer_ImpressionTicket", 1),
-            ("Mouvements - Ouverture PDF", "Mouvements_ImpressionAutoOpen", 1),
-            ("Client Paiement à crédit - Ouverture A5", "Client_PmtCredit_OpenA5", 0),
-            ("Client Paiement crédit - Ouverture Ticket 80", "Client_PmtCredit_OpenTicket80", 0),
+            ("Avoir - A5 (PDF)", "Avoir_ImpressionA5", 1),
+            ("Stock - Bon d'Entrée A5 (PDF) - Ouverture auto", "Entree_OpenA5", 1),
+            ("Stock - Bon de Sortie A5 (PDF) - Ouverture auto", "Sortie_OpenA5", 1),
+            ("Stock - Consommation interne A5 (PDF) - Ouverture auto", "Consommation_OpenA5", 1),
+            ("Stock - Changement articles A5 (PDF) - Ouverture auto", "Changement_OpenA5", 1),
+            ("Crédit - Acceptation A5 (PDF) - Ouverture auto", "Credit_Acceptation_OpenA5", 1),
+            ("Crédit - État temporaire A5 (PDF) - Ouverture auto", "Credit_Temporaire_OpenA5", 0),
+            ("Client créance - Ouverture A5 (PDF)", "Client_Creance_OpenA5", 0),
+            ("Fournisseur Paiement dette - Ouverture A5 (PDF)", "Fournisseur_PmtDette_OpenA5", 0),
+            ("Fournisseur dette - Ouverture A5 (PDF) (validation)", "Fournisseur_Dette_OpenA5", 0),
+            ("Mouvements - Ouverture PDF A5", "Mouvements_ImpressionAutoOpen", 1),
+        ]
+        self._print_keys_ticket80 = [
+            ("Vente - Ticket 80mm (texte) - Ouverture auto", "Vente_ImpressionTicket", 0),
+            ("Avoir - Ticket 80mm", "Avoir_ImpressionTicket", 0),
+            ("Client à payer - Ticket 80mm", "ClientAPayer_ImpressionTicket", 1),
+            ("Facture - Paiement (Ticket 80mm PDF) - Ouverture auto", "Facture_Paiement_OpenTicket80Pdf", 1),
+            ("Client Paiement à crédit - Ouverture Ticket 80mm (PDF)", "Client_PmtCredit_OpenTicket80", 0),
             ("Client Paiement crédit - Impression X80", "Client_PmtCredit_PrintX80", 0),
-            ("Client créance - Ouverture Ticket PDF", "Client_Creance_OpenTicketPdf", 0),
-            ("Client créance - Ouverture A5", "Client_Creance_OpenA5", 0),
-            ("Fournisseur Paiement dette - Ouverture A5", "Fournisseur_PmtDette_OpenA5", 0),
-            ("Fournisseur Paiemet dette - Ouverture Ticket 80", "Fournisseur_PmtDette_OpenTicket80", 0),
-            ("Fournisseur dette - Ouverture Ticket PDF", "Fournisseur_Dette_OpenTicketPdf", 0),
-            ("Fournisseur dette - Ouverture A5 (validation)", "Fournisseur_Dette_OpenA5", 0),
+            ("Client créance - Ouverture Ticket 80mm (PDF)", "Client_Creance_OpenTicketPdf", 0),
+            ("Fournisseur Paiement dette - Ouverture Ticket 80mm (PDF)", "Fournisseur_PmtDette_OpenTicket80", 0),
+            ("Fournisseur dette - Ouverture Ticket 80mm (PDF)", "Fournisseur_Dette_OpenTicketPdf", 0),
         ]
         self._vars = {}
+
+        def _section(title: str, row_idx: int) -> int:
+            ctk.CTkLabel(
+                scroll,
+                text=title,
+                font=Fonts.bold(12),
+                text_color=Colors.TEXT_PRIMARY,
+                anchor="w",
+            ).grid(row=row_idx, column=0, sticky="ew", padx=8, pady=(6, 8))
+            return row_idx + 1
+
         row = 0
-        for label, key, default in self._print_keys:
+        row = _section("Impressions A5 (PDF)", row)
+        for label, key, default in self._print_keys_a5:
+            v = ctk.BooleanVar(value=bool(self._settings.get(key, default)))
+            self._vars[key] = v
+            ctk.CTkSwitch(
+                scroll,
+                text=label,
+                variable=v,
+                onvalue=True,
+                offvalue=False,
+                font=Fonts.body(11),
+                text_color=Colors.TEXT_SECONDARY,
+            ).grid(row=row, column=0, sticky="w", padx=8, pady=(0, 8))
+            row += 1
+
+        row = _section("Tickets 80mm (PDF/Texte)", row)
+        for label, key, default in self._print_keys_ticket80:
             v = ctk.BooleanVar(value=bool(self._settings.get(key, default)))
             self._vars[key] = v
             ctk.CTkSwitch(
