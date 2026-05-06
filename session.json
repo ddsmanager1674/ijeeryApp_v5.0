@@ -1,13 +1,9 @@
 {
-    "user_id": 10,
-    "username": "brian",
+    "user_id": 1,
+    "username": "admin",
     "fonction_id": 1,
     "fonction_name": "Administration",
     "menus": [
-        [
-            "Ajout Banque",
-            "PageBanqueNv"
-        ],
         [
             "Article Liste",
             "page_listeArticle"
@@ -17,27 +13,15 @@
             "PageAutorisation"
         ],
         [
-            "Autorisation Admin",
-            "PageCodeAutorisation"
-        ],
-        [
-            "Banque",
-            "PageBanque"
-        ],
-        [
-            "Base Liste",
-            "PageBaseListe"
-        ],
-        [
             "BLOC: BASE DE DONNÉES",
             ""
         ],
         [
-            "BLOC: CHAT INTERNE",
+            "BLOC: COMMERCIALE",
             ""
         ],
         [
-            "BLOC: COMMERCIALE",
+            "BLOC: PERSONNEL",
             ""
         ],
         [
@@ -53,44 +37,92 @@
             "PageCaisse"
         ],
         [
-            "CHAT INTERNE",
-            "PageChat"
-        ],
-        [
-            "Encaissement",
-            "PageEncaissement"
+            "Client",
+            "PageClient"
         ],
         [
             "Facture Liste",
             "PageFactureListe"
         ],
         [
-            "Fournisseur Dettes",
-            "PageFrsDette"
+            "Fournisseur",
+            "PageFournisseur"
         ],
         [
-            "Menu",
-            "PageMenu"
+            "Inventaire du Jour",
+            "PageInventaireJour"
         ],
         [
-            "Sauvegarde",
-            "PageSauvegarde"
+            "Liste Facture",
+            "PageFactureListe"
+        ],
+        [
+            "Liste mouvements",
+            "PageListeMouvement"
+        ],
+        [
+            "Liste Personnel",
+            "AppMain"
+        ],
+        [
+            "Livraison Client",
+            "PageLivraisonClient"
+        ],
+        [
+            "Magasin",
+            "PageMagasin"
+        ],
+        [
+            "Marge Commerciale",
+            "PageStock"
+        ],
+        [
+            "Mouvement d'article",
+            "PageArticleMouvement"
+        ],
+        [
+            "Mouvement Stock",
+            "PageInfoMouvementStock"
+        ],
+        [
+            "Péremption d'article",
+            "PageGestionPeremption"
+        ],
+        [
+            "Prix d'article",
+            "PagePrixListe"
+        ],
+        [
+            "Prix de revient",
+            "PagePrixRevient"
+        ],
+        [
+            "Stock Alerte",
+            "PageStockAlerte"
         ],
         [
             "Stock Article",
             "PageStock"
         ],
         [
-            "Transfert Banque",
-            "PageTransfertBanque"
+            "Stock Livraison",
+            "PageStockLivraison"
         ],
         [
-            "Transfert Caisse",
-            "PageTransfertCaisse"
+            "Suivi Commande",
+            "PageSuiviCommande"
         ],
         [
-            "Utilisateurs",
-            "PageUsers"
+            "Suivi de présence",
+            "PageSuiviPresence"
+        ],
+        [
+            "TABLEAU DE BORD",
+            "page_home"
+        ],
+        [
+            "Ventes par Dépôt",
+            "PageVenteParMsin"
         ]
     ]
 }

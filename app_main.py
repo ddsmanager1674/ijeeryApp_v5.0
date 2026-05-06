@@ -560,8 +560,13 @@ class Sidebar(ctk.CTkFrame):
 
     def _is_authorized(self, cfg: dict) -> bool:
         """Retourne True si au moins un élément du groupe est autorisé."""
+        # Depuis le commit "autorisation synchronisé", certains déploiements ajoutent
+        # des entrées tb_menu "BLOC: ..." pour contrôler la visibilité des groupes.
+        # Mais d'autres bases / sessions n'ont pas ces clés : dans ce cas, il ne faut
+        # PAS masquer toute la sidebar.
+        has_bloc_auth = any(str(k).startswith("BLOC:") for k in self._authorized.keys())
         bloc_key = self._bloc_key(cfg)
-        if bloc_key and bloc_key not in self._authorized:
+        if has_bloc_auth and bloc_key and bloc_key not in self._authorized:
             return False
         # Pages directes
         if cfg.get("auth"):
