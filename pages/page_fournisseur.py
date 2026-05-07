@@ -134,6 +134,9 @@ class PageFournisseur(ctk.CTkFrame):
                     nomfrs VARCHAR(150),
                     contactfrs VARCHAR(50),
                     adressefrs VARCHAR(150),
+                    nombanque VARCHAR(150),
+                    comptebancaire VARCHAR(150),
+                    adressebanque VARCHAR(150),
                     niffrs VARCHAR(20),
                     statfrs VARCHAR(20),
                     ciffrs VARCHAR(20),
@@ -141,6 +144,10 @@ class PageFournisseur(ctk.CTkFrame):
                     deleted INT DEFAULT 0
                 )
             """)
+            # Assure la présence des colonnes banque si la table existe déjà.
+            self.cursor.execute("ALTER TABLE tb_fournisseur ADD COLUMN IF NOT EXISTS nombanque VARCHAR(150)")
+            self.cursor.execute("ALTER TABLE tb_fournisseur ADD COLUMN IF NOT EXISTS comptebancaire VARCHAR(150)")
+            self.cursor.execute("ALTER TABLE tb_fournisseur ADD COLUMN IF NOT EXISTS adressebanque VARCHAR(150)")
             self.conn.commit()
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur lors de la création de la table : {err}")
@@ -170,8 +177,20 @@ class PageFournisseur(ctk.CTkFrame):
         self.adresseFrs_entry = ctk.CTkEntry(row1, width=150, font=_F(_FONT_SIZE_MD))
         self.adresseFrs_entry.pack(side="left", padx=5)
 
+        ctk.CTkLabel(row1, text="Nom Banque:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.nombanqueFrs_entry = ctk.CTkEntry(row1, width=130, font=_F(_FONT_SIZE_MD))
+        self.nombanqueFrs_entry.pack(side="left", padx=5)
+
         row2 = ctk.CTkFrame(input_frame)
         row2.pack(fill="x", pady=5)
+
+        ctk.CTkLabel(row2, text="Compte Bancaire:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.comptebancaireFrs_entry = ctk.CTkEntry(row2, width=130, font=_F(_FONT_SIZE_MD))
+        self.comptebancaireFrs_entry.pack(side="left", padx=5)
+
+        ctk.CTkLabel(row2, text="Adresse Banque:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
+        self.adressebanqueFrs_entry = ctk.CTkEntry(row2, width=150, font=_F(_FONT_SIZE_MD))
+        self.adressebanqueFrs_entry.pack(side="left", padx=5)
 
         ctk.CTkLabel(row2, text="NIF:", font=_F(_FONT_SIZE_SM)).pack(side="left", padx=5)
         self.nifFrs_entry = ctk.CTkEntry(row2, width=120, font=_F(_FONT_SIZE_MD))
@@ -211,19 +230,35 @@ class PageFournisseur(ctk.CTkFrame):
         self.search_entry.bind("<KeyRelease>", self.filter_fournisseurs)
 
         # Treeview — tags couleur lignes alternées
-        columns = ("Nom du Fournisseur", "Contact", "Adresse", "NIF", "STAT", "CIF", "Dette en cours")
-        self.tree = ttk.Treeview(self, columns=columns, show="headings")
+        columns = ("Nom du Fournisseur", "Contact", "Adresse",
+                   "Nom Banque", "Compte Bancaire", "Adresse Banque",
+                   "NIF", "STAT", "CIF", "Dette en cours")
+
+        tree_container = ctk.CTkFrame(self, fg_color="transparent")
+        tree_container.pack(fill="both", expand=True, pady=10)
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
+
+        self.tree = ttk.Treeview(tree_container, columns=columns, show="headings")
         self.tree.tag_configure("even", background="#FFFFFF", foreground="#2C3E50")
         self.tree.tag_configure("odd",  background="#FEF9F0", foreground="#2C3E50")
 
-        col_widths = {"Nom du Fournisseur": 160, "Contact": 110, "Adresse": 140,
+        col_widths = {"Nom du Fournisseur": 160, "Contact": 110, "Adresse": 130,
+                      "Nom Banque": 120, "Compte Bancaire": 120, "Adresse Banque": 130,
                       "NIF": 90, "STAT": 90, "CIF": 90, "Dette en cours": 130}
         for col in columns:
             self.tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
-            self.tree.column(col, width=col_widths.get(col, 110))
+            self.tree.column(col, width=col_widths.get(col, 110), minwidth=80)
         self.tree.column("Dette en cours", anchor="e")
 
-        self.tree.pack(fill="both", expand=True, pady=10)
+        vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
         self.tree.bind("<Double-1>", self.on_frs_double_click)
 
@@ -240,7 +275,9 @@ class PageFournisseur(ctk.CTkFrame):
             return
         try:
             self.cursor.execute("""
-                SELECT idfrs, nomfrs, contactfrs, adressefrs, niffrs, statfrs, ciffrs
+                SELECT idfrs, nomfrs, contactfrs, adressefrs,
+                       nombanque, comptebancaire, adressebanque,
+                       niffrs, statfrs, ciffrs
                 FROM tb_fournisseur
                 WHERE deleted = 0
             """)
@@ -268,7 +305,9 @@ class PageFournisseur(ctk.CTkFrame):
             tag = "even" if idx % 2 == 0 else "odd"
             dette_str = self._formater_nombre(dette_restante)
             self.tree.insert("", "end", iid=frs[0], values=(
-                frs[1], frs[2], frs[3], frs[4], frs[5], frs[6], dette_str
+                frs[1], frs[2], frs[3],
+                frs[4] or "", frs[5] or "", frs[6] or "",
+                frs[7], frs[8], frs[9], dette_str
             ), tags=(tag,))
 
     def sort_by_column(self, column):
@@ -283,7 +322,8 @@ class PageFournisseur(ctk.CTkFrame):
 
         col_index = {
             "Nom du Fournisseur": 1, "Contact": 2, "Adresse": 3,
-            "NIF": 4, "STAT": 5, "CIF": 6, "Dette en cours": "dette"
+            "Nom Banque": 4, "Compte Bancaire": 5, "Adresse Banque": 6,
+            "NIF": 7, "STAT": 8, "CIF": 9, "Dette en cours": "dette"
         }
 
         if column == "Dette en cours":
@@ -305,9 +345,14 @@ class PageFournisseur(ctk.CTkFrame):
                 messagebox.showwarning("Attention", "Le nom est obligatoire.")
                 return
             self.cursor.execute("""
-                INSERT INTO tb_fournisseur (nomfrs, contactfrs, adressefrs, niffrs, statfrs, ciffrs, dateregistre, deleted)
-                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, 0)
+                INSERT INTO tb_fournisseur
+                    (nomfrs, contactfrs, adressefrs,
+                     nombanque, comptebancaire, adressebanque,
+                     niffrs, statfrs, ciffrs, dateregistre, deleted)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, 0)
             """, (nomfrs, self.contactFrs_entry.get(), self.adresseFrs_entry.get(),
+                  self.nombanqueFrs_entry.get(), self.comptebancaireFrs_entry.get(),
+                  self.adressebanqueFrs_entry.get(),
                   self.nifFrs_entry.get(), self.statFrs_entry.get(), self.cifFrs_entry.get()))
             self.conn.commit()
             self.load_fournisseur()
@@ -340,9 +385,13 @@ class PageFournisseur(ctk.CTkFrame):
                 old_name = ""
             self.cursor.execute("""
                 UPDATE tb_fournisseur
-                SET nomfrs=%s, contactfrs=%s, adressefrs=%s, niffrs=%s, statfrs=%s, ciffrs=%s
+                SET nomfrs=%s, contactfrs=%s, adressefrs=%s,
+                    nombanque=%s, comptebancaire=%s, adressebanque=%s,
+                    niffrs=%s, statfrs=%s, ciffrs=%s
                 WHERE idfrs=%s
             """, (self.nomFrs_entry.get(), self.contactFrs_entry.get(), self.adresseFrs_entry.get(),
+                  self.nombanqueFrs_entry.get(), self.comptebancaireFrs_entry.get(),
+                  self.adressebanqueFrs_entry.get(),
                   self.nifFrs_entry.get(), self.statFrs_entry.get(), self.cifFrs_entry.get(),
                   self.selected_frs_id))
             self.conn.commit()
@@ -397,7 +446,9 @@ class PageFournisseur(ctk.CTkFrame):
         self.selected_frs_id = selected[0]
         try:
             self.cursor.execute("""
-                SELECT idfrs, nomfrs, contactfrs, adressefrs, niffrs, statfrs, ciffrs
+                SELECT idfrs, nomfrs, contactfrs, adressefrs,
+                       nombanque, comptebancaire, adressebanque,
+                       niffrs, statfrs, ciffrs
                 FROM tb_fournisseur WHERE idfrs = %s
             """, (self.selected_frs_id,))
             res = self.cursor.fetchone()
@@ -405,14 +456,18 @@ class PageFournisseur(ctk.CTkFrame):
                 self.nomFrs_entry.delete(0, "end"); self.nomFrs_entry.insert(0, res[1] or "")
                 self.contactFrs_entry.delete(0, "end"); self.contactFrs_entry.insert(0, res[2] or "")
                 self.adresseFrs_entry.delete(0, "end"); self.adresseFrs_entry.insert(0, res[3] or "")
-                self.nifFrs_entry.delete(0, "end"); self.nifFrs_entry.insert(0, res[4] or "")
-                self.statFrs_entry.delete(0, "end"); self.statFrs_entry.insert(0, res[5] or "")
-                self.cifFrs_entry.delete(0, "end"); self.cifFrs_entry.insert(0, res[6] or "")
+                self.nombanqueFrs_entry.delete(0, "end"); self.nombanqueFrs_entry.insert(0, res[4] or "")
+                self.comptebancaireFrs_entry.delete(0, "end"); self.comptebancaireFrs_entry.insert(0, res[5] or "")
+                self.adressebanqueFrs_entry.delete(0, "end"); self.adressebanqueFrs_entry.insert(0, res[6] or "")
+                self.nifFrs_entry.delete(0, "end"); self.nifFrs_entry.insert(0, res[7] or "")
+                self.statFrs_entry.delete(0, "end"); self.statFrs_entry.insert(0, res[8] or "")
+                self.cifFrs_entry.delete(0, "end"); self.cifFrs_entry.insert(0, res[9] or "")
         except psycopg2.Error as err:
             print(err)
 
     def clear_fields(self):
         for entry in [self.nomFrs_entry, self.contactFrs_entry, self.adresseFrs_entry,
+                      self.nombanqueFrs_entry, self.comptebancaireFrs_entry, self.adressebanqueFrs_entry,
                       self.nifFrs_entry, self.statFrs_entry, self.cifFrs_entry]:
             entry.delete(0, "end")
         self.selected_frs_id = None
@@ -424,7 +479,8 @@ class PageFournisseur(ctk.CTkFrame):
             searchable_parts = [
                 str(frs[0] or ""), str(frs[1] or ""), str(frs[2] or ""),
                 str(frs[3] or ""), str(frs[4] or ""), str(frs[5] or ""),
-                str(frs[6] or ""), str(dette_restante or 0),
+                str(frs[6] or ""), str(frs[7] or ""), str(frs[8] or ""),
+                str(frs[9] or ""), str(dette_restante or 0),
                 self._formater_nombre(dette_restante),
             ]
             if not search_query or search_query in " ".join(searchable_parts).lower():
@@ -444,7 +500,9 @@ class PageFournisseur(ctk.CTkFrame):
     def open_frs_dette_details(self, idfrs):
         try:
             self.cursor.execute("""
-                SELECT idfrs, nomfrs, contactfrs, adressefrs, niffrs, statfrs, ciffrs
+                SELECT idfrs, nomfrs, contactfrs, adressefrs,
+                       nombanque, comptebancaire, adressebanque,
+                       niffrs, statfrs, ciffrs
                 FROM tb_fournisseur WHERE idfrs = %s
             """, (idfrs,))
             frs_info = self.cursor.fetchone()
@@ -494,9 +552,12 @@ class PageFournisseur(ctk.CTkFrame):
             ("Nom:", frs_info[1]),
             ("Contact:", frs_info[2] or "N/A"),
             ("Adresse:", frs_info[3] or "N/A"),
-            ("NIF:", frs_info[4] or "N/A"),
-            ("STAT:", frs_info[5] or "N/A"),
-            ("CIF:", frs_info[6] or "N/A"),
+            ("Nom Banque:", frs_info[4] or "N/A"),
+            ("Compte Bancaire:", frs_info[5] or "N/A"),
+            ("Adresse Banque:", frs_info[6] or "N/A"),
+            ("NIF:", frs_info[7] or "N/A"),
+            ("STAT:", frs_info[8] or "N/A"),
+            ("CIF:", frs_info[9] or "N/A"),
         ]
         for label, value in info_data:
             row_f = ctk.CTkFrame(sidebar_frame, fg_color="transparent")
@@ -583,9 +644,7 @@ class PageFournisseur(ctk.CTkFrame):
             self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
 
             def on_paiement_global_click():
-                self._open_global_payment_window(
-                    idfrs, detail_window, tree_dettes, label_montant_restant,
-                    refresh_callback=refresh_payment_history)
+                self._open_global_payment_window(idfrs, detail_window, tree_dettes, label_montant_restant)
 
             btn_paiement_global.configure(command=on_paiement_global_click)
         except psycopg2.Error as err:
@@ -1024,7 +1083,7 @@ class PageFournisseur(ctk.CTkFrame):
     # FENÊTRE PAIEMENT GLOBAL
     # ──────────────────────────────────────────────────────────────────
 
-    def _open_global_payment_window(self, idfrs, parent_window, tree_dettes, label_montant_restant, refresh_callback=None):
+    def _open_global_payment_window(self, idfrs, parent_window, tree_dettes, label_montant_restant):
         payment_window = ctk.CTkToplevel(parent_window)
         payment_window.title("Paiement Global des Dettes Fournisseur")
         parent_window.update_idletasks()
@@ -1053,6 +1112,19 @@ class PageFournisseur(ctk.CTkFrame):
         _, dette_total_initial, dette_total_paye, dette_total_restant, _ = \
             self._compute_dette_status_fifo(idfrs)
 
+        # ── Infos bancaires du fournisseur ────────────────────────────────
+        try:
+            self.cursor.execute("""
+                SELECT nomfrs, nombanque, comptebancaire, adressebanque
+                FROM tb_fournisseur WHERE idfrs = %s
+            """, (idfrs,))
+            frs_bank = self.cursor.fetchone()
+            frs_nombanque = frs_bank[1] or "N/A" if frs_bank else "N/A"
+            frs_comptebancaire = frs_bank[2] or "N/A" if frs_bank else "N/A"
+            frs_adressebanque = frs_bank[3] or "N/A" if frs_bank else "N/A"
+        except Exception:
+            frs_nombanque = frs_comptebancaire = frs_adressebanque = "N/A"
+
         info_text = (
             f"Récapitulatif des Dettes Fournisseur (ID: {idfrs})\n\n"
             f"Montant Total des Dettes: {self._formater_nombre(dette_total_initial)} Ar\n"
@@ -1062,14 +1134,38 @@ class PageFournisseur(ctk.CTkFrame):
 
         ctk.CTkLabel(main_frame, text=info_text, justify="left", anchor="w",
                      font=_F(_FONT_SIZE_MD, "bold")).grid(
-            row=0, column=0, sticky="ew", padx=8, pady=(8, 10))
+            row=0, column=0, sticky="ew", padx=8, pady=(8, 6))
+
+        # ── Bloc infos bancaires (badge) ───────────────────────────────────
+        bank_frame = ctk.CTkFrame(
+            main_frame, fg_color="#eaf4fb",
+            corner_radius=8, border_width=1, border_color="#aed6f1"
+        )
+        bank_frame.grid(row=0, column=0, sticky="se", padx=8, pady=(6, 2))
+        ctk.CTkLabel(
+            bank_frame,
+            text="🏦  Coordonnées Bancaires",
+            font=_F(_FONT_SIZE_SM, "bold"), text_color="#1a5276"
+        ).grid(row=0, column=0, columnspan=2, padx=10, pady=(6, 2), sticky="w")
+        for r_idx, (lbl, val) in enumerate([
+            ("Banque :", frs_nombanque),
+            ("N° Compte :", frs_comptebancaire),
+            ("Adresse Banque :", frs_adressebanque),
+        ], start=1):
+            ctk.CTkLabel(
+                bank_frame, text=lbl,
+                font=_F(_FONT_SIZE_SM, "bold"), text_color="#2980b9"
+            ).grid(row=r_idx, column=0, padx=(10, 4), pady=2, sticky="w")
+            ctk.CTkLabel(
+                bank_frame, text=val,
+                font=_F(_FONT_SIZE_SM), text_color="#1a5276"
+            ).grid(row=r_idx, column=1, padx=(0, 10), pady=2, sticky="w")
+        ctk.CTkFrame(bank_frame, height=4, fg_color="transparent").grid(row=4, column=0)
 
         ctk.CTkLabel(main_frame, text=f"Montant Global à Payer (max: {self._formater_nombre(dette_total_restant)} Ar):",
                      font=_F(_FONT_SIZE_MD, "bold")).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
         entry_montant = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
-        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
-        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
 
         ctk.CTkLabel(main_frame, text="Observation (optionnel):",
                      font=_F(_FONT_SIZE_MD, "bold")).grid(row=3, column=0, sticky="w", padx=8, pady=(2, 4))
@@ -1101,7 +1197,7 @@ class PageFournisseur(ctk.CTkFrame):
 
         def enregistrer_paiement_global():
             try:
-                montant_global = float(entry_montant.get().replace('.', '').replace(',', '.'))
+                montant_global = float(entry_montant.get().replace(',', '.'))
                 observation = entry_obs.get().strip()
 
                 if montant_global <= 0:
@@ -1177,8 +1273,6 @@ class PageFournisseur(ctk.CTkFrame):
                         messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
 
                 self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
-                if refresh_callback:
-                    refresh_callback()
                 self.load_fournisseur()
                 payment_window.destroy()
 
@@ -1242,8 +1336,6 @@ class PageFournisseur(ctk.CTkFrame):
         entry_montant = ctk.CTkEntry(main_frame, placeholder_text="Ex: 150000",
                                      font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
-        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
-        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
 
         def enregistrer_dette():
             try:
@@ -1254,7 +1346,7 @@ class PageFournisseur(ctk.CTkFrame):
                     messagebox.showwarning("Attention", "Veuillez remplir tous les champs.")
                     return
 
-                montant = float(montant_str.replace('.', '').replace(',', '.'))
+                montant = float(montant_str.replace(',', '.'))
                 if montant <= 0:
                     messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
                     return

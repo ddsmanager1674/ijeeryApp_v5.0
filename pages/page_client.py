@@ -267,34 +267,116 @@ class PageClient(ctk.CTkFrame):
         self.selected_cli_id = None
 
     def load_client(self):
+        """
+        Charge la liste des clients en recalculant le crédit restant à partir
+        des sources de crédit/paiement:
+          total_initial  = SUM(tb_pmtfacture idmode=4) + SUM(tb_autrecreance)
+          total_paye     = SUM(tb_pmtcredit tous modes)
+          credit_restant = MAX(total_initial - total_paye, 0)
+        """
         for item in self.tree.get_children():
             self.tree.delete(item)
-            
-        if not self.conn: return
+
+        if not self.conn:
+            return
 
         try:
             self.cursor.execute("""
-                SELECT c.idclient, c.nomcli, c.contactcli, c.adressecli, c.nifcli, c.credit, t.designationtypeclient
+                SELECT
+                    c.idclient,
+                    c.nomcli,
+                    c.contactcli,
+                    c.adressecli,
+                    c.nifcli,
+                    c.credit,
+                    COALESCE(t.designationtypeclient, '')       AS designationtypeclient,
+                    COALESCE(credits.total_credit, 0)
+                        + COALESCE(creances.total_creance, 0)   AS total_credit_initial,
+                    COALESCE(pmt.total_paye, 0)                 AS total_paye,
+                    GREATEST(
+                        COALESCE(credits.total_credit, 0)
+                        + COALESCE(creances.total_creance, 0)
+                        - COALESCE(pmt.total_paye, 0),
+                        0
+                    )                                           AS credit_restant,
+                    GREATEST(
+                        COALESCE(credits.derniere_date, '-infinity'::timestamp),
+                        COALESCE(creances.derniere_date, '-infinity'::timestamp)
+                    )                                           AS derniere_date
                 FROM tb_client c
                 LEFT JOIN tb_typeclient t ON c.idtypeclient = t.idtypeclient
-                WHERE c.idtypeclient != 1
+                LEFT JOIN (
+                    SELECT idclient, SUM(mtpaye) AS total_credit, MAX(datepmt) AS derniere_date
+                    FROM tb_pmtfacture
+                    WHERE idmode = 4 AND deleted = 0
+                    GROUP BY idclient
+                ) credits ON credits.idclient = c.idclient
+                LEFT JOIN (
+                    SELECT idclient, SUM(montant) AS total_creance, MAX(dateregistre) AS derniere_date
+                    FROM tb_autrecreance
+                    GROUP BY idclient
+                ) creances ON creances.idclient = c.idclient
+                LEFT JOIN (
+                    SELECT idclient, COALESCE(SUM(mtpaye), 0) AS total_paye
+                    FROM tb_pmtcredit
+                    GROUP BY idclient
+                ) pmt ON pmt.idclient = c.idclient
+                WHERE c.deleted = 0
+                  AND c.idtypeclient != 1
+                ORDER BY credit_restant DESC
             """)
-            clients = self.cursor.fetchall()
-            
+            rows = self.cursor.fetchall()
+
+            today = datetime.now().date()
             clients_avec_credits = []
-            for cli in clients:
-                try:
-                    _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
-                except Exception:
-                    credit_restant = 0
-                dernier_credit = self._get_dernier_credit_label(cli[0])
-                clients_avec_credits.append((cli, credit_restant, dernier_credit))
-            
-            clients_avec_credits.sort(key=lambda x: x[1], reverse=True)
+            for row in rows:
+                (idcli, nom, contact, adresse, nif, plafond, type_cli,
+                 _total_init, _total_paye, credit_restant, derniere_date) = row
+
+                if derniere_date is None:
+                    dernier_label = "-"
+                else:
+                    try:
+                        date_ref = derniere_date.date() if hasattr(derniere_date, "date") else derniere_date
+                        jours = max((today - date_ref).days, 0)
+                        dernier_label = "Aujourd'hui" if jours == 0 else f"il y a {jours} jours"
+                    except (OverflowError, OSError, ValueError):
+                        dernier_label = "-"
+
+                cli_tuple = (idcli, nom, contact, adresse, nif, plafond, type_cli)
+                clients_avec_credits.append((cli_tuple, float(credit_restant or 0), dernier_label))
+
             self.all_clients_data = clients_avec_credits
             self.display_clients(clients_avec_credits)
         except psycopg2.Error as err:
-            messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
+            # Fallback: si certaines tables n'existent pas encore dans la BD.
+            try:
+                self.cursor.execute("""
+                    SELECT c.idclient, c.nomcli, c.contactcli, c.adressecli, c.nifcli, c.credit, t.designationtypeclient
+                    FROM tb_client c
+                    LEFT JOIN tb_typeclient t ON c.idtypeclient = t.idtypeclient
+                    WHERE c.deleted = 0
+                      AND c.idtypeclient != 1
+                """)
+                clients = self.cursor.fetchall()
+
+                clients_avec_credits = []
+                for cli in clients:
+                    try:
+                        _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
+                    except Exception:
+                        credit_restant = 0
+                    try:
+                        dernier_credit = self._get_dernier_credit_label(cli[0])
+                    except Exception:
+                        dernier_credit = "-"
+                    clients_avec_credits.append((cli, float(credit_restant or 0), dernier_credit))
+
+                clients_avec_credits.sort(key=lambda x: x[1], reverse=True)
+                self.all_clients_data = clients_avec_credits
+                self.display_clients(clients_avec_credits)
+            except Exception:
+                messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
 
     def display_clients(self, clients_avec_credits):
         for item in self.tree.get_children():
@@ -615,8 +697,10 @@ class PageClient(ctk.CTkFrame):
         table_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_columnconfigure(0, weight=1)
         table_frame.grid_columnconfigure(1, weight=0)
-        table_frame.grid_rowconfigure(0, weight=0)
-        table_frame.grid_rowconfigure(1, weight=1)
+        table_frame.grid_rowconfigure(0, weight=0)  # titre
+        table_frame.grid_rowconfigure(1, weight=1)  # tree + scrollbar v
+        table_frame.grid_rowconfigure(2, weight=0)  # scrollbar h
+        table_frame.grid_rowconfigure(3, weight=0)  # footer totaux
         
         ctk.CTkLabel(table_frame, text="Récapitulatif des Crédits", 
                     font=_F(_FONT_SIZE_LG, "bold")).grid(
@@ -637,18 +721,66 @@ class PageClient(ctk.CTkFrame):
             else:
                 tree_credits.column(col, width=110, anchor='w')
         
-        scrollbar = ttk.Scrollbar(table_frame, command=tree_credits.yview)
-        tree_credits.configure(yscrollcommand=scrollbar.set)
-        tree_credits.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
-        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
+        sb_cr_v = ttk.Scrollbar(table_frame, orient="vertical", command=tree_credits.yview)
+        sb_cr_h = ttk.Scrollbar(table_frame, orient="horizontal", command=tree_credits.xview)
+        tree_credits.configure(yscrollcommand=sb_cr_v.set, xscrollcommand=sb_cr_h.set)
+        tree_credits.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=0)
+        sb_cr_v.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=0)
+        sb_cr_h.grid(row=2, column=0, sticky="ew", padx=(10, 0), pady=(0, 4))
+
+        # ── Footer (totaux crédits)
+        tot_cr = ctk.CTkFrame(table_frame, fg_color="#2C3E50", corner_radius=4)
+        tot_cr.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
+        for ci in range(7):
+            tot_cr.grid_columnconfigure(ci, weight=(1 if ci % 2 == 0 else 0))
+
+        ctk.CTkLabel(tot_cr, text="TOTAUX :", font=_F(_FONT_SIZE_SM, "bold"),
+                     text_color="#FFFFFF").grid(row=0, column=0, sticky="w", padx=(10, 6), pady=5)
+        ctk.CTkLabel(tot_cr, text="Montant total :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=1, sticky="e", padx=(4, 2), pady=5)
+        lbl_cr_montant = ctk.CTkLabel(tot_cr, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#F9E79F")
+        lbl_cr_montant.grid(row=0, column=2, sticky="w", padx=(2, 10), pady=5)
+        ctk.CTkLabel(tot_cr, text="Total payé :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=3, sticky="e", padx=(4, 2), pady=5)
+        lbl_cr_paye = ctk.CTkLabel(tot_cr, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#A9DFBF")
+        lbl_cr_paye.grid(row=0, column=4, sticky="w", padx=(2, 10), pady=5)
+        ctk.CTkLabel(tot_cr, text="Solde restant :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=5, sticky="e", padx=(4, 2), pady=5)
+        lbl_cr_solde = ctk.CTkLabel(tot_cr, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#F1948A")
+        lbl_cr_solde.grid(row=0, column=6, sticky="w", padx=(2, 10), pady=5)
+
+        def _to_float(v):
+            try:
+                return float(
+                    str(v)
+                    .replace("\xa0", "")
+                    .replace("\u202f", "")
+                    .replace(" ", "")
+                    .replace(".", "")
+                    .replace(",", ".")
+                )
+            except Exception:
+                return 0.0
+
+        def _refresh_totaux_credits():
+            tm = tp = ts = 0.0
+            for iid in tree_credits.get_children():
+                vals = tree_credits.item(iid, "values")
+                if not vals:
+                    continue
+                tm += _to_float(vals[4])
+                tp += _to_float(vals[5])
+                ts += _to_float(vals[6])
+            lbl_cr_montant.configure(text=f"{self._formater_nombre(tm)} Ar")
+            lbl_cr_paye.configure(text=f"{self._formater_nombre(tp)} Ar")
+            lbl_cr_solde.configure(text=f"{self._formater_nombre(ts)} Ar")
         
         try:
             self._render_credit_table(tree_credits, idclient, label_montant_restant)
+            _refresh_totaux_credits()
 
             def on_paiement_global_click():
-                self._open_global_payment_window(
-                    idclient, detail_window, tree_credits, label_montant_restant,
-                    refresh_callback=refresh_payment_history)
+                self._open_global_payment_window(idclient, detail_window, tree_credits, label_montant_restant)
 
             btn_paiement_global.configure(command=on_paiement_global_click)
         except psycopg2.Error as err:
@@ -676,8 +808,10 @@ class PageClient(ctk.CTkFrame):
         payment_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(5, 0))
         payment_frame.grid_columnconfigure(0, weight=1)
         payment_frame.grid_columnconfigure(1, weight=0)
-        payment_frame.grid_rowconfigure(0, weight=0)
-        payment_frame.grid_rowconfigure(1, weight=1)
+        payment_frame.grid_rowconfigure(0, weight=0)  # titre
+        payment_frame.grid_rowconfigure(1, weight=1)  # tree + scrollbar v
+        payment_frame.grid_rowconfigure(2, weight=0)  # scrollbar h
+        payment_frame.grid_rowconfigure(3, weight=0)  # footer totaux
         
         ctk.CTkLabel(payment_frame, text="Historique des Paiements", 
                     font=_F(_FONT_SIZE_LG, "bold")).grid(
@@ -699,54 +833,61 @@ class PageClient(ctk.CTkFrame):
             else:
                 tree_paiements.column(col, width=150, anchor='w')
         
-        scrollbar_pmt = ttk.Scrollbar(payment_frame, command=tree_paiements.yview)
-        tree_paiements.configure(yscrollcommand=scrollbar_pmt.set)
-        tree_paiements.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
-        scrollbar_pmt.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
-        
-        empty_label = None
-        def refresh_payment_history():
-            nonlocal empty_label
-            for item in tree_paiements.get_children():
-                tree_paiements.delete(item)
-            if empty_label is not None:
-                try:
-                    empty_label.destroy()
-                except Exception:
-                    pass
-                empty_label = None
+        sb_pmt_v = ttk.Scrollbar(payment_frame, orient="vertical", command=tree_paiements.yview)
+        sb_pmt_h = ttk.Scrollbar(payment_frame, orient="horizontal", command=tree_paiements.xview)
+        tree_paiements.configure(yscrollcommand=sb_pmt_v.set, xscrollcommand=sb_pmt_h.set)
+        tree_paiements.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=0)
+        sb_pmt_v.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=0)
+        sb_pmt_h.grid(row=2, column=0, sticky="ew", padx=(10, 0), pady=(0, 4))
 
-            try:
-                self.cursor.execute("""
-                    SELECT p.id, p.datepmt, p.mtpaye, p.observation, 
-                           COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
-                    FROM tb_pmtcredit p
-                    LEFT JOIN tb_users u ON p.iduser = u.iduser
-                    WHERE p.idclient = %s
-                    ORDER BY p.datepmt DESC
-                """, (idclient,))
-                paiements = self.cursor.fetchall()
-                
-                for idx, pmt in enumerate(paiements):
-                    pmt_id, date_pmt, montant_pmt, observation, utilisateur = pmt
-                    tag = "even" if idx % 2 == 0 else "odd"
-                    tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
-                        pmt_id,
-                        date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
-                        f"{self._formater_nombre(float(montant_pmt or 0))}",
-                        observation or "",
-                        utilisateur or "N/A"
-                    ), tags=(tag,))
-                
-                if not paiements:
-                    empty_label = ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré", 
-                                              text_color="gray", font=_F(_FONT_SIZE_MD))
-                    empty_label.grid(row=1, column=0, pady=20)
-            except psycopg2.Error as err:
-                messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
+        # ── Footer (totaux paiements)
+        tot_pmt = ctk.CTkFrame(payment_frame, fg_color="#1A5276", corner_radius=4)
+        tot_pmt.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
+        for ci in range(5):
+            tot_pmt.grid_columnconfigure(ci, weight=(1 if ci % 2 == 0 else 0))
+
+        ctk.CTkLabel(tot_pmt, text="TOTAUX :", font=_F(_FONT_SIZE_SM, "bold"),
+                     text_color="#FFFFFF").grid(row=0, column=0, sticky="w", padx=(10, 6), pady=5)
+        ctk.CTkLabel(tot_pmt, text="Nombre :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=1, sticky="e", padx=(4, 2), pady=5)
+        lbl_pmt_nb = ctk.CTkLabel(tot_pmt, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#AED6F1")
+        lbl_pmt_nb.grid(row=0, column=2, sticky="w", padx=(2, 10), pady=5)
+        ctk.CTkLabel(tot_pmt, text="Total payé :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=3, sticky="e", padx=(4, 2), pady=5)
+        lbl_pmt_total = ctk.CTkLabel(tot_pmt, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#A9DFBF")
+        lbl_pmt_total.grid(row=0, column=4, sticky="w", padx=(2, 10), pady=5)
 
         try:
-            refresh_payment_history()
+            self.cursor.execute("""
+                SELECT p.id, p.datepmt, p.mtpaye, p.observation,
+                       COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
+                FROM tb_pmtcredit p
+                LEFT JOIN tb_users u ON p.iduser = u.iduser
+                WHERE p.idclient = %s
+                ORDER BY p.datepmt DESC
+            """, (idclient,))
+            paiements = self.cursor.fetchall()
+
+            total_pmt_val = 0.0
+            for idx, pmt in enumerate(paiements):
+                pmt_id, date_pmt, montant_pmt, observation, utilisateur = pmt
+                tag = "even" if idx % 2 == 0 else "odd"
+                v = float(montant_pmt or 0)
+                total_pmt_val += v
+                tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
+                    pmt_id,
+                    date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
+                    f"{self._formater_nombre(v)}",
+                    observation or "",
+                    utilisateur or "N/A"
+                ), tags=(tag,))
+
+            lbl_pmt_nb.configure(text=f"{len(paiements)} paiement(s)")
+            lbl_pmt_total.configure(text=f"{self._formater_nombre(total_pmt_val)} Ar")
+
+            if not paiements:
+                ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré",
+                             text_color="gray", font=_F(_FONT_SIZE_MD)).grid(row=1, column=0, pady=20)
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
 
@@ -1101,7 +1242,7 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
         ctk.CTkButton(btn_frame, text="Annuler", command=payment_window.destroy,
                      fg_color="#e74c3c", font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
 
-    def _open_global_payment_window(self, idclient, parent_window, tree_credits, label_montant_restant, refresh_callback=None):
+    def _open_global_payment_window(self, idclient, parent_window, tree_credits, label_montant_restant):
         payment_window = ctk.CTkToplevel(parent_window)
         payment_window.title("Paiement Global des Crédits")
         parent_window.update_idletasks()
@@ -1130,6 +1271,8 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
         main_frame.grid_rowconfigure(4, weight=0)
         main_frame.grid_rowconfigure(5, weight=1)
         main_frame.grid_rowconfigure(6, weight=0)
+        main_frame.grid_rowconfigure(7, weight=0)
+        main_frame.grid_rowconfigure(8, weight=0)
 
         _, credit_total_initial, credit_total_paye, credit_total_restant, _ = self._compute_credit_status_fifo(idclient)
         
@@ -1151,8 +1294,6 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         ).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
         entry_montant = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
-        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
-        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
         
         ctk.CTkLabel(
             main_frame, text="Observation (optionnel):",
@@ -1186,11 +1327,75 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         if mode_names:
             default_mode = "Espèces" if "Espèces" in mode_names else mode_names[0]
             mode_combo_global.set(default_mode)
-        mode_combo_global.grid(row=7, column=0, sticky="ew", padx=8, pady=(0, 10))
+        mode_combo_global.grid(row=7, column=0, sticky="ew", padx=8, pady=(0, 4))
+
+        # ── Badge / notification solde restant ───────────────────────────────
+        notif_frame = ctk.CTkFrame(
+            main_frame, fg_color="#eaf4fb",
+            corner_radius=8, border_width=1, border_color="#aed6f1"
+        )
+        notif_frame.grid(row=8, column=0, sticky="ew", padx=8, pady=(0, 8))
+        notif_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(notif_frame, text="💳", font=_F(18)).grid(row=0, column=0, padx=(10, 6), pady=8)
+
+        notif_label = ctk.CTkLabel(
+            notif_frame,
+            text=f"Mode sélectionné : {default_mode if mode_names else '-'}\n"
+                 f"Solde restant à régler : {self._formater_nombre(credit_total_restant)} Ar",
+            font=_F(_FONT_SIZE_MD, "bold"),
+            text_color="#1a5276",
+            justify="left", anchor="w"
+        )
+        notif_label.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=8)
+
+        solde_badge = ctk.CTkLabel(
+            notif_frame,
+            text=f"{self._formater_nombre(credit_total_restant)} Ar",
+            font=_F(_FONT_SIZE_LG, "bold"),
+            text_color="#ffffff",
+            fg_color="#e74c3c",
+            corner_radius=6, padx=10, pady=4
+        )
+        solde_badge.grid(row=0, column=2, padx=(0, 10), pady=8)
+
+        def _on_mode_change(selected_mode):
+            solde = credit_total_restant
+            if solde <= 0:
+                badge_color = "#27ae60"
+                frame_color = "#eafaf1"
+                border_color = "#a9dfbf"
+                txt_color = "#1e8449"
+                icone = "✅"
+            elif solde <= credit_total_initial * 0.25:
+                badge_color = "#f39c12"
+                frame_color = "#fef9e7"
+                border_color = "#f9e79f"
+                txt_color = "#7d6608"
+                icone = "⚠️"
+            else:
+                badge_color = "#e74c3c"
+                frame_color = "#eaf4fb"
+                border_color = "#aed6f1"
+                txt_color = "#1a5276"
+                icone = "💳"
+
+            notif_frame.configure(fg_color=frame_color, border_color=border_color)
+            notif_label.configure(
+                text=f"Mode sélectionné : {selected_mode}\n"
+                     f"Solde restant à régler : {self._formater_nombre(solde)} Ar",
+                text_color=txt_color
+            )
+            solde_badge.configure(text=f"{self._formater_nombre(solde)} Ar", fg_color=badge_color)
+            notif_frame.winfo_children()[0].configure(text=icone)
+
+        mode_combo_global.configure(command=_on_mode_change)
+        if mode_names:
+            _on_mode_change(default_mode)
         
         def enregistrer_paiement_global():
             try:
-                montant_global = float(entry_montant.get().replace('.', '').replace(',', '.'))
+                montant_global = float(entry_montant.get().replace(',', '.'))
                 observation = entry_obs.get().strip()
                 
                 if montant_global <= 0:
@@ -1262,9 +1467,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                         messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
 
                 self._render_credit_table(tree_credits, idclient, label_montant_restant)
-                if refresh_callback:
-                    refresh_callback()
-                self.refresh_client_list()
+                self.load_client()
                 payment_window.destroy()
             
             except ValueError:
