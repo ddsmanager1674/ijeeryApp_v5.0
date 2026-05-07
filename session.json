@@ -73,10 +73,6 @@
             "AppMain"
         ],
         [
-            "Livraison Client",
-            "PageLivraisonClient"
-        ],
-        [
             "Magasin",
             "PageMagasin"
         ],
@@ -111,10 +107,6 @@
         [
             "Stock Article",
             "PageStock"
-        ],
-        [
-            "Stock Livraison",
-            "PageStockLivraison"
         ],
         [
             "Suivi Commande",

@@ -26,6 +26,14 @@ except ImportError:
 
 
 from .page_clientCrédit import PageClientCrédit
+try:
+    from .page_retardCredit import PageRetardCredit
+except ImportError:
+    class PageRetardCredit(ctk.CTkFrame):
+        def __init__(self, master):
+            super().__init__(master)
+            from tkinter import messagebox as _mb
+            _mb.showerror("Erreur", "Le fichier 'page_retardCredit.py' est manquant ou contient une erreur.")
 from log_utils import AppLogger
 
 
@@ -226,6 +234,14 @@ class PageClient(ctk.CTkFrame):
         self.delete_button = ctk.CTkButton(button_frame, text="Supprimer", command=self.delete_client,
                                            fg_color="#e74c3c", font=_F(_FONT_SIZE_MD, "bold"))
         self.delete_button.pack(side="left", padx=5)
+
+        self.suivi_credit_button = ctk.CTkButton(
+            button_frame, text="⏰ Suivi Crédit",
+            command=self.open_suivi_credit_window,
+            fg_color="#8e44ad", hover_color="#6c3483",
+            font=_F(_FONT_SIZE_MD, "bold")
+        )
+        self.suivi_credit_button.pack(side="left", padx=5)
 
         self.credit_page_button = ctk.CTkButton(button_frame, text="Crédit", 
                                        command=self.open_credit_window,
@@ -581,6 +597,54 @@ class PageClient(ctk.CTkFrame):
         credit_window.grid_rowconfigure(0, weight=1)
         credit_page = PageClientCrédit(credit_window)
         credit_page.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+    def open_suivi_credit_window(self, page_livr_frs=None):
+        """
+        Ouvre la fenêtre de suivi des retards de paiement crédit.
+        Si appelée depuis une page de réception fournisseur, on peut appliquer
+        une condition métier basée sur son switch 'a_payer'.
+        """
+        if page_livr_frs is not None:
+            try:
+                if page_livr_frs.var_a_payer.get():
+                    messagebox.showinfo(
+                        "Suivi Crédit",
+                        "Le switch 'Fournisseur à payer' est activé.\n"
+                        "Le suivi crédit s'affiche uniquement pour les clients crédit\n"
+                        "(switch désactivé)."
+                    )
+                    return
+            except Exception:
+                pass
+
+        main_window = self.winfo_toplevel()
+        main_window.update_idletasks()
+        mw = max(main_window.winfo_width(), 1)
+        mh = max(main_window.winfo_height(), 1)
+        mx = main_window.winfo_x()
+        my = main_window.winfo_y()
+
+        win_w = max(1100, int(mw * 0.85))
+        win_h = max(620, int(mh * 0.85))
+        pos_x = mx + (mw - win_w) // 2
+        pos_y = my + (mh - win_h) // 2
+
+        suivi_window = ctk.CTkToplevel(self)
+        suivi_window.title("⏰ Suivi des Retards de Paiement Crédit")
+        suivi_window.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        suivi_window.attributes("-topmost", False)
+        suivi_window.grid_columnconfigure(0, weight=1)
+        suivi_window.grid_rowconfigure(0, weight=1)
+
+        try:
+            page = PageRetardCredit(suivi_window)
+            page.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        except Exception as e:
+            messagebox.showerror("Erreur", "Impossible d'ouvrir le Suivi Crédit :\n" + str(e))
+            suivi_window.destroy()
+            return
+
+        suivi_window.after(150, lambda: (suivi_window.lift(), suivi_window.focus_force()))
 
     def on_client_double_click(self, event):
         selected = self.tree.selection()
