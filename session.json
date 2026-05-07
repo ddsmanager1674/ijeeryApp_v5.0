@@ -17,6 +17,10 @@
             ""
         ],
         [
+            "BLOC: CHAT INTERNE",
+            ""
+        ],
+        [
             "BLOC: COMMERCIALE",
             ""
         ],
@@ -35,6 +39,10 @@
         [
             "Caisse",
             "PageCaisse"
+        ],
+        [
+            "CHAT INTERNE",
+            "PageChat"
         ],
         [
             "Client",
