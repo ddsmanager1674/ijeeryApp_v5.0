@@ -1,9 +1,9 @@
 {
     "database": {
-        "host": "127.0.0.1",
+        "host": "localhost",
         "user": "postgres",
         "password": "root",
-        "database": "ambanja",
+        "database": "sarah_gros",
         "port": 5432
     }
 }
