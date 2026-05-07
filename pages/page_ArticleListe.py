@@ -524,11 +524,12 @@ class page_listeArticle(customtkinter.CTkFrame):
         try:
             info_window = customtkinter.CTkToplevel(self)
             info_window.title(f"Détails Article - ID: {idarticle}")
-            info_window.geometry("900x600")
+            info_window.geometry("1100x720")
             if _T:
                 Theme.apply_toplevel(info_window)
             info_window.grid_columnconfigure(0, weight=1)
             info_window.grid_rowconfigure(0, weight=1)
+
             page_frame = PageInfoArticle(
                 master=info_window,
                 db_conn=self.db_conn,
@@ -537,9 +538,9 @@ class page_listeArticle(customtkinter.CTkFrame):
             )
             page_frame.grid(row=0, column=0, sticky="nsew")
             info_window.update_idletasks()
-            x = (info_window.winfo_screenwidth()  // 2) - (900 // 2)
-            y = (info_window.winfo_screenheight() // 2) - (600 // 2)
-            info_window.geometry(f"900x600+{x}+{y}")
+            x = (info_window.winfo_screenwidth()  // 2) - (1100 // 2)
+            y = (info_window.winfo_screenheight() // 2) - (720 // 2)
+            info_window.geometry(f"1100x720+{x}+{y}")
             info_window.focus()
             info_window.lift()
         except Exception as e:

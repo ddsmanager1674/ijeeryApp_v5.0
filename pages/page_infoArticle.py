@@ -5,6 +5,8 @@ import psycopg2
 import json
 from datetime import datetime
 from tkcalendar import DateEntry
+from PIL import Image, ImageTk
+from resource_utils import get_config_path
 
 # Ajout pour forcer les chemins d'import
 import sys
@@ -102,9 +104,10 @@ class PageInfoArticle(ctk.CTkFrame):
             self.show_view(None)
 
     def create_sidebar(self):
-        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0, fg_color="#3b8ed4")
+        # Sidebar élargie pour afficher photo + infos
+        self.sidebar_frame = ctk.CTkFrame(self, width=340, corner_radius=0, fg_color="#3b8ed4")
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        self.sidebar_frame.grid_rowconfigure(8, weight=1)
 
         ctk.CTkLabel(
             self.sidebar_frame, 
@@ -112,6 +115,49 @@ class PageInfoArticle(ctk.CTkFrame):
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"), 
             text_color="white"
         ).grid(row=0, column=0, padx=20, pady=(20, 10))
+
+        # ── Bloc photo + infos ───────────────────────────────────────────────
+        self._sidebar_photo_ref = None
+        self._lbl_article_info = {}
+
+        info_card = ctk.CTkFrame(self.sidebar_frame, fg_color="#2f7fbe", corner_radius=10)
+        info_card.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
+        info_card.grid_columnconfigure(0, weight=1)
+
+        photo_box = ctk.CTkFrame(info_card, fg_color="#e9f2fb", corner_radius=10, height=170)
+        photo_box.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 8))
+        photo_box.grid_propagate(False)
+        self._sidebar_photo_box = photo_box
+
+        self._sidebar_photo_label = tk.Label(photo_box, text="Chargement…", bg="#e9f2fb", fg="#1f3a57")
+        self._sidebar_photo_label.place(relx=0.5, rely=0.5, anchor="center")
+
+        details_frame = ctk.CTkFrame(info_card, fg_color="transparent")
+        details_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        details_frame.grid_columnconfigure(1, weight=1)
+
+        def _add_row(r, title):
+            ctk.CTkLabel(
+                details_frame, text=f"{title} :",
+                font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                text_color="#eaf4ff"
+            ).grid(row=r, column=0, sticky="w", padx=(0, 6), pady=2)
+            lbl = ctk.CTkLabel(
+                details_frame, text="—",
+                font=ctk.CTkFont(family="Segoe UI", size=12),
+                text_color="white",
+                wraplength=220, justify="left"
+            )
+            lbl.grid(row=r, column=1, sticky="w", pady=2)
+            return lbl
+
+        self._lbl_article_info["id"] = _add_row(0, "ID")
+        self._lbl_article_info["code"] = _add_row(1, "Code")
+        self._lbl_article_info["designation"] = _add_row(2, "Désignation")
+        self._lbl_article_info["categorie"] = _add_row(3, "Catégorie")
+
+        # Charger les infos article dès l'init si on a un id
+        self.after(100, self._refresh_sidebar_article_details)
 
         self.update_vars = {
             "Unite": tk.StringVar(value="On"),
@@ -151,7 +197,148 @@ class PageInfoArticle(ctk.CTkFrame):
             **checkbox_config
         )
         self.checkbox_fournisseur.grid(row=2, column=0, padx=15, pady=5, sticky="w")
+        # Demandé: cacher totalement les cases à cocher
+        self.checkbox_unite.grid_remove()
         self.checkbox_fournisseur.grid_remove()
+
+    def _get_photos_folder(self):
+        """
+        Même logique que la liste article:
+        - si serveur distant → \\IP\\photos
+        - sinon → <cwd>/photos (fallback)
+        - possibilité de surcharger via config.json (photos_path / photo_path / photos.path)
+        """
+        try:
+            with open(get_config_path('config.json')) as f:
+                config = json.load(f)
+            configured_path = (
+                config.get("photos_path")
+                or config.get("photo_path")
+                or config.get("photos", {}).get("path")
+            )
+            if configured_path:
+                return configured_path
+
+            server_cfg = config.get("server", {})
+            server_ip = (
+                server_cfg.get("ip")
+                or config.get("server_ip")
+                or config.get("ip_server")
+                or config.get("database", {}).get("host")
+                or "localhost"
+            )
+        except Exception:
+            server_ip = "localhost"
+
+        if str(server_ip).lower() in ("localhost", "127.0.0.1"):
+            return os.path.join(os.getcwd(), "photos")
+        return rf"\\{server_ip}\photos"
+
+    def _normalize_article_id(self, article_id):
+        if article_id is None:
+            return ""
+        s = str(article_id).strip()
+        if not s:
+            return ""
+        if s.endswith(".0"):
+            s = s[:-2]
+        return s
+
+    def _find_photo_path(self, idarticle):
+        article_id = self._normalize_article_id(idarticle)
+        if not article_id:
+            return None
+        photo_dir = self._get_photos_folder()
+        for ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp"):
+            candidate = os.path.join(photo_dir, f"{article_id}{ext}")
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def _refresh_sidebar_article_details(self):
+        """Met à jour photo + infos dans la sidebar gauche."""
+        if not self.initial_idarticle:
+            return
+        article_id = self._normalize_article_id(self.initial_idarticle)
+        if not article_id:
+            return
+
+        # 1) Infos texte (DB)
+        code = designation = categorie = "—"
+        try:
+            conn = None
+            if self.db_conn:
+                conn = self.db_conn
+            else:
+                with open(get_config_path('config.json')) as f:
+                    config = json.load(f)
+                    db_config = config['database']
+                conn = psycopg2.connect(
+                    host=db_config['host'],
+                    user=db_config['user'],
+                    password=db_config['password'],
+                    database=db_config['database'],
+                    port=db_config['port']
+                )
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT a.idarticle, a.designation, COALESCE(c.designationcat,'')
+                FROM tb_article a
+                LEFT JOIN tb_categoriearticle c ON a.idca = c.idca
+                WHERE a.idarticle = %s
+                LIMIT 1
+            """, (article_id,))
+            row = cur.fetchone()
+            if row:
+                designation = row[1] or "—"
+                categorie = row[2] or "—"
+            # code article (prendre le 1er code unité)
+            cur.execute("""
+                SELECT codearticle
+                FROM tb_unite
+                WHERE idarticle = %s
+                ORDER BY codearticle
+                LIMIT 1
+            """, (article_id,))
+            r2 = cur.fetchone()
+            if r2 and r2[0]:
+                code = r2[0]
+            try:
+                cur.close()
+            except Exception:
+                pass
+            if conn is not None and conn is not self.db_conn:
+                conn.close()
+        except Exception:
+            pass
+
+        self._lbl_article_info["id"].configure(text=article_id)
+        self._lbl_article_info["code"].configure(text=code)
+        self._lbl_article_info["designation"].configure(text=designation)
+        self._lbl_article_info["categorie"].configure(text=categorie)
+
+        # 2) Photo (dossier photos)
+        photo_path = self._find_photo_path(article_id)
+
+        if not photo_path:
+            try:
+                self._sidebar_photo_label.configure(image="")
+            except Exception:
+                pass
+            self._sidebar_photo_label.configure(text="Aucune photo")
+            return
+
+        try:
+            img = Image.open(photo_path).convert("RGB")
+            img.thumbnail((260, 160), Image.Resampling.LANCZOS)
+            self._sidebar_photo_ref = ImageTk.PhotoImage(img)
+            self._sidebar_photo_label.configure(image=self._sidebar_photo_ref, text="")
+        except Exception:
+            try:
+                self._sidebar_photo_label.configure(image="")
+            except Exception:
+                pass
+            self._sidebar_photo_label.configure(text="Photo indisponible")
 
     def create_main_container(self):
         self.right_panel = ctk.CTkFrame(self, fg_color="transparent")
