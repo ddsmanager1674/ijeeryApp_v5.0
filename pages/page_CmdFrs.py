@@ -278,6 +278,11 @@ class PageCommandeFrs(ctk.CTkFrame):
             command=self.nouvelle_commande, width=100, height=28
         ).pack(side="right", padx=0, pady=7)
 
+        styled.button_info(
+            header, text="Stock par frs", icon="📦",
+            command=self.ouvrir_stock_par_frs, width=140, height=28
+        ).pack(side="right", padx=8, pady=7)
+
         # ── Corps principal (pas de scrollbar) ───────────────────────────────
         body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE)
         body.pack(fill="both", expand=True, padx=8, pady=6)
@@ -297,6 +302,30 @@ class PageCommandeFrs(ctk.CTkFrame):
     # ─────────────────────────────────────────────────────────────────────────
     # Section 1 — Infos générales  (ref + fournisseur inline)
     # ─────────────────────────────────────────────────────────────────────────
+    def ouvrir_stock_par_frs(self):
+        """
+        Ouvre l'écran "Stock par Fournisseur" (PageStockParFrs).
+        Conçu pour être accessible depuis le menu "Bon de commande".
+        """
+        fen = ctk.CTkToplevel(self)
+        fen.title("Stock par Fournisseur")
+        fen.geometry("1200x720")
+        fen.resizable(True, True)
+        fen.grab_set()
+
+        try:
+            Theme.apply_toplevel(fen)
+        except Exception:
+            pass
+
+        try:
+            from pages.page_stockParFrs import PageStockParFrs
+        except ImportError:
+            from page_stockParFrs import PageStockParFrs
+
+        page = PageStockParFrs(fen, iduser=self.iduser)
+        page.pack(fill="both", expand=True)
+
     def _build_section_infos(self, parent):
         card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
                             corner_radius=8, border_width=1, border_color=Colors.BORDER)

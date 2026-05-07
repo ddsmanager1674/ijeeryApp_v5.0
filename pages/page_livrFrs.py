@@ -154,6 +154,11 @@ class PageBonReception(ctk.CTkFrame):
                                 command=self.nouveau_bon_reception, width=100, height=28
                                 ).pack(side="right", padx=8, pady=7)
 
+        styled.button_info(
+            header, text="Réception directe", icon="📥",
+            command=self.ouvrir_reception_directe, width=160, height=28
+        ).pack(side="right", padx=8, pady=7)
+
         # ── Corps ─────────────────────────────────────────────────────────────
         body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE)
         body.pack(fill="both", expand=True, padx=8, pady=6)
@@ -164,6 +169,30 @@ class PageBonReception(ctk.CTkFrame):
     # ─────────────────────────────────────────────────────────────────────────
     # Section 1 — Informations (tout inline, compact)
     # ─────────────────────────────────────────────────────────────────────────
+    def ouvrir_reception_directe(self):
+        """
+        Ouvre l'écran "Réception directe" (PageReceptionDirecte).
+        Conçu pour être accessible depuis le menu "Bon de réception".
+        """
+        fen = ctk.CTkToplevel(self)
+        fen.title("Réception directe")
+        fen.geometry("1200x720")
+        fen.resizable(True, True)
+        fen.grab_set()
+
+        try:
+            Theme.apply_toplevel(fen)
+        except Exception:
+            pass
+
+        try:
+            from pages.page_receptiondirect import PageReceptionDirecte
+        except ImportError:
+            from page_receptiondirect import PageReceptionDirecte
+
+        page = PageReceptionDirecte(fen, iduser=self.iduser)
+        page.pack(fill="both", expand=True)
+
     def _build_section_infos(self, parent):
         card = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD,
                             corner_radius=8, border_width=1, border_color=Colors.BORDER)
