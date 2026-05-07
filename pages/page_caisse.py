@@ -8,7 +8,6 @@ from datetime import datetime
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 # Imports ReportLab pour le PDF
 from reportlab.lib import colors
@@ -81,8 +80,11 @@ def _f(size=10, weight="normal"):
 
 class PageCaisse(ctk.CTkFrame):
 
-    def __init__(self, master):
+    def __init__(self, master, username=None):
         super().__init__(master, fg_color=C.BG_PAGE)
+
+        # ── Utilisateur connecté (transmis depuis le login) ───────────────────
+        self.current_username = username or "Système"
 
         # ── État interne (identique à l'original) ─────────────────────────────
         self.modes_paiement_dict = {"Tous": None}
@@ -129,9 +131,6 @@ class PageCaisse(ctk.CTkFrame):
         self._build_treeview()
         self._build_table_actions()
         self._build_footer()
-
-        self.session_data = getattr(master, "session_data", None) or {}
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
 
         self.charger_modes_paiement()
         self.appliquer_filtres()
@@ -878,16 +877,7 @@ class PageCaisse(ctk.CTkFrame):
             from page_decaissement import PageDecaissement
         except ImportError:
             from pages.page_decaissement import PageDecaissement
-        try:
-            self._logger.log(
-                action="Ouverture décaissement",
-                element="Décaissement",
-                details="Ouverture fenêtre décaissement depuis caisse",
-                value="open",
-            )
-        except Exception:
-            pass
-        win = PageDecaissement(self.master, username="VotreUsername")
+        win = PageDecaissement(self.master, username=self.current_username)
         self.master.wait_window(win)
         self.appliquer_filtres()
 
