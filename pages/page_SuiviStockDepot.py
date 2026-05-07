@@ -205,15 +205,5 @@ class PageSuiviStockDepot(ctk.CTkFrame):
                 ])
                 df.to_excel(filepath, index=False)
                 messagebox.showinfo("Succès", "Fichier Excel généré.")
-                try:
-                    from log_utils import AppLogger
-                    AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
-                        action="Export Excel",
-                        element="Suivi Stock Dépôt",
-                        details=f"export suivi stock dépôt, lignes={len(df)}, fichier={os.path.basename(filepath)}",
-                        value=filepath,
-                    )
-                except Exception:
-                    pass
             except Exception as e:
                 messagebox.showerror("Erreur", f"Export impossible : {e}")

@@ -35,7 +35,7 @@ def get_resource_path(relative_path):
         base_path = sys._MEIPASS
     except AttributeError:
         # Si c'est du Python direct
-        base_path = os.path.dirname(os.path.abspath(__file__))
+        base_path = os.path.abspath(".")
     
     return os.path.join(base_path, relative_path)
 

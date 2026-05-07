@@ -8,7 +8,6 @@ import sys
 from datetime import datetime
 from tkinter import filedialog
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -119,14 +118,13 @@ class PageActivitePrix(ctk.CTkFrame):
 
         self.app_root = app_root or master
         self.db_conn = db_manager
-        self.session_data = session_data or getattr(master, "session_data", None) or {}
+        self.session_data = session_data
         self.db_config = db_config
 
         # Plus besoin de geometry() car c'est un frame
         # self.title() et autres méthodes de fenêtre ne sont plus disponibles
 
         self.db_params = self.db_conn.db_params
-        self._logger = AppLogger(session_data=self.session_data)
 
         self.activites_data = {}
         self.series_data = {}
@@ -563,17 +561,6 @@ class PageActivitePrix(ctk.CTkFrame):
                 message = "Prix d'activité enregistré avec succès !"
             
             conn.commit()
-            try:
-                act_txt = selected_activite_designation
-                ser_txt = selected_serie_designation
-                self._logger.log(
-                    action="Enregistrement prix activité",
-                    element=f"{act_txt} / {ser_txt}",
-                    details=f"Prix activité enregistré/mis à jour (montant={montant}, annee_id={id_annee_scolaire})",
-                    value=str(montant),
-                )
-            except Exception:
-                pass
 
             tkinter.messagebox.showinfo("Succès", message)
             self.montant_entry.delete(0, ctk.END)
@@ -692,15 +679,6 @@ class PageActivitePrix(ctk.CTkFrame):
                 sheet.append(values)
             
             workbook.save(file_path)
-            try:
-                self._logger.log(
-                    action="Export Excel",
-                    element="Activité Prix (liste étudiants)",
-                    details=f"Export Excel étudiants (lignes={len(self.lower_treeview.get_children())})",
-                    value=os.path.basename(file_path),
-                )
-            except Exception:
-                pass
             tkinter.messagebox.showinfo("Export Réussi", f"Les données ont été exportées avec succès vers :\n{file_path}")
 
         except Exception as e:

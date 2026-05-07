@@ -1,0 +1,11 @@
+REFACTORING: TabView for PageVenteParMsin (IN PROGRESS - 2026-02-06)
+- Changed PageVenteParMsin from CTkToplevel to CTkFrame for tab support
+- Created VenteTabManager class to manage multiple sales windows in tabs
+- Refactored open_vente_window() to use VenteTabManager instead of multiple windows
+- Max 10 tabs with + button; previous UI defaults maintained
+- Files modified: app_main.py, pages/page_venteParMsin.py
+- Backward compatible: existing frame embeds in app_main and page_Facturation still work
+---
+
+8c34516 | Fix: sync stock display in vente search (exclude EN_ATTENTE) 
+1149364 | Sort: order Stock table by designation ASC then codeArticle ASC

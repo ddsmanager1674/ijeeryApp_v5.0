@@ -15,8 +15,7 @@ from tkinter import ttk, messagebox
 import psycopg2
 import json
 import threading
-from resource_utils import get_config_path, get_session_path, safe_file_read
-from log_utils import AppLogger
+from resource_utils import get_session_path, safe_file_read
 
 # page_prixSaisie doit rester optionnel
 try:
@@ -89,8 +88,6 @@ class PagePrixListe(ctk.CTkFrame):
             session_data=session_data,
             id_user_connecte=id_user_connecte,
         )
-        self.session_data = session_data or getattr(parent, "session_data", None) or {"user_id": self.iduser}
-        self._logger = AppLogger(conn=db_conn, session_data=self.session_data, fallback_user_id=self.iduser)
 
         # Protection contre les double-clics
         self.is_opening_window = False
@@ -142,7 +139,7 @@ class PagePrixListe(ctk.CTkFrame):
 
     def _connect(self):
         try:
-            with open(get_config_path('config.json'), 'r', encoding='utf-8') as f:
+            with open('config.json', 'r', encoding='utf-8') as f:
                 cfg = json.load(f).get('database', {})
             return psycopg2.connect(
                 host=cfg.get('host'), user=cfg.get('user'),
@@ -452,15 +449,6 @@ class PagePrixListe(ctk.CTkFrame):
             return
 
         try:
-            try:
-                self._logger.log(
-                    action="Ouverture saisie prix",
-                    element=str(code_article),
-                    details=f"Ouverture fenêtre saisie prix (idunite={idunite})",
-                    value=f"idunite={idunite}",
-                )
-            except Exception:
-                pass
             saisie_win = ctk.CTkToplevel(self)
             saisie_win.title(f"Saisie Prix — {code_article}")
             saisie_win.geometry("900x700")

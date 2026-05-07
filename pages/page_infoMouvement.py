@@ -9,9 +9,6 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts
-from settings_utils import open_file_if_enabled
-from log_utils import AppLogger
-from stock_snapshot import StockSnapshot, format_nombre_auto
 
 # Imports pour génération PDF
 from reportlab.lib.pagesizes import A5, landscape
@@ -26,7 +23,6 @@ from reportlab.pdfgen import canvas
 # Importation des pages existantes
 from pages.page_CmdFrs import PageCommandeFrs
 from pages.page_livrFrs import PageBonReception
-from pages.page_entree import PageEntree
 from pages.page_transfert import PageTransfert
 from pages.page_sortie import PageSortie
 from pages.page_SuiviCommande import PageSuiviCommande
@@ -105,8 +101,6 @@ class PageChangementArticle(ctk.CTkFrame):
         super().__init__(master, fg_color=Colors.BG_PAGE, **kwargs)
 
         self.iduser = iduser
-        self.session_data = getattr(master, "session_data", None) or {"user_id": self.iduser}
-        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
         self.magasins: Dict[str, int] = {}
         self.idchg_charge              = None
         self.mode_modification         = False
@@ -748,7 +742,7 @@ class PageChangementArticle(ctk.CTkFrame):
 
     def open_recherche_article(self, type_mouvement: str):
         """
-        Fenêtre modale de recherche d'article avec stock via StockManager (StockSnapshot).
+        Fenêtre modale de recherche d'article avec stock CTE consolidé.
         *** LOGIQUE MÉTIER — NE PAS MODIFIER ***
         """
         fen = ctk.CTkToplevel(self)
@@ -764,6 +758,7 @@ class PageChangementArticle(ctk.CTkFrame):
             font=Fonts.heading(16),
         ).pack(pady=(0, 10))
 
+        # Barre de recherche
         search_frame = ctk.CTkFrame(main_frame)
         search_frame.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(search_frame, text="🔍 Rechercher :").pack(side="left", padx=5)
@@ -772,10 +767,22 @@ class PageChangementArticle(ctk.CTkFrame):
         )
         entry_search.pack(side="left", padx=5, fill="x", expand=True)
 
+        # Treeview
         tree_frame = ctk.CTkFrame(main_frame)
         tree_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        self._apply_treeview_style("ArtChg")
+        style = ttk.Style()
+        style.configure(
+            "ArtChg.Treeview",
+            rowheight=22, font=('Segoe UI', 8),
+            background=Colors.BG_CARD, foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD, borderwidth=0,
+        )
+        style.configure(
+            "ArtChg.Treeview.Heading",
+            background=Colors.BG_HEADER, foreground=Colors.TEXT_ON_DARK,
+            font=('Segoe UI', 8, 'bold'), relief="flat",
+        )
 
         colonnes = ("ID_Article", "ID_Unite", "Code", "Désignation", "Unité", "Stock", "Prix U.")
         tree = ttk.Treeview(
@@ -794,10 +801,10 @@ class PageChangementArticle(ctk.CTkFrame):
             "ID_Article":  (0,   False, "center"),
             "ID_Unite":    (0,   False, "center"),
             "Code":        (120, True,  "w"),
-            "Désignation": (320, True,  "w"),
-            "Unité":       (90,  True,  "w"),
-            "Stock":       (120, True,  "e"),
-            "Prix U.":     (110, True,  "e"),
+            "Désignation": (300, True,  "w"),
+            "Unité":       (80,  True,  "w"),
+            "Stock":       (100, True,  "e"),
+            "Prix U.":     (100, True,  "e"),
         }
         for col, (w, stretch, anchor) in col_cfg.items():
             lbl = (f"Magasin {nom_mag}" if col == "Stock" and nom_mag else col)
@@ -810,36 +817,82 @@ class PageChangementArticle(ctk.CTkFrame):
         tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        label_count = ctk.CTkLabel(main_frame, text="")
-        label_count.pack(pady=5)
-
-        QUERY_ARTICLES = """
-            SELECT
-                u.idarticle,
-                u.idunite,
-                u.codearticle,
-                a.designation,
-                u.designationunite,
-                COALESCE(p.prix, 0) AS prix_unitaire
-            FROM tb_unite u
-            INNER JOIN tb_article a ON a.idarticle = u.idarticle
-            LEFT JOIN (
-                SELECT idarticle, idunite, prix
-                FROM (
-                    SELECT idarticle, idunite, prix,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY idarticle, idunite
-                               ORDER BY id DESC
-                           ) AS rn
-                    FROM tb_prix
-                    WHERE deleted = 0
-                ) x
-                WHERE x.rn = 1
-            ) p ON p.idarticle = u.idarticle AND p.idunite = u.idunite
-            WHERE a.deleted = 0
-              AND COALESCE(u.deleted, 0) = 0
-              AND (u.codearticle ILIKE %s OR a.designation ILIKE %s)
-            ORDER BY a.designation ASC, u.codearticle ASC, u.idunite ASC
+        # ── Requête CTE consolidée (identique aux autres pages) ───────────────
+        QUERY = """
+        WITH unite_hierarchie AS (
+            SELECT idarticle, idunite, niveau, qtunite, designationunite
+            FROM tb_unite WHERE deleted=0
+        ),
+        unite_coeff AS (
+            SELECT idarticle, idunite, niveau, qtunite, designationunite,
+                exp(sum(ln(NULLIF(CASE WHEN qtunite>0 THEN qtunite ELSE 1 END,0)))
+                    OVER (PARTITION BY idarticle ORDER BY niveau
+                          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+                ) AS coeff_hierarchique
+            FROM unite_hierarchie
+        ),
+        base_unite_par_article AS (
+            SELECT DISTINCT ON (idarticle) idarticle, idunite
+            FROM tb_unite WHERE deleted=0
+            ORDER BY idarticle, qtunite ASC, idunite ASC
+        ),
+        rec  AS (SELECT lf.idarticle,lf.idunite,lf.idmag,SUM(lf.qtlivrefrs) AS q FROM tb_livraisonfrs lf WHERE lf.deleted=0 GROUP BY lf.idarticle,lf.idunite,lf.idmag),
+        ven  AS (SELECT vd.idarticle,vd.idunite,v.idmag,SUM(vd.qtvente) AS q FROM tb_ventedetail vd INNER JOIN tb_vente v ON vd.idvente=v.id AND v.deleted=0 AND v.statut='VALIDEE' WHERE vd.deleted=0 GROUP BY vd.idarticle,vd.idunite,v.idmag),
+        tin  AS (SELECT t.idarticle,t.idunite,t.idmagentree AS idmag,SUM(t.qttransfert) AS q FROM tb_transfertdetail t WHERE t.deleted=0 GROUP BY t.idarticle,t.idunite,t.idmagentree),
+        tout AS (SELECT t.idarticle,t.idunite,t.idmagsortie AS idmag,SUM(t.qttransfert) AS q FROM tb_transfertdetail t WHERE t.deleted=0 GROUP BY t.idarticle,t.idunite,t.idmagsortie),
+        sor  AS (SELECT sd.idarticle,sd.idunite,sd.idmag,SUM(sd.qtsortie) AS q FROM tb_sortiedetail sd GROUP BY sd.idarticle,sd.idunite,sd.idmag),
+        inv  AS (SELECT bu.idarticle,bu.idunite,i.idmag,SUM(i.qtinventaire) AS q FROM tb_inventaire i INNER JOIN tb_unite u ON i.codearticle=u.codearticle INNER JOIN base_unite_par_article bu ON bu.idarticle=u.idarticle AND bu.idunite=u.idunite GROUP BY bu.idarticle,bu.idunite,i.idmag),
+        avo  AS (SELECT ad.idarticle,ad.idunite,ad.idmag,SUM(ad.qtavoir) AS q FROM tb_avoir a INNER JOIN tb_avoirdetail ad ON a.id=ad.idavoir WHERE a.deleted=0 AND ad.deleted=0 GROUP BY ad.idarticle,ad.idunite,ad.idmag),
+        conso AS (SELECT cd.idarticle,cd.idunite,cd.idmag,SUM(cd.qtconsomme) AS q FROM tb_consommationinterne_details cd GROUP BY cd.idarticle,cd.idunite,cd.idmag),
+        ech_in  AS (SELECT dce.idarticle,dce.idunite,dce.idmagasin AS idmag,SUM(dce.quantite_entree) AS q FROM tb_detailchange_entree dce GROUP BY dce.idarticle,dce.idunite,dce.idmagasin),
+        ech_out AS (SELECT dcs.idarticle,dcs.idunite,dcs.idmagasin AS idmag,SUM(dcs.quantite_sortie) AS q FROM tb_detailchange_sortie dcs GROUP BY dcs.idarticle,dcs.idunite,dcs.idmagasin),
+        mv AS (
+            SELECT idarticle,idunite,idmag,q,'rec'   AS t FROM rec
+            UNION ALL SELECT idarticle,idunite,idmag,q,'ven'   FROM ven
+            UNION ALL SELECT idarticle,idunite,idmag,q,'tin'   FROM tin
+            UNION ALL SELECT idarticle,idunite,idmag,q,'tout'  FROM tout
+            UNION ALL SELECT idarticle,idunite,idmag,q,'sor'   FROM sor
+            UNION ALL SELECT idarticle,idunite,idmag,q,'inv'   FROM inv
+            UNION ALL SELECT idarticle,idunite,idmag,q,'avo'   FROM avo
+            UNION ALL SELECT idarticle,idunite,idmag,q,'conso' FROM conso
+            UNION ALL SELECT idarticle,idunite,idmag,q,'ei'    FROM ech_in
+            UNION ALL SELECT idarticle,idunite,idmag,q,'eo'    FROM ech_out
+        ),
+        solde AS (
+            SELECT mv.idarticle, mv.idmag,
+                SUM(CASE mv.t
+                    WHEN 'rec'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'tin'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'inv'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'avo'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'ei'    THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'ven'   THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'sor'   THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'tout'  THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'conso' THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'eo'    THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    ELSE 0
+                END) AS solde_base
+            FROM mv LEFT JOIN unite_coeff uc ON uc.idarticle=mv.idarticle AND uc.idunite=mv.idunite
+            GROUP BY mv.idarticle, mv.idmag
+        ),
+        dernier_prix AS (
+            SELECT idarticle, idunite, prix,
+                   ROW_NUMBER() OVER (PARTITION BY idarticle, idunite ORDER BY id DESC) AS rn
+            FROM tb_prix
+        )
+        SELECT u.idarticle, u.idunite, u.codearticle, a.designation,
+               uc.designationunite,
+               GREATEST(COALESCE(s.solde_base,0) / NULLIF(COALESCE(uc.coeff_hierarchique,1),0), 0) AS stock_total,
+               COALESCE(p.prix,0) AS prix_unitaire
+        FROM tb_article a
+        INNER JOIN tb_unite u          ON a.idarticle=u.idarticle
+        LEFT JOIN  unite_coeff uc      ON uc.idarticle=u.idarticle AND uc.idunite=u.idunite
+        LEFT JOIN  solde s             ON s.idarticle=u.idarticle AND s.idmag=%s
+        LEFT JOIN  dernier_prix p      ON a.idarticle=p.idarticle AND u.idunite=p.idunite AND p.rn=1
+        WHERE a.deleted=0
+          AND (u.codearticle ILIKE %s OR a.designation ILIKE %s)
+        ORDER BY a.designation ASC, u.codearticle ASC, u.idunite ASC
         """
 
         def charger_articles(filtre=""):
@@ -849,9 +902,9 @@ class PageChangementArticle(ctk.CTkFrame):
             if not conn:
                 return
             try:
-                cur = conn.cursor()
-                filtre_like = f"%{filtre}%"
-                designationmag = (
+                cur             = conn.cursor()
+                filtre_like     = f"%{filtre}%"
+                designationmag  = (
                     self.combo_mag_sortie.get() if type_mouvement == "sortie"
                     else self.combo_mag_entree.get() or ""
                 ).strip()
@@ -859,31 +912,16 @@ class PageChangementArticle(ctk.CTkFrame):
                 tree.heading("Stock", text=f"Magasin {designationmag}" if designationmag else "Magasin")
 
                 if idmag_actif is None:
-                    label_count.configure(text="0 article(s)")
                     return
 
-                cache = getattr(self, "_stock_snapshot_cache", None)
-                if cache is None:
-                    cache = {}
-                    setattr(self, "_stock_snapshot_cache", cache)
-
-                idmag_int = int(idmag_actif)
-                snapshot = cache.get(idmag_int)
-                if snapshot is None:
-                    snapshot = StockSnapshot.build(idmag_int)
-                    cache[idmag_int] = snapshot
-
-                cur.execute(QUERY_ARTICLES, (filtre_like, filtre_like))
-                rows = cur.fetchall()
-                for idx, row in enumerate(rows):
-                    stock_total = snapshot.stock_unite(row[0], row[1])
+                cur.execute(QUERY, (idmag_actif, filtre_like, filtre_like))
+                for idx, row in enumerate(cur.fetchall()):
                     tree.insert('', 'end', values=(
                         row[0], row[1],
                         row[2] or "", row[3] or "", row[4] or "",
-                        format_nombre_auto(stock_total),
-                        format_nombre_auto(row[5]),
+                        self.formater_nombre(row[5]),
+                        self.formater_nombre(row[6]),
                     ), tags=("even" if idx % 2 == 0 else "odd",))
-                label_count.configure(text=f"{len(rows)} article(s)")
 
             except Exception as e:
                 messagebox.showerror("Erreur", f"Chargement articles : {e}")
@@ -1148,15 +1186,6 @@ class PageChangementArticle(ctk.CTkFrame):
                 )
 
             conn.commit()
-            try:
-                self._logger.log(
-                    action="Création changement stock",
-                    element=str(refchg),
-                    details=f"Changement enregistré ref={refchg} (sorties={len(self.articles_sortie)}, entrées={len(self.articles_entree)})",
-                    value=f"idchg={idchg}",
-                )
-            except Exception:
-                pass
 
             messagebox.showinfo(
                 "Succès",
@@ -1474,7 +1503,7 @@ class PageChangementArticle(ctk.CTkFrame):
             doc.build(elements)
             print(f"✅ PDF généré : {output_path}")
             if sys.platform == 'win32':
-                open_file_if_enabled(output_path, operation="open", setting_key="Changement_OpenA5", setting_default=1)
+                os.startfile(output_path)
             return output_path
         except Exception as e:
             print(f"❌ Erreur PDF : {e}")
@@ -1589,7 +1618,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         """Créer le menu latéral"""
         self.sidebar = ctk.CTkFrame(self, width=150, corner_radius=0, fg_color="#3b82f6")
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(7, weight=1)
+        self.sidebar.grid_rowconfigure(6, weight=1)
         self.sidebar.grid_propagate(False)  # Empêcher le redimensionnement
         
         # Titre du menu
@@ -1606,7 +1635,6 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         menus = [
             ("🧾 Bon de commande", "PageCommandeFrs"),
             ("📥 Bon de réception", "PageBonReception"),
-            ("📥 Entrée", "PageEntree"),
             ("🔄 Transferts", "PageTransfert"),
             ("📤 Sortie/Consommation", "PageSortie"),
             ("🔁 Changements", "PageChangementArticle"),
@@ -1670,7 +1698,6 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         page_mapping = {
             "🧾 Bon de commande": PageCommandeFrs,
             "📥 Bon de réception": PageBonReception,
-            "📥 Entrée": PageEntree,
             "🔄 Transferts": PageTransfert,
             "📤 Sortie/Consommation": PageSortie,
             "🔁 Changements": PageChangementArticle,
@@ -1691,8 +1718,6 @@ class PageInfoMouvementStock(ctk.CTkFrame):
                 if page_class == PageCommandeFrs:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 elif page_class == PageBonReception:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageEntree:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 elif page_class == PageTransfert:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)

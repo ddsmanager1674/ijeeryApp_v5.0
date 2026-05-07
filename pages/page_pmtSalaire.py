@@ -12,8 +12,6 @@ import json
 import sys
 from resource_utils import get_config_path, safe_file_read
 
-from app_theme import Colors, Fonts, styled, Layout
-
 
 # Configuration du chemin pour les imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -57,61 +55,43 @@ conn = db_manager.get_connection()
 
 class PageValidationSalaire(ctk.CTkFrame):
     def __init__(self, parent):
-        # [UI] Paiement Salaire — alignement sur app_theme (header/cards/boutons)
-        super().__init__(parent, fg_color=Colors.BG_PAGE)
+        super().__init__(parent)
         self.conn = conn
         self.cursor = conn.cursor() if conn else None
 
-        self.grid_rowconfigure(3, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure((0, 1, 2, 3, 4, 5), weight=1) 
 
-        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        left = styled.frame(header)
-        left.pack(side="left", padx=14)
-        ctk.CTkLabel(left, text="💳", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
-        inner = styled.frame(left)
-        inner.pack(side="left")
-        ctk.CTkLabel(inner, text="Paiement Salaire", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
-        ctk.CTkLabel(inner, text="État combiné, exports Excel / PDF", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
+        # --- Interface ---
+        self.label_mois = ctk.CTkLabel(self, text="Choisir le mois :")
+        self.label_mois.grid(row=0, column=0, padx=10, pady=10, sticky="w")
 
-        toolbar = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        toolbar.grid(row=1, column=0, sticky="ew", padx=10, pady=(10, 6))
-        toolbar.grid_columnconfigure(1, weight=1)
-        for c in range(2, 6):
-            toolbar.grid_columnconfigure(c, weight=1)
-
-        self.label_mois = ctk.CTkLabel(toolbar, text="Mois :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY)
-        self.label_mois.grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
-
-        mois_vals = [
+        self.mois_combobox = ctk.CTkComboBox(self, values=[
             "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
-            "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
-        ]
-        self.mois_combobox = styled.combobox(toolbar, values=mois_vals, height=32, width=160)
-        self.mois_combobox.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="ew")
-        self.mois_combobox.set(datetime.now().strftime("%B"))
+            "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"])
+        self.mois_combobox.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        self.mois_combobox.set(datetime.now().strftime("%B")) 
 
-        styled.button_success(toolbar, text="Afficher", icon="🔍", width=110, height=32, command=self.afficher_donnees_combinees).grid(row=0, column=2, padx=4, pady=10, sticky="ew")
-        styled.button_premium(toolbar, text="Excel", icon="📊", width=100, height=32, command=self.exporter_excel).grid(row=0, column=3, padx=4, pady=10, sticky="ew")
-        styled.button_premium(toolbar, text="PDF", icon="📄", width=100, height=32, command=self.exporter_pdf_global).grid(row=0, column=4, padx=4, pady=10, sticky="ew")
-        styled.button_info(toolbar, text="Fiches", icon="📋", width=110, height=32, command=self.exporter_pdf_fiches_groupees).grid(row=0, column=5, padx=(4, 12), pady=10, sticky="ew")
+        self.btn_afficher = ctk.CTkButton(self, text="Afficher", fg_color="#2ecc71", command=self.afficher_donnees_combinees)
+        self.btn_afficher.grid(row=0, column=2, padx=10, sticky="ew")
+
+        self.btn_excel = ctk.CTkButton(self, text="Etat Excel", command=self.exporter_excel)
+        self.btn_excel.grid(row=0, column=3, padx=10, sticky="ew")
+
+        self.btn_pdf_global = ctk.CTkButton(self, text="Etat PDF", command=self.exporter_pdf_global)
+        self.btn_pdf_global.grid(row=0, column=4, padx=10, sticky="ew")
+
+        self.btn_pdf_individual_merged = ctk.CTkButton(self, text="Fiches de Paie", command=self.exporter_pdf_fiches_groupees)
+        self.btn_pdf_individual_merged.grid(row=0, column=5, padx=10, sticky="ew")
 
         self.headers = ["Nom", "Prénom", "SB", "Taux Hor.", "Tot. Heure", "Mt. Heure", "Salaire Brut", "Avance 15e", "Avance Spéc.", "Net à Payer"]
-        self.current_export_data = []
+        self.current_export_data = [] 
         self.info_ecole = self.recuperer_info_societe()
 
-        list_card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        list_card.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 6))
-        list_card.grid_rowconfigure(0, weight=1)
-        list_card.grid_columnconfigure(0, weight=1)
-
-        self.scroll_frame = ctk.CTkScrollableFrame(list_card, fg_color="transparent")
-        self.scroll_frame.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
-
-        self.label_count = ctk.CTkLabel(self, text="Enregistrements: 0", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY)
-        self.label_count.grid(row=4, column=0, sticky="w", padx=14, pady=(0, 10))
+        self.scroll_frame = ctk.CTkScrollableFrame(self)
+        self.scroll_frame.grid(row=1, column=0, columnspan=6, padx=10, pady=10, sticky="nsew") 
+        self.label_count = ctk.CTkLabel(self, text="Enregistrements: 0")
+        self.label_count.grid(row=2, column=0, columnspan=6, sticky="w", padx=10)
 
     def _to_decimal(self, value):
         try: return Decimal(str(value)) if value else Decimal(0)
@@ -179,15 +159,9 @@ class PageValidationSalaire(ctk.CTkFrame):
                     float(data_sb[idp]['avs']), float(net)
                 ))
                 
-                # [UI] Ligne résultat lisible (card légère)
-                f = ctk.CTkFrame(self.scroll_frame, fg_color=Colors.BG_INPUT, corner_radius=8, border_width=1, border_color=Colors.BORDER)
-                f.pack(fill="x", pady=3)
-                ctk.CTkLabel(
-                    f,
-                    text=f"{data_sb[idp]['nom']} {data_sb[idp]['prenom']}  ·  Net : {net:,.0f} Ar",
-                    font=Fonts.body(12),
-                    text_color=Colors.TEXT_PRIMARY,
-                ).pack(side="left", padx=12, pady=8)
+                f = ctk.CTkFrame(self.scroll_frame)
+                f.pack(fill="x", pady=2)
+                ctk.CTkLabel(f, text=f"{data_sb[idp]['nom']} {data_sb[idp]['prenom']} | Net: {net:,.0f} Ar").pack(side="left", padx=10)
 
         self.label_count.configure(text=f"Nombre d'enregistrements: {len(self.current_export_data)}")
 
@@ -284,16 +258,6 @@ class PageValidationSalaire(ctk.CTkFrame):
         path = os.path.join(os.path.expanduser("~"), "Desktop", "Salaires.xlsx")
         df.to_excel(path, index=False)
         subprocess.Popen([path], shell=True)
-        try:
-            from log_utils import AppLogger
-            AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
-                action="Export Excel",
-                element="Paiement Salaire",
-                details=f"export salaires, lignes={len(df)}, fichier={os.path.basename(path)}",
-                value=path,
-            )
-        except Exception:
-            pass
 
 if __name__ == "__main__":
     app = ctk.CTk()

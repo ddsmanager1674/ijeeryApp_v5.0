@@ -30,7 +30,6 @@ import customtkinter as ctk
 from PIL import Image
 from tkinter import messagebox
 import psycopg2
-from log_utils import AppLogger
 
 # ── Chemins ──────────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(os.path.abspath(__file__))
@@ -177,7 +176,6 @@ MENU_STRUCTURE = [
             ("⚠️  Stock Alerte",        "Stock Alerte",          "pages.page_StockAlerte",      "PageStockAlerte",     None),
             ("🛡️  Péremption Article",  "Péremption d'article",  "pages.page_peremption",       "PageGestionPeremption", None),
             ("🚚  Stock Livraison",     "Stock Livraison",       "pages.page_StockLivraison",   "PageStockLivraison",  None),
-            ("🚚  Livraison Client",    "Livraison Client",      "pages.page_LivraisonClient",  "PageLivraisonClient", "vente"),
             ("🔄  Mouvement Article",   "Mouvement d'article",   "pages.page_articleMouvement", "PageArticleMouvement", None),
             ("📊  Mouvement Stock",     "Mouvement Stock",       "pages.page_infoMouvement",    "PageInfoMouvementStock", "iduser"),
             ("📋  Liste Mouvements",    "Liste mouvements",      "pages.page_listeMouvement",   "PageListeMouvement",  None),
@@ -185,6 +183,7 @@ MENU_STRUCTURE = [
             ("💲  Prix Article",        "Prix d'article",        "pages.page_prixListe",        "PagePrixListe",       None),
             ("📊  Prix de Revient",     "Prix de revient",       "pages.page_prixRevient",      "PagePrixRevient",     None),
             ("📈  Marge Commerciale",   "Marge Commerciale",     "pages.page_margeCommerciale", "PageStock",           None),
+            ("🚚  Livraison Client",    "Livraison Client",      "pages.page_LivraisonClient",  "PageLivraisonClient", "vente"),
         ],
     },
     # ── PERSONNEL ──────────────────────────────────────────────────────────
@@ -270,14 +269,38 @@ MENU_STRUCTURE = [
 
 def _lazy_load(module_path: str, class_name: str):
     """Importe un module et retourne la classe demandée (import différé)."""
+    import sys, importlib, importlib.util, os
+
     try:
+        # 1. Tentative d'import standard (fonctionne en dev et si frozen+compiled)
         mod = importlib.import_module(module_path)
         return getattr(mod, class_name)
-    except ImportError as e:
-        print(f"[lazy_load] Import échoué {module_path}.{class_name}: {e}")
-        return None
-    except AttributeError:
-        print(f"[lazy_load] Classe {class_name} introuvable dans {module_path}")
+    except ImportError:
+        pass
+
+    # 2. Fallback pour EXE PyInstaller : charger depuis le fichier .py dans _internal
+    try:
+        if getattr(sys, 'frozen', False):
+            base = sys._MEIPASS
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+
+        # Convertir "pages.page_ListeFacture" -> "pages/page_ListeFacture.py"
+        rel_path = module_path.replace(".", os.sep) + ".py"
+        full_path = os.path.join(base, rel_path)
+
+        if not os.path.exists(full_path):
+            print(f"[lazy_load] Fichier introuvable: {full_path}")
+            return None
+
+        spec = importlib.util.spec_from_file_location(module_path, full_path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_path] = mod
+        spec.loader.exec_module(mod)
+        return getattr(mod, class_name, None)
+
+    except Exception as e:
+        print(f"[lazy_load] Erreur chargement {module_path}.{class_name}: {e}")
         return None
 
 
@@ -560,14 +583,6 @@ class Sidebar(ctk.CTkFrame):
 
     def _is_authorized(self, cfg: dict) -> bool:
         """Retourne True si au moins un élément du groupe est autorisé."""
-        # Depuis le commit "autorisation synchronisé", certains déploiements ajoutent
-        # des entrées tb_menu "BLOC: ..." pour contrôler la visibilité des groupes.
-        # Mais d'autres bases / sessions n'ont pas ces clés : dans ce cas, il ne faut
-        # PAS masquer toute la sidebar.
-        has_bloc_auth = any(str(k).startswith("BLOC:") for k in self._authorized.keys())
-        bloc_key = self._bloc_key(cfg)
-        if has_bloc_auth and bloc_key and bloc_key not in self._authorized:
-            return False
         # Pages directes
         if cfg.get("auth"):
             return cfg["auth"] in self._authorized
@@ -576,21 +591,6 @@ class Sidebar(ctk.CTkFrame):
             if sub[1] in self._authorized:
                 return True
         return False
-
-    def _bloc_key(self, cfg: dict) -> str | None:
-        """
-        Clé d'autorisation qui contrôle la visibilité du bloc (menu principal).
-        Correspond aux entrées créées dans tb_menu par PageAutorisation.
-        """
-        mapping = {
-            "DASHBOARD":  "BLOC: TABLEAU DE BORD",
-            "CHAT":       "BLOC: CHAT INTERNE",
-            "COMMERCIALE":"BLOC: COMMERCIALE",
-            "PERSONNEL":  "BLOC: PERSONNEL",
-            "TRESORERIE": "BLOC: TRÉSORERIE",
-            "DATABASE":   "BLOC: BASE DE DONNÉES",
-        }
-        return mapping.get(cfg.get("id"))
 
     def _build_logout(self):
         self._btn_logout = ctk.CTkButton(
@@ -805,11 +805,7 @@ class VenteTabManager(ctk.CTkToplevel):
         # Chargement différé de PageVenteParMsin (évite import circulaire)
         try:
             from pages.page_venteParMsin import PageVenteParMsin
-            page = PageVenteParMsin(
-                content_frame,
-                id_user_connecte=self._id_user,
-                vente_tab_no=tab_id,
-            )
+            page = PageVenteParMsin(content_frame, id_user_connecte=self._id_user)
             page.pack(fill="both", expand=True)
         except Exception as e:
             # Afficher l'erreur dans le cadre sans crasher toute l'appli
@@ -943,7 +939,13 @@ class App(ctk.CTk):
         self.session_data     = session_data
         self.id_user_connecte = session_data.get("user_id")
         self._vente_tab_mgr   = None
-        self._logger          = AppLogger(session_data=session_data, fallback_user_id=self.id_user_connecte)
+
+        # ── Alias de session accessibles par toutes les pages enfants ─────────
+        # Utilisés par PageFactureListe, PagePmtFacture et toute page qui
+        # remonte la hiérarchie master pour récupérer l'utilisateur connecté.
+        self.current_iduser   = session_data.get("user_id")
+        self.current_username = session_data.get("username")
+        print(f"[App] Session : iduser={self.current_iduser!r}  username={self.current_username!r}")
 
         # Connexion DB
         self.db_manager = DatabaseManager()
@@ -1124,7 +1126,6 @@ class App(ctk.CTk):
                 session_data={
                     "iduser":   self.id_user_connecte,
                     "username": self.session_data.get("username", "Utilisateur"),
-                    "computer_name": os.environ.get("COMPUTERNAME", "PC-Inconnu"),
                 },
             )
 
@@ -1169,19 +1170,8 @@ class App(ctk.CTk):
         if not messagebox.askyesno("Déconnexion", "Voulez-vous vraiment vous déconnecter ?"):
             return
         try:
-            try:
-                self._logger.log(
-                    action="Déconnexion",
-                    element="Session utilisateur",
-                    details="fermeture de session",
-                    value="logout",
-                )
-            except Exception:
-                # Ne jamais bloquer la déconnexion à cause du log
-                pass
-            session_file = os.path.join(_BASE, "session.json")
-            if os.path.exists(session_file):
-                os.remove(session_file)
+            if os.path.exists("session.json"):
+                os.remove("session.json")
             if self.db_conn:
                 try: self.db_conn.close()
                 except Exception: pass

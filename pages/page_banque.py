@@ -10,8 +10,6 @@ import os
 import json
 import sys
 from resource_utils import get_config_path, safe_file_read
-from app_theme import Colors, Fonts, styled, Layout
-from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -24,7 +22,7 @@ if parent_dir not in sys.path:
 class PageBanque(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master)
-        self.configure(fg_color=Colors.BG_PAGE)
+        self.configure(fg_color="#f5f5f5")
 
         # Connexion à la base de données
         self.conn = self.connect_db()
@@ -38,15 +36,12 @@ class PageBanque(ctk.CTkFrame):
         self.bank_id_map = {}
         self.donnees_export = []
         self.selected_bank_id = None
-        self._responsive_mode = None  # "wide" | "narrow"
         
         if not self.conn:
             messagebox.showerror("Erreur", "Connexion impossible.")
             return
         
         self.cursor = self.conn.cursor()
-        self.session_data = getattr(master, "session_data", None) or {}
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         
         # CORRECTION PRINCIPALE : Appeler setup_ui() dans __init__
         self.setup_ui()
@@ -86,164 +81,63 @@ class PageBanque(ctk.CTkFrame):
             return False
 
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background=Colors.BG_CARD)
-        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
+        tree.tag_configure("row_even", background="#FFFFFF")
+        tree.tag_configure("row_odd", background="#F2D9EA")
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):
             tree.item(item, tags=("row_even" if idx % 2 == 0 else "row_odd",))
 
-    def _apply_ttk_theme(self):
-        """Style ttk.Treeview pour s'intégrer au thème courant."""
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-
-        style.configure(
-            "Treeview",
-            background=Colors.BG_CARD,
-            foreground=Colors.TEXT_PRIMARY,
-            fieldbackground=Colors.BG_CARD,
-            rowheight=Layout.ROW_H,
-            borderwidth=0,
-            font=("Segoe UI", 9),
-        )
-        style.configure(
-            "Treeview.Heading",
-            background=Colors.BG_HEADER,
-            foreground=Colors.TEXT_ON_DARK,
-            font=("Segoe UI", 9, "bold"),
-            borderwidth=0,
-        )
-        style.map(
-            "Treeview",
-            background=[("selected", Colors.PRIMARY_LIGHT)],
-            foreground=[("selected", Colors.TEXT_PRIMARY)],
-        )
-
-    def _make_date_entry(self, parent):
-        # tkcalendar.DateEntry est un widget Tk : on harmonise au mieux sans casser l'OS theme.
-        return DateEntry(
-            parent,
-            width=12,
-            date_pattern="dd/mm/yyyy",
-            background=Colors.PRIMARY,
-            foreground=Colors.TEXT_ON_DARK,
-            borderwidth=1,
-            selectbackground=Colors.PRIMARY_HOVER,
-            selectforeground=Colors.TEXT_ON_DARK,
-            normalbackground=Colors.BG_INPUT,
-            normalforeground=Colors.TEXT_PRIMARY,
-        )
-
-    def _update_responsive_layout(self, width: int):
-        mode = "narrow" if width < 980 else "wide"
-        if mode == self._responsive_mode:
-            return
-        self._responsive_mode = mode
-
-        # Repositionner les blocs de filtres / actions selon la largeur.
-        if mode == "wide":
-            self.top_left.grid(row=0, column=0, sticky="w", padx=(0, 12), pady=0)
-            self.top_right.grid(row=0, column=1, sticky="e", padx=(12, 0), pady=0)
-            self.top_container.grid_columnconfigure(0, weight=1)
-            self.top_container.grid_columnconfigure(1, weight=1)
-        else:
-            self.top_left.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 10))
-            self.top_right.grid(row=1, column=0, sticky="ew", padx=0, pady=0)
-            self.top_container.grid_columnconfigure(0, weight=1)
-            self.top_container.grid_columnconfigure(1, weight=0)
-
     def setup_ui(self):
-        self.pack(expand=True, fill="both", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
-        self._apply_ttk_theme()
+        self.pack(expand=True, fill="both", padx=20, pady=20)
 
-        # Conteneur principal
-        self.container = styled.frame(self, color="transparent")
-        self.container.pack(fill="both", expand=True)
-        self.container.grid_columnconfigure(0, weight=1)
+        # ---- UI TOP (Filtres) ----
+        self.frame_top = ctk.CTkFrame(self, fg_color="#f5f5f5")
+        self.frame_top.pack(pady=10, fill="x", padx=10)
 
-        # ---- TOP : Banque + Solde + Filtres ----
-        self.top_card = styled.card(self.container)
-        self.top_card.pack(fill="x", pady=(0, Layout.SECTION_GAP))
+        # Sélection de la Banque
+        self.bank_combobox = ctk.CTkComboBox(self.frame_top, width=200, command=self.on_bank_selected, state="readonly")
+        self.bank_combobox.pack(side="left", padx=10)
+        
+        self.label_solde = ctk.CTkLabel(self.frame_top, text="Solde : 0 Ar", text_color="#000", font=("Arial", 14, "bold"))
+        self.label_solde.pack(side="left", padx=20)
 
-        self.top_container = styled.frame(self.top_card, color="transparent")
-        self.top_container.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
-        self.top_container.grid_rowconfigure(0, weight=1)
-        self.top_container.grid_columnconfigure(0, weight=1)
-        self.top_container.grid_columnconfigure(1, weight=1)
+        self.frame_filtre = ctk.CTkFrame(self.frame_top, fg_color="#f5f5f5")
+        self.frame_filtre.pack(side="right", padx=10)
 
-        # Gauche : sélection banque + solde
-        self.top_left = styled.frame(self.top_container, color="transparent")
-        self.top_left.grid(row=0, column=0, sticky="w", padx=(0, 12))
+        self.entry_debut = DateEntry(self.frame_filtre, width=12, background='darkblue', date_pattern='dd/mm/yyyy')
+        self.entry_debut.pack(side="left", padx=5)
+        self.entry_fin = DateEntry(self.frame_filtre, width=12, background='darkblue', date_pattern='dd/mm/yyyy')
+        self.entry_fin.pack(side="left", padx=5)
 
-        styled.label_muted(self.top_left, text="Banque", anchor="w").pack(anchor="w", pady=(0, 4))
-        self.bank_combobox = styled.combobox(
-            self.top_left,
-            values=[],
-            command=self.on_bank_selected,
-            width=280,
-            state="readonly",
-        )
-        self.bank_combobox.pack(anchor="w")
-
-        self.label_solde = styled.badge(self.top_left, text="Solde : 0 Ar", variant="info")
-        self.label_solde.pack(anchor="w", pady=(10, 0))
-
-        # Droite : filtres
-        self.top_right = styled.frame(self.top_container, color="transparent")
-        self.top_right.grid(row=0, column=1, sticky="e", padx=(12, 0))
-
-        self.filters_grid = styled.frame(self.top_right, color="transparent")
-        self.filters_grid.pack(anchor="e")
-        for c in range(8):
-            self.filters_grid.grid_columnconfigure(c, weight=0)
-        self.filters_grid.grid_columnconfigure(0, weight=0)
-
-        styled.label_muted(self.filters_grid, text="Du", anchor="w").grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.entry_debut = self._make_date_entry(self.filters_grid)
-        self.entry_debut.grid(row=0, column=1, sticky="w", padx=(0, 10))
-
-        styled.label_muted(self.filters_grid, text="Au", anchor="w").grid(row=0, column=2, sticky="w", padx=(0, 6))
-        self.entry_fin = self._make_date_entry(self.filters_grid)
-        self.entry_fin.grid(row=0, column=3, sticky="w", padx=(0, 14))
-
-        styled.label_muted(self.filters_grid, text="Mode", anchor="w").grid(row=0, column=4, sticky="w", padx=(0, 6))
-        self.combo_mode = styled.combobox(self.filters_grid, values=["Tous"], width=160)
-        self.combo_mode.grid(row=0, column=5, sticky="w", padx=(0, 14))
+        # ComboBox Mode de Paiement
+        self.combo_mode = ctk.CTkComboBox(self.frame_filtre, values=["Tous"], width=130)
+        self.combo_mode.pack(side="left", padx=5)
         self.combo_mode.set("Tous")
 
-        styled.label_muted(self.filters_grid, text="Document", anchor="w").grid(row=0, column=6, sticky="w", padx=(0, 6))
-        self.combo_doc = styled.combobox(
-            self.filters_grid,
-            values=["Tous", "Clients", "Avoir", "Fournisseurs", "Personnel", "Divers"],
-            width=170,
+        # ComboBox Documents (Comme en Caisse)
+        self.combo_doc = ctk.CTkComboBox(
+            self.frame_filtre, 
+            values=["Tous", "Clients", "Avoir", "Fournisseurs", "Personnel", "Divers"], 
+            width=130
         )
-        self.combo_doc.grid(row=0, column=7, sticky="w", padx=(0, 0))
+        self.combo_doc.pack(side="left", padx=5)
         self.combo_doc.set("Tous")
 
-        self.filters_actions = styled.frame(self.top_right, color="transparent")
-        self.filters_actions.pack(anchor="e", pady=(12, 0))
-        styled.button_success(self.filters_actions, text="Valider", width=140, command=self.trigger_data_load).pack(side="left", padx=(0, 8))
-        styled.button_premium(self.filters_actions, text="Export Excel", width=160, command=self.exporter_excel).pack(side="left")
+        ctk.CTkButton(self.frame_filtre, text="Valider", width=80, fg_color="#28a745", command=self.trigger_data_load).pack(side="left", padx=5)
+        ctk.CTkButton(self.frame_filtre, text="Export Excel", width=100, fg_color="#17a2b8", command=self.exporter_excel).pack(side="left", padx=5)
 
-        # ---- TABLE ----
-        self.table_card = styled.card(self.container)
-        self.table_card.pack(fill="both", expand=True, pady=(0, Layout.SECTION_GAP))
-
-        self.frame_tree = styled.frame(self.table_card, color="transparent")
-        self.frame_tree.pack(fill="both", expand=True, padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
-
+        # ---- TREEVIEW (Colonnes alignées sur Caisse) ----
         self.colonnes = ("Date", "Référence", "Description", "Encaissement", "Décaissement", "Mode", "Utilisateur")
+        self.frame_tree = ctk.CTkFrame(self)
+        self.frame_tree.pack(fill="both", expand=True, padx=10, pady=5)
+
         self.tree = ttk.Treeview(self.frame_tree, columns=self.colonnes, show="headings")
         self._configure_table_alternating_colors(self.tree)
-
         for col in self.colonnes:
             self.tree.heading(col, text=col)
-            self.tree.column(col, anchor="center", width=120)
-        self.tree.column("Description", width=320, anchor="w")
+            self.tree.column(col, anchor="center", width=110)
+        self.tree.column("Description", width=250, anchor="w")
 
         self.scrollbar_y = ttk.Scrollbar(self.frame_tree, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=self.scrollbar_y.set)
@@ -252,34 +146,30 @@ class PageBanque(ctk.CTkFrame):
         self.frame_tree.grid_rowconfigure(0, weight=1)
         self.frame_tree.grid_columnconfigure(0, weight=1)
 
-        # ---- BOTTOM : totaux + actions ----
-        self.bottom_card = styled.card(self.container)
-        self.bottom_card.pack(fill="x")
+        # ---- BOTTOM (Totaux et Boutons) ----
+        self.frame_bottom_container = ctk.CTkFrame(self, fg_color="#f5f5f5")
+        self.frame_bottom_container.pack(pady=10, fill="x", padx=10, side="bottom")
 
-        self.frame_bottom = styled.frame(self.bottom_card, color="transparent")
-        self.frame_bottom.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_BOT)
-        self.frame_bottom.grid_columnconfigure(0, weight=1)
-        self.frame_bottom.grid_columnconfigure(1, weight=0)
+        self.frame_totaux = ctk.CTkFrame(self.frame_bottom_container, fg_color="#f5f5f5")
+        self.frame_totaux.pack(side="left", fill="y")
 
-        self.totals = styled.frame(self.frame_bottom, color="transparent")
-        self.totals.grid(row=0, column=0, sticky="w")
-        self.label_total_encaissement = styled.label(self.totals, text="Total Encaissement: 0 Ar", size=13, weight="bold")
-        self.label_total_encaissement.grid(row=0, column=0, sticky="w", pady=(0, 4))
-        self.label_total_decaissement = styled.label(self.totals, text="Total Décaissement: 0 Ar", size=13, weight="bold")
-        self.label_total_decaissement.grid(row=1, column=0, sticky="w")
+        self.label_total_encaissement = ctk.CTkLabel(self.frame_totaux, text="Total Encaissement: 0 Ar", font=("Arial", 13, "bold"))
+        self.label_total_encaissement.grid(row=0, column=0, padx=20, sticky='w')
+        self.label_total_decaissement = ctk.CTkLabel(self.frame_totaux, text="Total Décaissement: 0 Ar", font=("Arial", 13, "bold"))
+        self.label_total_decaissement.grid(row=1, column=0, padx=20, sticky='w')
 
-        self.actions = styled.frame(self.frame_bottom, color="transparent")
-        self.actions.grid(row=0, column=1, sticky="e")
-        self.btn_open_encaissement = styled.button_success(self.actions, text="+ Encaissement", width=180, command=self.open_page_encaissement)
-        self.btn_open_encaissement.pack(side="left", padx=(0, 8))
-        self.btn_open_decaissement = styled.button_danger(self.actions, text="- Décaissement", width=180, command=self.open_page_decaissement)
-        self.btn_open_decaissement.pack(side="left")
+        self.frame_actions = ctk.CTkFrame(self.frame_bottom_container, fg_color="#f5f5f5")
+        self.frame_actions.pack(side="right", fill="y", padx=20)
+
+        self.btn_open_encaissement = ctk.CTkButton(self.frame_actions, text="+ Encaissement", fg_color="#28a745", width=150, command=self.open_page_encaissement)
+        self.btn_open_encaissement.pack(side="left", padx=5)
+
+        self.btn_open_decaissement = ctk.CTkButton(self.frame_actions, text="- Décaissement", fg_color="#dc3545", width=150, command=self.open_page_decaissement)
+        self.btn_open_decaissement.pack(side="left", padx=5)
 
         # Charger les données initiales
         self.charger_modes_paiement()
         self.load_bank_names()
-        self.bind("<Configure>", lambda e: self._update_responsive_layout(e.width))
-        self._update_responsive_layout(self.winfo_width() or 1200)
 
     def format_montant(self, v):
         return f"{v:,.2f}".replace(",", " ").replace(".", ",").replace(" ", ".")
@@ -392,7 +282,6 @@ class PageBanque(ctk.CTkFrame):
             """, (bank_id, bank_id, bank_id, bank_id, bank_id))
             res = self.cursor.fetchone()
             solde = res[0] if res and res[0] else 0
-            # label_solde est un badge CTkLabel
             self.label_solde.configure(text=f"Solde : {self.format_montant(solde)} Ar")
         except Exception as e:
             print(f"Erreur calcul solde: {e}")
@@ -406,16 +295,6 @@ class PageBanque(ctk.CTkFrame):
             nom = f"Banque_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             df.to_excel(nom, index=False)
             messagebox.showinfo("Succès", f"Exporté vers {nom}")
-            try:
-                from log_utils import AppLogger
-                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
-                    action="Export Excel",
-                    element="Banque",
-                    details=f"export banque, lignes={len(self.donnees_export)}, fichier={os.path.basename(nom)}",
-                    value=nom,
-                )
-            except Exception:
-                pass
         except Exception as e:
             messagebox.showerror("Erreur", str(e))
 
@@ -423,15 +302,6 @@ class PageBanque(ctk.CTkFrame):
         if not self.selected_bank_id:
             messagebox.showwarning("Attention", "Veuillez sélectionner une banque")
             return
-        try:
-            self._logger.log(
-                action="Ouverture décaissement bancaire",
-                element=f"id_banque={self.selected_bank_id}",
-                details="Ouverture page Décaissement Bq",
-                value=f"id_banque={self.selected_bank_id}",
-            )
-        except Exception:
-            pass
         from pages.page_decaissementBq import PageDecaissementBq
         win = PageDecaissementBq(self.master, bank_id=self.selected_bank_id)
         win.grab_set()
@@ -442,15 +312,6 @@ class PageBanque(ctk.CTkFrame):
         if not self.selected_bank_id:
             messagebox.showwarning("Attention", "Veuillez sélectionner une banque")
             return
-        try:
-            self._logger.log(
-                action="Ouverture encaissement bancaire",
-                element=f"id_banque={self.selected_bank_id}",
-                details="Ouverture page Encaissement Bq",
-                value=f"id_banque={self.selected_bank_id}",
-            )
-        except Exception:
-            pass
         from pages.page_encaissementBq import PageEncaissementBq
         win = PageEncaissementBq(self.master, bank_id=self.selected_bank_id)
         win.grab_set()

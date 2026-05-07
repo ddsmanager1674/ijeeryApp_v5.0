@@ -8,7 +8,6 @@ from datetime import datetime
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 # Imports ReportLab pour le PDF
 from reportlab.lib import colors
@@ -81,8 +80,11 @@ def _f(size=10, weight="normal"):
 
 class PageCaisse(ctk.CTkFrame):
 
-    def __init__(self, master):
+    def __init__(self, master, username=None):
         super().__init__(master, fg_color=C.BG_PAGE)
+
+        # ── Utilisateur connecté (transmis depuis le login) ───────────────────
+        self.current_username = username or "Système"
 
         # ── État interne (identique à l'original) ─────────────────────────────
         self.modes_paiement_dict = {"Tous": None}
@@ -129,9 +131,6 @@ class PageCaisse(ctk.CTkFrame):
         self._build_treeview()
         self._build_table_actions()
         self._build_footer()
-
-        self.session_data = getattr(master, "session_data", None) or {}
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
 
         self.charger_modes_paiement()
         self.appliquer_filtres()
@@ -224,7 +223,7 @@ class PageCaisse(ctk.CTkFrame):
 
         ctk.CTkButton(
             inner, text="Valider",
-            command=self._apply_filters_with_log,
+            command=self.appliquer_filtres,
             fg_color=C.SUCCESS_DARK, hover_color=C.SUCCESS,
             text_color="#FFFFFF", height=28, width=80, font=_f(10, "bold")
         ).pack(side="left", padx=(0, 4))
@@ -617,8 +616,7 @@ class PageCaisse(ctk.CTkFrame):
             result = self.cursor.fetchone()
             self.montants_docs["Personnel"] = float(result[0]) if result and result[0] else 0
 
-            # Inclure aussi les transferts caisse<->banque : ils doivent impacter la card "Espèces".
-            params = [d_str, f_str] * 10
+            params = [d_str, f_str] * 9
             self.cursor.execute("""
                 SELECT COALESCE(t2.modedepaiement, 'Inconnu'),
                        SUM(CASE WHEN t1.idtypeoperation=1 THEN t1.mtpaye ELSE -t1.mtpaye END)
@@ -632,7 +630,6 @@ class PageCaisse(ctk.CTkFrame):
                     UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtsalaire WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
                     UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtavoir WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
                     UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_pmtcredit WHERE datepmt::date BETWEEN %s AND %s AND id_banque IS NULL
-                    UNION ALL SELECT idmode, mtpaye, idtypeoperation FROM tb_transfertcaisse WHERE datepmt::date BETWEEN %s AND %s
                 ) t1
                 LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
                 GROUP BY t2.modedepaiement
@@ -667,22 +664,6 @@ class PageCaisse(ctk.CTkFrame):
         self.calculer_montants_categories(date_d, date_f)
         self.charger_donnees(date_d, date_f, mode_id, type_doc)
 
-    def _apply_filters_with_log(self):
-        try:
-            type_doc = self.filtre_doc_actif if self.filtre_doc_actif else "Tous"
-            mode_ui = self.filtre_mode_actif if self.filtre_mode_actif else "Tous"
-            d = self.entry_debut.get_date()
-            f = self.entry_fin.get_date()
-            self._logger.log(
-                action="Consultation caisse",
-                element="Caisse",
-                details=f"Filtre caisse (du={d}, au={f}, doc={type_doc}, mode={mode_ui})",
-                value="filtre",
-            )
-        except Exception:
-            pass
-        self.appliquer_filtres()
-
     def charger_donnees(self, date_d, date_f, mode_id=None, type_doc="Tous"):
         if not self.conn: return
         d_str, f_str = date_d.strftime('%Y-%m-%d'), date_f.strftime('%Y-%m-%d')
@@ -703,22 +684,22 @@ class PageCaisse(ctk.CTkFrame):
                 self.conn.rollback()
 
         if type_doc in ["Tous", "Client"]:
-            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtfacture t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(NULLIF(t3.username,''), %s) FROM tb_pmtfacture t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [self.current_username, d_str, f_str]+mode_params)
         if type_doc in ["Tous", "Paiement Crédit"]:
-            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtcredit t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(NULLIF(t3.username,''), %s) FROM tb_pmtcredit t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [self.current_username, d_str, f_str]+mode_params)
         if type_doc in ["Tous", "Avoir"]:
-            exec_query(f"SELECT t1.datepmt, t1.refavoir, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtavoir t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+            exec_query(f"SELECT t1.datepmt, t1.refavoir, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(NULLIF(t3.username,''), %s) FROM tb_pmtavoir t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [self.current_username, d_str, f_str]+mode_params)
         if type_doc in ["Tous", "Fournisseur"]:
-            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_pmtcom t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(NULLIF(t3.username,''), %s) FROM tb_pmtcom t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [self.current_username, d_str, f_str]+mode_params)
         if type_doc in ["Tous", "Encaissement"]:
-            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_encaissement t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(NULLIF(t3.username,''), %s) FROM tb_encaissement t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [self.current_username, d_str, f_str]+mode_params)
         if type_doc in ["Tous", "Dépenses"]:
-            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM tb_decaissement t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+            exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(NULLIF(t3.username,''), %s) FROM tb_decaissement t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [self.current_username, d_str, f_str]+mode_params)
         if type_doc in ["Tous", "Personnel"]:
             for tbl in ("tb_avancepers", "tb_avancespecpers", "tb_pmtsalaire"):
-                exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(t3.username,'Système') FROM {tbl} t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [d_str, f_str]+mode_params)
+                exec_query(f"SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Inconnu'), COALESCE(NULLIF(t3.username,''), %s) FROM {tbl} t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s AND t1.id_banque IS NULL{sql_mode}", [self.current_username, d_str, f_str]+mode_params)
         if (not mode_id or mode_id == 1) and type_doc == "Tous":
-            exec_query("SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Espèces'), COALESCE(t3.username,'admin') FROM tb_transfertcaisse t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s", [d_str, f_str])
+            exec_query("SELECT t1.datepmt, t1.refpmt, t1.observation, t1.mtpaye, t1.idtypeoperation, COALESCE(t2.modedepaiement,'Espèces'), COALESCE(NULLIF(t3.username,''), %s) FROM tb_transfertcaisse t1 LEFT JOIN tb_modepaiement t2 ON t1.idmode=t2.idmode LEFT JOIN tb_users t3 ON t1.iduser=t3.iduser WHERE t1.datepmt::date BETWEEN %s AND %s", [self.current_username, d_str, f_str])
 
         def get_datetime(op):
             dt = op[0]
@@ -859,17 +840,6 @@ class PageCaisse(ctk.CTkFrame):
                 styles['Italic']))
             doc.build(elements)
             os.startfile(nom_fichier)
-            try:
-                filtre_doc  = self.filtre_doc_actif  or "Tous"
-                filtre_mode = self.filtre_mode_actif or "Tous"
-                self._logger.log(
-                    action="Impression",
-                    element="État de caisse",
-                    details=f"PDF état de caisse (du={self.entry_debut.get()}, au={self.entry_fin.get()}, mode={filtre_mode}, doc={filtre_doc})",
-                    value=nom_fichier,
-                )
-            except Exception:
-                pass
         except Exception as e:
             messagebox.showerror("Erreur PDF", f"Détails : {e}")
 
@@ -878,16 +848,7 @@ class PageCaisse(ctk.CTkFrame):
             from page_decaissement import PageDecaissement
         except ImportError:
             from pages.page_decaissement import PageDecaissement
-        try:
-            self._logger.log(
-                action="Ouverture décaissement",
-                element="Décaissement",
-                details="Ouverture fenêtre décaissement depuis caisse",
-                value="open",
-            )
-        except Exception:
-            pass
-        win = PageDecaissement(self.master, username="VotreUsername")
+        win = PageDecaissement(self.master, username=self.current_username)
         self.master.wait_window(win)
         self.appliquer_filtres()
 
@@ -896,16 +857,7 @@ class PageCaisse(ctk.CTkFrame):
             from page_encaissement import PageEncaissement
         except ImportError:
             from pages.page_encaissement import PageEncaissement
-        try:
-            self._logger.log(
-                action="Ouverture encaissement",
-                element="Encaissement",
-                details="Ouverture fenêtre encaissement depuis caisse",
-                value="open",
-            )
-        except Exception:
-            pass
-        win = PageEncaissement(self.master, username="VotreUsername")
+        win = PageEncaissement(self.master, username=self.current_username)
         self.master.wait_window(win)
         self.appliquer_filtres()
 
@@ -921,5 +873,5 @@ if __name__ == "__main__":
         Theme.apply(app)
     app.grid_rowconfigure(0, weight=1)
     app.grid_columnconfigure(0, weight=1)
-    PageCaisse(app).grid(row=0, column=0, sticky="nsew")
+    PageCaisse(app, username="admin").grid(row=0, column=0, sticky="nsew")
     app.mainloop()

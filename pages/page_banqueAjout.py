@@ -5,8 +5,6 @@ import json
 import os
 import sys
 from resource_utils import get_config_path, safe_file_read
-from app_theme import Colors, styled, Layout
-from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -19,7 +17,6 @@ if parent_dir not in sys.path:
 class PageBanqueNv(ctk.CTkFrame):
     def __init__(self, parent):
         super().__init__(parent)
-        self.configure(fg_color=Colors.BG_PAGE)
 
         # Connexion à la base de données
         self.conn = self.connect_db()
@@ -32,8 +29,6 @@ class PageBanqueNv(ctk.CTkFrame):
         if self.conn:  # Seulement si la connexion a réussi
             self.create_widgets()
             self.afficher_banque()  # Afficher les données après la création des widgets
-            self.session_data = getattr(parent, "session_data", None) or {}
-            self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         else:
             # Afficher un message d'erreur si la connexion échoue
             error_label = ctk.CTkLabel(self, text="Erreur: Impossible de se connecter à la base de données", 
@@ -76,8 +71,8 @@ class PageBanqueNv(ctk.CTkFrame):
             return False
 
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background=Colors.BG_CARD)
-        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
+        tree.tag_configure("row_even", background="#FFFFFF")
+        tree.tag_configure("row_odd", background="#F2D9EA")
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):
@@ -86,34 +81,45 @@ class PageBanqueNv(ctk.CTkFrame):
     def create_widgets(self):
         """Crée et organise tous les widgets de l'interface."""
 
-        self.pack(fill="both", expand=True, padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        # --- Cadre pour le titre ---
+        self.title_frame = ctk.CTkFrame(self, corner_radius=10)
+        self.title_frame.pack(side="top", fill="x", padx=20, pady=10)
 
-        # --- Titre ---
-        self.title_card = styled.card(self)
-        self.title_card.pack(fill="x", pady=(0, Layout.SECTION_GAP))
-        self.title_frame = styled.frame(self.title_card, color="transparent")
-        self.title_frame.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
-        styled.label_title(self.title_frame, text="Gestion des Banques").pack(anchor="w")
+        self.title_label = ctk.CTkLabel(self.title_frame, text="Gestion des Banques", 
+                                      font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"))
+        self.title_label.pack(pady=10)
 
-        # --- Actions ---
-        self.buttons_card = styled.card(self)
-        self.buttons_card.pack(fill="x", pady=(0, Layout.SECTION_GAP))
-        self.buttons_frame = styled.frame(self.buttons_card, color="transparent")
-        self.buttons_frame.pack(fill="x", padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        # --- Cadre pour les boutons (Ajouter, Modifier, Supprimer) ---
+        self.buttons_frame = ctk.CTkFrame(self, corner_radius=10)
+        self.buttons_frame.pack(side="top", fill="x", padx=20, pady=10)
+        
+        # Utilisation de grid pour les boutons pour un meilleur alignement
+        self.buttons_frame.grid_columnconfigure((0, 1, 2), weight=1)  # Pour distribuer l'espace également
 
-        self.btn_ajouter = styled.button_success(self.buttons_frame, text="Ajouter", width=160, command=self.ajouter_banque)
-        self.btn_ajouter.pack(side="left", padx=(0, 10))
-        self.btn_modifier = styled.button_primary(self.buttons_frame, text="Modifier", width=160, command=self.modifier_banque)
-        self.btn_modifier.pack(side="left", padx=(0, 10))
-        self.btn_supprimer = styled.button_danger(self.buttons_frame, text="Supprimer", width=160, command=self.supprimer_banque)
-        self.btn_supprimer.pack(side="left")
+        self.btn_ajouter = ctk.CTkButton(self.buttons_frame, text="Ajouter",
+                                         fg_color="#2ecc71",
+                                         hover_color="#27ae60", 
+                                         command=self.ajouter_banque, 
+                                         width=100)
+        self.btn_ajouter.grid(row=0, column=0, padx=5, pady=5)
 
-        # --- Contenu principal : table + formulaire ---
-        self.main_card = styled.card(self)
-        self.main_card.pack(side="top", fill="both", expand=True)
+        self.btn_modifier = ctk.CTkButton(self.buttons_frame, text="Modifier",
+                                          fg_color="#3498db",
+                                          hover_color="#2980b9", 
+                                          command=self.modifier_banque, 
+                                          width=100)
+        self.btn_modifier.grid(row=0, column=1, padx=5, pady=5)
 
-        self.main_content_frame = styled.frame(self.main_card, color="transparent")
-        self.main_content_frame.pack(fill="both", expand=True, padx=Layout.CARD_PADX, pady=Layout.CARD_PADY_TOP)
+        self.btn_supprimer = ctk.CTkButton(self.buttons_frame, text="Supprimer",
+                                           fg_color="#e74c3c",
+                                           hover_color="#c0392b", 
+                                           command=self.supprimer_banque, 
+                                           width=100)
+        self.btn_supprimer.grid(row=0, column=2, padx=5, pady=5)
+
+        # --- Cadre principal pour Treeview (gauche) et Champ de Saisie (droite) ---
+        self.main_content_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.main_content_frame.pack(side="top", fill="both", expand=True, padx=20, pady=10)
 
         # Configuration de la grille pour le main_content_frame
         self.main_content_frame.grid_columnconfigure(0, weight=2)  # Treeview prend plus d'espace
@@ -121,7 +127,7 @@ class PageBanqueNv(ctk.CTkFrame):
         self.main_content_frame.grid_rowconfigure(0, weight=1)
 
         # --- Cadre pour Treeview ---
-        self.treeview_frame = styled.card(self.main_content_frame)
+        self.treeview_frame = ctk.CTkFrame(self.main_content_frame, corner_radius=10)
         self.treeview_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
         # Configuration du Treeview
@@ -142,27 +148,24 @@ class PageBanqueNv(ctk.CTkFrame):
         # Liaison de l'événement de sélection du Treeview à une méthode
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
 
-        # Style pour le Treeview (standard ttk) — harmonisé avec le thème
+        # Style pour le Treeview (standard ttk)
         style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
+        style.theme_use("clam")  # Un thème ttk qui peut mieux s'intégrer
         style.configure("Treeview.Heading", 
-                       font=('Segoe UI', 9, 'bold'), 
-                       background=Colors.BG_HEADER, 
-                       foreground=Colors.TEXT_ON_DARK)
+                       font=('Segoe UI', 8, 'bold'), 
+                       background="#E8E8E8", 
+                       foreground="#000000")
         style.configure("Treeview", 
-                       rowheight=Layout.ROW_H, 
-                       font=('Segoe UI', 9), 
-                       background=Colors.BG_CARD, 
-                       foreground=Colors.TEXT_PRIMARY, 
-                       fieldbackground=Colors.BG_CARD,
+                       rowheight=22, 
+                       font=('Segoe UI', 8), 
+                       background="#FFFFFF", 
+                       foreground="#000000", 
+                       fieldbackground="#FFFFFF",
                        borderwidth=0)
-        style.map("Treeview", background=[('selected', Colors.PRIMARY_LIGHT)])
+        style.map("Treeview", background=[('selected', '#3498db')])
 
         # --- Cadre pour Champ de Saisie (Formulaire) ---
-        self.entry_frame = styled.card(self.main_content_frame)
+        self.entry_frame = ctk.CTkFrame(self.main_content_frame, corner_radius=10)
         self.entry_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
 
         # Configuration de la grille pour les champs de saisie
@@ -170,30 +173,41 @@ class PageBanqueNv(ctk.CTkFrame):
         self.entry_frame.grid_columnconfigure(1, weight=1)  # Entries
 
         # Titre du formulaire
-        form_title = styled.label_heading(self.entry_frame, text="Informations Banque", size=16)
-        form_title.grid(row=0, column=0, columnspan=2, pady=(16, 18))
+        form_title = ctk.CTkLabel(self.entry_frame, text="Informations Banque", 
+                                font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
+        form_title.grid(row=0, column=0, columnspan=2, pady=(10, 20))
 
-        self.label_nombanque = styled.label_muted(self.entry_frame, text="Nom banque :")
+        self.label_nombanque = ctk.CTkLabel(self.entry_frame, text="Nom banque :", 
+                                          font=ctk.CTkFont(family="Segoe UI", size=14))
         self.label_nombanque.grid(row=1, column=0, padx=10, pady=10, sticky="w")
 
-        self.entry_nombanque = styled.entry(self.entry_frame, placeholder="ex: BNI")
+        self.entry_nombanque = ctk.CTkEntry(self.entry_frame, width=200, 
+                                          font=ctk.CTkFont(family="Segoe UI", size=14))
         self.entry_nombanque.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
 
-        self.label_adresse = styled.label_muted(self.entry_frame, text="Adresse :")
+        self.label_adresse = ctk.CTkLabel(self.entry_frame, text="Adresse :", 
+                                        font=ctk.CTkFont(family="Segoe UI", size=14))
         self.label_adresse.grid(row=2, column=0, padx=10, pady=10, sticky="w")
 
-        self.entry_adresse = styled.entry(self.entry_frame, placeholder="Adresse")
+        self.entry_adresse = ctk.CTkEntry(self.entry_frame, width=200, 
+                                        font=ctk.CTkFont(family="Segoe UI", size=14))
         self.entry_adresse.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
 
-        self.label_numcompte = styled.label_muted(self.entry_frame, text="Compte :")
+        self.label_numcompte = ctk.CTkLabel(self.entry_frame, text="Compte :", 
+                                          font=ctk.CTkFont(family="Segoe UI", size=14))
         self.label_numcompte.grid(row=3, column=0, padx=10, pady=10, sticky="w")
 
-        self.entry_numcompte = styled.entry(self.entry_frame, placeholder="Numéro de compte")
+        self.entry_numcompte = ctk.CTkEntry(self.entry_frame, width=200, 
+                                          font=ctk.CTkFont(family="Segoe UI", size=14))
         self.entry_numcompte.grid(row=3, column=1, padx=10, pady=10, sticky="ew")
 
         # Bouton pour vider les champs
-        self.btn_clear = styled.button_secondary(self.entry_frame, text="Vider les champs", width=220, command=self.clear_entry_fields)
-        self.btn_clear.grid(row=4, column=0, columnspan=2, pady=(18, 16))
+        self.btn_clear = ctk.CTkButton(self.entry_frame, text="Vider les champs",
+                                     fg_color="#95a5a6",
+                                     hover_color="#7f8c8d",
+                                     command=self.clear_entry_fields,
+                                     width=150)
+        self.btn_clear.grid(row=4, column=0, columnspan=2, pady=20)
 
     def on_tree_select(self, event):
         """
@@ -239,15 +253,6 @@ class PageBanqueNv(ctk.CTkFrame):
             )
             self.conn.commit()
             messagebox.showinfo("Succès", "Banque ajoutée avec succès.")
-            try:
-                self._logger.log(
-                    action="Création banque",
-                    element=nombanque,
-                    details=f"Banque créée, adresse='{adresse}', compte='{numcompte}'",
-                    value="aucune valeur",
-                )
-            except Exception:
-                pass
             self.clear_entry_fields()
             self.afficher_banque()
         except psycopg2.Error as err:
@@ -278,28 +283,12 @@ class PageBanqueNv(ctk.CTkFrame):
             return
 
         try:
-            old_name = ""
-            try:
-                self.cursor.execute("SELECT nombanque FROM tb_banque WHERE id_banque=%s", (banque_id,))
-                r = self.cursor.fetchone()
-                old_name = r[0] if r and r[0] else ""
-            except Exception:
-                old_name = ""
             self.cursor.execute(
                 "UPDATE tb_banque SET nombanque = %s, adresse = %s, numcompte = %s WHERE id_banque = %s",
                 (new_nombanque, new_adresse, new_numcompte, banque_id)
             )
             self.conn.commit()
             messagebox.showinfo("Succès", "Banque modifiée avec succès.")
-            try:
-                self._logger.log(
-                    action="Modification banque",
-                    element=old_name or f"id_banque={banque_id}",
-                    details=f"Banque modifiée en '{new_nombanque}', adresse='{new_adresse}', compte='{new_numcompte}'",
-                    value=f"id_banque={banque_id}",
-                )
-            except Exception:
-                pass
             self.clear_entry_fields()
             self.afficher_banque()
         except psycopg2.Error as err:
@@ -328,15 +317,6 @@ class PageBanqueNv(ctk.CTkFrame):
                 self.cursor.execute("DELETE FROM tb_banque WHERE id_banque = %s", (banque_id,))
                 self.conn.commit()
                 messagebox.showinfo("Succès", "Banque supprimée avec succès.")
-                try:
-                    self._logger.log(
-                        action="Suppression banque",
-                        element=nom_banque,
-                        details="Suppression banque",
-                        value=f"id_banque={banque_id}",
-                    )
-                except Exception:
-                    pass
                 self.clear_entry_fields()
                 self.afficher_banque()
             except psycopg2.Error as err:

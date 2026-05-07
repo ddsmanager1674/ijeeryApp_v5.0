@@ -11,7 +11,6 @@ import json
 from datetime import datetime
 from resource_utils import get_config_path
 from app_theme import Colors, Fonts, styled, Layout
-from log_utils import AppLogger
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -28,8 +27,6 @@ class ModalPersonnel(ctk.CTkToplevel):
         self.mode        = mode
         self.personnel   = personnel_data
         self.fonction_dict = {}
-        self.session_data = getattr(master, "session_data", None) or {}
-        self._logger = AppLogger(session_data=self.session_data)
 
         titre = "Nouveau personnel" if mode == "ajout" else "Modifier le personnel"
         self.title(titre)
@@ -215,15 +212,6 @@ class ModalPersonnel(ctk.CTkToplevel):
                 )
                 msg = "Personnel mis à jour !"
             conn.commit()
-            try:
-                self._logger.log(
-                    action="Création personnel" if self.mode == "ajout" else "Modification personnel",
-                    element=str(data.get("matricule") or data.get("nom") or ""),
-                    details=f"Personnel {'créé' if self.mode=='ajout' else 'modifié'} (nom='{data.get('nom')}', prenom='{data.get('prenom')}', sexe='{data.get('sexe')}', idfonction={data.get('idfonction')})",
-                    value="aucune valeur",
-                )
-            except Exception:
-                pass
             messagebox.showinfo("Succès", msg, parent=self)
             self._on_save()
             self.destroy()

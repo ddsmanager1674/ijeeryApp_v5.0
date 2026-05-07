@@ -19,7 +19,6 @@ from datetime import datetime
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from log_utils import AppLogger
 
 # ── Thème centralisé ──────────────────────────────────────────────────────────
 try:
@@ -256,10 +255,6 @@ class PageStockAlerte(ctk.CTkFrame):
         _apply_treeview_style()
         self._build_ui()
         self.charger_donnees()
-        resolved_user = None
-        if isinstance(session_data, dict):
-            resolved_user = session_data.get("user_id") or session_data.get("iduser")
-        self._logger = AppLogger(conn=db_conn, session_data=session_data or ({"user_id": resolved_user} if resolved_user else {}))
 
     # ── Base de données ───────────────────────────────────────────────────────
     def connect_db(self):
@@ -727,15 +722,6 @@ class PageStockAlerte(ctk.CTkFrame):
                     (new_ad, new_ag, sel_mag, idarticle))
                 conn.commit()
                 messagebox.showinfo("Succès", "Alertes mises à jour.")
-                try:
-                    self._logger.log(
-                        action="Modification alerte stock",
-                        element=str(designation),
-                        details=f"Stock Alerte ({'Générale' if self._portee == self.PORTEE_GEN else 'Magasin'}): article={codearticle}, magasin='{var_mag.get()}', seuil_mag={new_ad}, seuil_gen={new_ag}",
-                        value=f"seuil_mag={new_ad}, seuil_gen={new_ag}",
-                    )
-                except Exception:
-                    pass
                 win.destroy()
                 self.charger_donnees()
             except Exception as e:

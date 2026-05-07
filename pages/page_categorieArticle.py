@@ -6,7 +6,6 @@ import json
 import os
 import sys
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -67,13 +66,11 @@ class PageCategorieArticle(ctk.CTkFrame):
 
     def __init__(self, parent):
         super().__init__(parent, fg_color=C.BG_PAGE)
-        self.session_data = getattr(parent, "session_data", None) or {}
 
         self.conn = self.connect_db()
         if self.conn:
             self.cursor = self.conn.cursor()
             self.initialiser_table()
-            self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         else:
             return
 
@@ -245,15 +242,6 @@ class PageCategorieArticle(ctk.CTkFrame):
                 "INSERT INTO tb_categoriearticle (designationcat) VALUES (%s)",
                 (designation,))
             self.conn.commit()
-            try:
-                self._logger.log(
-                    action="Création catégorie article",
-                    element=designation,
-                    details="Catégorie article créée",
-                    value="aucune valeur",
-                )
-            except Exception:
-                pass
             self.charger_categoriearticle()
             self.vider()
             messagebox.showinfo("Succès", "Catégorie enregistrée !")
@@ -271,15 +259,6 @@ class PageCategorieArticle(ctk.CTkFrame):
                 "UPDATE tb_categoriearticle SET designationcat=%s "
                 "WHERE idca=%s", (designation, idca))
             self.conn.commit()
-            try:
-                self._logger.log(
-                    action="Modification catégorie article",
-                    element=f"idca={idca}",
-                    details=f"Catégorie article modifiée en '{designation}'",
-                    value=f"idca={idca}",
-                )
-            except Exception:
-                pass
             self.charger_categoriearticle()
             self.vider()
         except Exception as e:
@@ -294,15 +273,6 @@ class PageCategorieArticle(ctk.CTkFrame):
             self.cursor.execute(
                 "DELETE FROM tb_categoriearticle WHERE idca=%s", (idca,))
             self.conn.commit()
-            try:
-                self._logger.log(
-                    action="Suppression catégorie article",
-                    element=f"idca={idca}",
-                    details="Catégorie article supprimée",
-                    value=f"idca={idca}",
-                )
-            except Exception:
-                pass
             self.charger_categoriearticle()
             self.vider()
 

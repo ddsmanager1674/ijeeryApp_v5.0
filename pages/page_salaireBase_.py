@@ -9,9 +9,6 @@ import os
 import sys
 from resource_utils import get_config_path, safe_file_read
 
-from app_theme import Colors, Fonts, styled, Layout
-from log_utils import AppLogger
-
 
 # Ensure the parent directory is in the Python path for absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -109,6 +106,9 @@ ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")  # Themes: "blue" (default), "green", "dark-blue"
 
 class PageSalaireBase(ctk.CTkFrame):
+    def __init__(self, master, app_root):
+        super().__init__(master)
+        self.app_root = app_root if app_root else master
     """
     A CustomTkinter page for managing professors' base salaries.
     Allows searching, displaying, and updating base salaries in a PostgreSQL database.
@@ -121,27 +121,20 @@ class PageSalaireBase(ctk.CTkFrame):
             master: The parent widget (e.g., ctk.CTk).
             app_root: The main application window, used for protocol handling (e.g., window closing).
         """
-        # [UI] Fond et structure alignés sur app_theme (Nouveau SB)
-        super().__init__(master, fg_color=Colors.BG_PAGE)
+        # Call the constructor of the parent class (ctk.CTkFrame)
+        super().__init__(master, fg_color="transparent")
+        # Pack this main frame to fill the entire master window
         self.pack(fill="both", expand=True)
 
-        self.session_data = getattr(master, "session_data", None) or {}
-        self._logger = AppLogger(conn=getattr(self, "conn", None), session_data=self.session_data)
-
-        self.app_root = app_root
+        self.app_root = app_root # Store reference to the main application window
 
         # Database connection variables
         self.conn = None
         self.cursor = None
         
         # Dictionary to store references to dynamically created CTkEntry widgets for salary input
-        self.entry_widgets = {}  # legacy (plus utilisé)
-        self.selected_personnel_id: int | None = None
-        self.selected_personnel_name = ctk.StringVar(value="")
-        self.current_salary_var = ctk.StringVar(value="")
-        self.new_salary_var = ctk.StringVar(value="")
+        self.entry_widgets = {} 
 
-        self._setup_treeview_style()
         # Initialize the user interface components
         self._init_ui()
         # Connect to the database and load initial data
@@ -150,154 +143,68 @@ class PageSalaireBase(ctk.CTkFrame):
         self._setup_protocol()
 
     def _init_ui(self):
-        """[UI] Interface structurée : sélection personnel → saisie salaire → enregistrement."""
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        """
+        Initializes and lays out all the UI components for the page.
+        """
+        # --- Search Zone ---
+        self.search_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.search_frame.pack(pady=10, padx=10, fill="x")
 
-        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        left = styled.frame(header)
-        left.pack(side="left", padx=14, pady=0)
-        ctk.CTkLabel(left, text="📋", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
-        inner = styled.frame(left)
-        inner.pack(side="left")
-        ctk.CTkLabel(inner, text="Nouveau SB", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
-        ctk.CTkLabel(inner, text="Enregistrement du salaire de base", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
+        self.search_label = ctk.CTkLabel(self.search_frame, text="Rechercher par nom/prénom :")
+        self.search_label.pack(side="left", padx=(0, 10))
 
-        # Toolbar recherche
-        toolbar = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        toolbar.grid(row=1, column=0, padx=10, pady=(10, 6), sticky="ew")
-        toolbar.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(toolbar, text="Recherche", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=0, padx=(12, 8), pady=10, sticky="w")
-        self.search_entry = ctk.CTkEntry(
-            toolbar, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(11), placeholder_text="Nom ou prénom…"
-        )
-        self.search_entry.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="ew")
+        self.search_entry = ctk.CTkEntry(self.search_frame, placeholder_text="Saisir le nom ou le prénom...")
+        self.search_entry.pack(side="left", fill="x", expand=True)
+        # Bind the search entry's KeyRelease event to the filter method
         self.search_entry.bind("<KeyRelease>", self._filter_personnels)
-        styled.button_secondary(toolbar, text="Actualiser", icon="↻", width=120, height=32, command=self._filter_personnels).grid(
-            row=0, column=2, padx=(0, 12), pady=10, sticky="e"
-        )
 
-        # Contenu: liste personnel (gauche) + fiche salaire (droite)
-        content = ctk.CTkFrame(self, fg_color="transparent")
-        content.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 6))
-        content.grid_columnconfigure(0, weight=3)
-        content.grid_columnconfigure(1, weight=2)
-        content.grid_rowconfigure(0, weight=1)
+        # --- Treeview for displaying professor data ---
+        # Note: CustomTkinter does not have a direct CTkTreeview.
+        # We use ttk.Treeview which is part of standard Tkinter's themed widgets.
+        # Styling might not perfectly match CTk themes but it will function.
+        self.tree_frame = ctk.CTkFrame(self, fg_color="transparent") # Use CTkFrame for the container
+        self.tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        list_card = ctk.CTkFrame(content, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        list_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        list_card.grid_columnconfigure(0, weight=1)
-        list_card.grid_rowconfigure(0, weight=1)
+        # Configure ttk.Treeview styles for better integration with dark mode
+       # Configure ttk.Treeview styles for better integration with dark mode
+        # This is a basic attempt; more comprehensive styling might require a custom theme
+        style = ttk.Style()
+        # Set background for headings
+        style.configure("Treeview.Heading", background="#E8E8E8",
+                        foreground="#000000",
+                        font=('Segoe UI', 8, 'bold'))
+        # Set background and foreground for rows
+        style.configure("Treeview", background="#FFFFFF",
+                        foreground="#000000",
+                        fieldbackground="#FFFFFF",
+                        borderwidth=0,
+                        rowheight=22,
+                        font=('Segoe UI', 8))
 
-        self.tree = ttk.Treeview(list_card, columns=("nom", "prenom", "montant"), show="headings", style="P.Treeview", selectmode="browse")
+        # Create the Treeview widget
+        self.tree = ttk.Treeview(self.tree_frame, columns=("nom", "prenom", "montant"), show="headings")
         self._configure_table_alternating_colors(self.tree)
         self.tree.heading("nom", text="Nom")
         self.tree.heading("prenom", text="Prénom")
-        self.tree.heading("montant", text="Salaire actuel")
-        self.tree.column("nom", width=180, anchor="w")
-        self.tree.column("prenom", width=180, anchor="w")
-        self.tree.column("montant", width=140, anchor="e")
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
-        vsb = ttk.Scrollbar(list_card, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        vsb.grid(row=0, column=1, sticky="ns", pady=6)
-        self.tree.bind("<<TreeviewSelect>>", self._on_select_personnel)
+        self.tree.heading("montant", text="Salaire de base (Ariary)")
 
-        self.label_count = ctk.CTkLabel(list_card, text="Personnel affichés : 0", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY)
-        self.label_count.grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 10))
+        self.tree.column("nom", width=200, anchor="w")
+        self.tree.column("prenom", width=200, anchor="w")
+        self.tree.column("montant", width=150, anchor="e") # Right-align numbers
+        self.tree.pack(side="left", fill="both", expand=True)
 
-        form_card = ctk.CTkFrame(content, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        form_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        form_card.grid_columnconfigure(0, weight=1)
+        # CustomTkinter Scrollbar for the Treeview
+        self.scrollbar = ctk.CTkScrollbar(self.tree_frame, orientation="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side="right", fill="y")
 
-        ctk.CTkLabel(form_card, text="Fiche salaire", font=Fonts.bold(12), text_color=Colors.TEXT_PRIMARY).grid(
-            row=0, column=0, padx=12, pady=(12, 6), sticky="w"
-        )
-        ctk.CTkLabel(form_card, text="Personnel sélectionné", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=1, column=0, padx=12, pady=(6, 2), sticky="w"
-        )
-        self.personnel_entry = ctk.CTkEntry(
-            form_card, textvariable=self.selected_personnel_name, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(11), state="readonly"
-        )
-        self.personnel_entry.grid(row=2, column=0, padx=12, pady=(0, 10), sticky="ew")
-
-        ctk.CTkLabel(form_card, text="Salaire actuel", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=3, column=0, padx=12, pady=(0, 2), sticky="w"
-        )
-        self.current_salary_entry = ctk.CTkEntry(
-            form_card, textvariable=self.current_salary_var, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(11), state="readonly"
-        )
-        self.current_salary_entry.grid(row=4, column=0, padx=12, pady=(0, 10), sticky="ew")
-
-        # Historique (même table tb_salairebasepers)
-        ctk.CTkLabel(form_card, text="Historique (derniers enregistrements)", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=5, column=0, padx=12, pady=(0, 2), sticky="w"
-        )
-        hist_card = ctk.CTkFrame(form_card, fg_color=Colors.BG_CARD, corner_radius=10, border_width=1, border_color=Colors.BORDER)
-        hist_card.grid(row=6, column=0, padx=12, pady=(0, 10), sticky="nsew")
-        hist_card.grid_columnconfigure(0, weight=1)
-        hist_card.grid_rowconfigure(0, weight=1)
-
-        self.history_tree = ttk.Treeview(hist_card, columns=("date", "montant"), show="headings", style="P.Treeview", height=5, selectmode="browse")
-        self.history_tree.heading("date", text="Date")
-        self.history_tree.heading("montant", text="Montant")
-        self.history_tree.column("date", width=160, anchor="w")
-        self.history_tree.column("montant", width=120, anchor="e")
-        self.history_tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
-        hvsb = ttk.Scrollbar(hist_card, orient="vertical", command=self.history_tree.yview)
-        self.history_tree.configure(yscrollcommand=hvsb.set)
-        hvsb.grid(row=0, column=1, sticky="ns", pady=6)
-        self._configure_table_alternating_colors(self.history_tree)
-
-        ctk.CTkLabel(form_card, text="Nouveau salaire (Ariary)", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=7, column=0, padx=12, pady=(0, 2), sticky="w"
-        )
-        self.new_salary_entry = ctk.CTkEntry(
-            form_card, textvariable=self.new_salary_var, height=36, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(12), placeholder_text="Ex: 250000"
-        )
-        self.new_salary_entry.grid(row=8, column=0, padx=12, pady=(0, 12), sticky="ew")
-
-        actions = ctk.CTkFrame(form_card, fg_color="transparent")
-        actions.grid(row=9, column=0, padx=12, pady=(0, 12), sticky="ew")
-        styled.button_success(actions, text="Enregistrer", icon="💾", width=160, height=34, command=self._enregistrer_sb).pack(side="left")
-        styled.button_secondary(actions, text="Vider", icon="↺", width=120, height=34, command=self._clear_form).pack(side="left", padx=(10, 0))
-
-    def _setup_treeview_style(self):
-        # [UI] Style P.Treeview aligné sur Suivi présence / Absence
-        s = ttk.Style()
-        try:
-            s.theme_use("clam")
-        except Exception:
-            pass
-        s.configure(
-            "P.Treeview",
-            background=Colors.BG_CARD,
-            foreground=Colors.TEXT_PRIMARY,
-            fieldbackground=Colors.BG_CARD,
-            rowheight=26,
-            borderwidth=0,
-            font=("Segoe UI", 10),
-        )
-        s.configure(
-            "P.Treeview.Heading",
-            background=Colors.MIDNIGHT,
-            foreground=Colors.TEXT_ON_DARK,
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            padding=(6, 5),
-        )
-        s.map("P.Treeview", background=[("selected", Colors.PRIMARY_LIGHT)])
-        s.map("P.Treeview.Heading", background=[("active", Colors.MIDNIGHT_LIGHT)])
+        # --- Save Button ---
+        self.btn_enregistrer = ctk.CTkButton(self, text="Enregistrer", command=self._enregistrer_sb)
+        self.btn_enregistrer.pack(pady=10)
 
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background=Colors.BG_CARD)
-        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
+        tree.tag_configure("row_even", background="#FFFFFF")
+        tree.tag_configure("row_odd", background="#D9EEED")
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):
@@ -398,7 +305,7 @@ class PageSalaireBase(ctk.CTkFrame):
     def _filter_personnels(self, event=None):
         """
         Filters the Treeview based on the search input.
-        Affiche nom/prénom + salaire actuel (dernier).
+        Clears existing entries, reloads personnels, and adds input fields for visible rows.
         """
         search_term = self._normalize_string(self.search_entry.get())
         print(f"Filtering personnels with search term: '{search_term}'")
@@ -409,6 +316,14 @@ class PageSalaireBase(ctk.CTkFrame):
         print("Treeview cleared.")
         self._refresh_table_alternating_colors(self.tree)
         
+        # Destroy and clear CTkEntry widgets for visible rows
+        # This is important to prevent orphaned widgets when the Treeview is refreshed
+        for entry_widget in self.entry_widgets.values():
+            if entry_widget.winfo_exists(): # Check if the widget still exists before destroying
+                entry_widget.destroy()
+        self.entry_widgets.clear()
+        print("Existing salary entry widgets destroyed and cleared.")
+
         # Reload and filter professors
         all_personnel = self._charger_personnel()
         inserted_count = 0
@@ -432,78 +347,53 @@ class PageSalaireBase(ctk.CTkFrame):
 
             # Check if the normalized search term is present in the normalized name or prenom
             if search_term in normalized_nom or search_term in normalized_prenom:
-                prenom_disp = (prenom or "").strip() if prenom is not None else ""
-                prenom_disp = prenom_disp if prenom_disp else "-"
-                nom_disp = (nom or "").strip() if nom is not None else ""
-                nom_disp = nom_disp if nom_disp else "-"
                 # Insert the professor into the treeview with their current salary
-                self.tree.insert("", "end", iid=idprof, values=(nom_disp, prenom_disp, current_montant))
+                self.tree.insert("", "end", iid=idprof, values=(nom, prenom, current_montant))
                 inserted_count += 1
         self._refresh_table_alternating_colors(self.tree)
         
         print(f"Inserted {inserted_count} professors into the treeview.")
-        if hasattr(self, "label_count"):
-            self.label_count.configure(text=f"Personnel affichés : {inserted_count}")
+        # Re-add CTkEntry widgets for the filtered, visible rows
+        self._ajouter_champs_saisie()
+        print("Salary entry fields added/updated.")
 
 
-    def _clear_form(self):
-        self.selected_personnel_id = None
-        self.selected_personnel_name.set("")
-        self.current_salary_var.set("")
-        self.new_salary_var.set("")
-        if hasattr(self, "history_tree"):
-            for item in self.history_tree.get_children():
-                self.history_tree.delete(item)
+    def _ajouter_champs_saisie(self):
+        """
+        Adds CustomTkinter Entry widgets into the 'montant' column of the Treeview.
+        These entries allow users to input or modify base salaries.
+        """
+        # Iterate over all items currently visible in the Treeview
+        for item in self.tree.get_children():
+            # Get the bounding box of the 'montant' column for the current item
+            bbox = self.tree.bbox(item, column=2)
+            if bbox and len(bbox) == 4: # Ensure bbox is valid (x, y, width, height)
+                x, y, width, height = bbox
+                
+                # If an entry widget already exists for this item and is still valid, destroy it
+                # This handles refreshing the entries when the treeview content changes
+                if item in self.entry_widgets and self.entry_widgets[item].winfo_exists():
+                    self.entry_widgets[item].destroy()
 
-    def _on_select_personnel(self, event=None):
-        sel = self.tree.selection()
-        if not sel:
-            return
-        try:
-            pid = int(sel[0])
-        except Exception:
-            return
-        values = self.tree.item(sel[0], "values")
-        nom = values[0] if len(values) > 0 else ""
-        prenom = values[1] if len(values) > 1 else ""
-        salaire = values[2] if len(values) > 2 else ""
-        self.selected_personnel_id = pid
-        nom_disp = (str(nom).strip() if nom is not None else "") or "-"
-        prenom_disp = (str(prenom).strip() if prenom is not None else "") or "-"
-        self.selected_personnel_name.set(f"{nom_disp} {prenom_disp}".strip())
-        self.current_salary_var.set(str(salaire) if salaire is not None else "")
-        self.new_salary_var.set("")
-        self._load_history(pid)
-        try:
-            self.new_salary_entry.focus_set()
-        except Exception:
-            pass
+                # Create a new CTkEntry widget, parented to the treeview
+                # Set fg_color to match treeview background and text_color for readability
+                taux_entry = ctk.CTkEntry(self.tree, 
+                                          width=width,  # Pass width to constructor
+                                          height=height, # Pass height to constructor
+                                          fg_color=ctk.ThemeManager.theme["CTkFrame"]["fg_color"],
+                                          text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
+                                          corner_radius=5) # Add rounded corners
 
-    def _load_history(self, idpers: int, limit: int = 8):
-        # [LOGIQUE] Lecture historique depuis tb_salairebasepers
-        if not getattr(self, "cursor", None):
-            return
-        if not hasattr(self, "history_tree"):
-            return
-        for item in self.history_tree.get_children():
-            self.history_tree.delete(item)
-        try:
-            self.cursor.execute(
-                "SELECT date, montant FROM tb_salairebasepers WHERE idpers=%s ORDER BY date DESC LIMIT %s",
-                (int(idpers), int(limit)),
-            )
-            rows = self.cursor.fetchall()
-            for idx, (d, m) in enumerate(rows):
-                d_str = d.strftime("%Y-%m-%d %H:%M") if hasattr(d, "strftime") else str(d)
-                try:
-                    m_val = float(m) if m is not None else 0.0
-                    m_str = f"{m_val:,.2f}".replace(",", " ").replace(".", ",")
-                except Exception:
-                    m_str = str(m)
-                self.history_tree.insert("", "end", values=(d_str, m_str))
-            self._refresh_table_alternating_colors(self.history_tree)
-        except Exception:
-            return
+                # Insert the current value from the treeview into the entry field
+                current_value = self.tree.item(item, 'values')[2]
+                if current_value:
+                    taux_entry.insert(0, current_value)
+
+                # Place the entry widget precisely over the Treeview cell
+                # REMOVED width=width, height=height from place() method
+                taux_entry.place(x=x, y=y) 
+                # Store the reference to the entry widget using the item ID as key
+                self.entry_widgets[item] = taux_entry
 
     def _enregistrer_sb(self):
         """
@@ -518,58 +408,57 @@ class PageSalaireBase(ctk.CTkFrame):
         success_count = 0
         error_occurred = False
 
-        # [LOGIQUE] Enregistrement guidé : 1 personnel sélectionné
-        if not self.selected_personnel_id:
-            messagebox.showerror("Erreur", "Veuillez sélectionner un personnel dans la liste.")
-            return
-        montant_input = (self.new_salary_var.get() or "").strip().replace(" ", "").replace(",", ".")
-        if not montant_input:
-            messagebox.showerror("Erreur", "Veuillez saisir le nouveau salaire.")
-            return
-        try:
-            montant_float = float(montant_input)
-            if montant_float <= 0:
-                messagebox.showerror("Erreur", "Le salaire doit être supérieur à zéro.")
-                return
-        except ValueError:
-            messagebox.showerror("Erreur", "Veuillez entrer un nombre valide pour le salaire.")
-            return
+        # Iterate over all professor IDs currently displayed in the treeview
+        for idpers_str in self.tree.get_children():
+            # Get the associated CTkEntry widget for this professor
+            entry = self.entry_widgets.get(idpers_str)
+            if not entry: # Skip if no entry widget is found for this item
+                continue
 
-        try:
-            self.cursor.execute(
-                """
-                INSERT INTO tb_salairebasepers (montant, idpers, date)
-                VALUES (%s, %s, %s)
-                """,
-                (montant_float, int(self.selected_personnel_id), now),
-            )
-            success_count = 1
-        except Exception as e:
-            self.conn.rollback()
-            messagebox.showerror("Erreur SQL", f"Erreur lors de l'enregistrement : {e}")
-            error_occurred = True
+            montant_input = entry.get().strip() # Get the text from the entry field
+            
+            # Get the current value displayed in the treeview for comparison
+            # This helps avoid saving identical data unnecessarily
+            current_tree_value = self.tree.item(idpers_str, 'values')[2]
+
+            # Only process if a value is entered AND it's different from the currently displayed value
+            if montant_input and (montant_input != current_tree_value): 
+                try:
+                    idpers = int(idpers_str) # Convert item ID (which is prof ID) to integer
+                    montant_float = float(montant_input) # Convert salary input to float
+
+                    # Always insert a new record to keep a historical log of salary changes
+                    self.cursor.execute(
+                        """
+                        INSERT INTO tb_salairebasepers (montant, idpers, date)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (montant_float, idpers, now)
+                    )
+                    success_count += 1 # Increment success counter
+                except ValueError:
+                    # Handle cases where the input is not a valid number
+                    messagebox.showerror("Erreur de saisie", f"Veuillez entrer un nombre valide pour le salaire du personnel ID {idpers_str} ('{montant_input}' n'est pas un nombre valide).")
+                    self.conn.rollback() # Rollback all changes if any error occurs
+                    error_occurred = True
+                    break # Stop processing on the first error
+                except Exception as e:
+                    # Handle other potential database errors
+                    self.conn.rollback() # Rollback all changes
+                    messagebox.showerror("Erreur SQL", f"Erreur lors de l'enregistrement du salaire pour ID {idpers_str} : {e}")
+                    error_occurred = True
+                    break # Stop processing on the first error
+            # If montant_input is empty, or if it's the same as the current_tree_value, we do nothing.
+            # If explicit handling for clearing a salary (e.g., setting to NULL) is needed,
+            # that logic would be added here.
 
         if not error_occurred:
             self.conn.commit() # Commit all changes if no errors occurred
-            try:
-                self._logger.log(
-                    action="Création salaire de base",
-                    element=f"idpers={self.selected_personnel_id}",
-                    details=f"Salaire de base enregistré (montant={montant_float}, date={now})",
-                    value=str(montant_float),
-                )
-            except Exception:
-                pass
             if success_count > 0:
                 messagebox.showinfo("Succès", f"{success_count} salaires de base enregistrés avec succès.")
             else:
                 messagebox.showinfo("Information", "Aucun nouveau salaire de base à enregistrer ou aucun changement détecté.")
             self._filter_personnels() # Refresh the view after saving to show updated data
-            # rafraîchir l'historique du personnel courant puis reset formulaire
-            pid = self.selected_personnel_id
-            if pid:
-                self._load_history(pid)
-            self._clear_form()
         else:
             # An error message was already shown in the loop, this is a final summary
             messagebox.showerror("Erreur", "Une ou plusieurs erreurs sont survenues lors de l'enregistrement. Les modifications ont été annulées.")

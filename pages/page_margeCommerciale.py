@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import threading
 from tkinter import ttk
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -86,9 +85,6 @@ class PageStock(ctk.CTkFrame):
             self.iduser = session_data['user_id']
         else:
             self.iduser = 1
-
-        self.session_data = session_data or getattr(master, "session_data", None) or {"user_id": self.iduser}
-        self._logger = AppLogger(conn=db_conn, session_data=self.session_data, fallback_user_id=self.iduser)
 
         self.magasins            = []
         self.colonnes_dynamiques = []
@@ -1293,15 +1289,6 @@ class PageStock(ctk.CTkFrame):
                 writer.writerow(self.colonnes_dynamiques)
                 for item in self.tree.get_children():
                     writer.writerow(self.tree.item(item)['values'])
-            try:
-                self._logger.log(
-                    action="Export",
-                    element="Marge commerciale",
-                    details=f"Export CSV marge commerciale (lignes={len(self.tree.get_children())})",
-                    value=os.path.basename(fichier),
-                )
-            except Exception:
-                pass
             messagebox.showinfo("Succès", f"Marge commerciale exportée vers :\n{fichier}")
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de l'export: {str(e)}")
@@ -1338,15 +1325,6 @@ class PageStock(ctk.CTkFrame):
                     if (compteur_maj + compteur_ins) % 100 == 0:
                         conn.commit()
             conn.commit()
-            try:
-                self._logger.log(
-                    action="Synchronisation stock",
-                    element="tb_stock",
-                    details=f"Synchronisation tb_stock terminée (maj={compteur_maj}, ins={compteur_ins}, total={compteur_total})",
-                    value=f"maj={compteur_maj}, ins={compteur_ins}",
-                )
-            except Exception:
-                pass
             messagebox.showinfo("Synchronisation réussie",
                                 f"✅ {compteur_maj} mises à jour, {compteur_ins} créations, {compteur_total} lignes traitées.")
         except Exception as e:

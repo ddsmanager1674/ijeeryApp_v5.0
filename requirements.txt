@@ -1,12 +1,9 @@
 customtkinter>=5.0.0
-psycopg2>=2.9.0
+psycopg2-binary>=2.9.0
 reportlab>=4.0.0
 Pillow>=9.0.0
 num2words>=0.5.0
 fpdf2>=2.7.0
 openpyxl>=3.0.0
-# dépendances explicites de customtkinter
-darkdetect>=0.8.0
-packaging>=26.0
-pandas>=3.0.0
 tkcalendar>=1.6.1
+Babel>=2.10.0

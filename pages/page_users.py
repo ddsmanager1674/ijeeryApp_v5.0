@@ -5,7 +5,6 @@ from datetime import datetime
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 
 class PageUsers(ctk.CTkFrame):
@@ -21,9 +20,6 @@ class PageUsers(ctk.CTkFrame):
         # Initialisation des dictionnaires pour la traduction des IDs
         self.fonctions_dict = {}
         self.magasins_dict = {}
-
-        self.session_data = getattr(master, "session_data", None) or {}
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         
         self.setup_ui()
         
@@ -303,15 +299,6 @@ class PageUsers(ctk.CTkFrame):
             self.load_users()
             self.clear_fields()
             messagebox.showinfo("Succès", "Utilisateur ajouté avec succès!")
-            try:
-                self._logger.log(
-                    action="Création utilisateur",
-                    element=username,
-                    details=f"Utilisateur créé: {prenomuser} {nomuser} (fonction='{fonction_designation}', magasin='{magasin_designation}', actif={active})",
-                    value=f"username={username}",
-                )
-            except Exception:
-                pass
             
         except psycopg2.Error as err:
             self.conn.rollback()
@@ -328,13 +315,6 @@ class PageUsers(ctk.CTkFrame):
         if not self.conn: return
             
         try:
-            old_username = ""
-            try:
-                self.cursor.execute("SELECT username FROM tb_users WHERE iduser=%s", (self.selected_user_id,))
-                r = self.cursor.fetchone()
-                old_username = r[0] if r and r[0] else ""
-            except Exception:
-                old_username = ""
             # Récupérer toutes les entrées
             nomuser = self.nomuser_entry.get().strip()
             prenomuser = self.prenomuser_entry.get().strip()
@@ -370,15 +350,6 @@ class PageUsers(ctk.CTkFrame):
             self.load_users()
             self.clear_fields()
             messagebox.showinfo("Succès", "Utilisateur modifié avec succès!")
-            try:
-                self._logger.log(
-                    action="Modification utilisateur",
-                    element=old_username or f"iduser={self.selected_user_id}",
-                    details=f"Utilisateur modifié en '{username}' (fonction='{fonction_designation}', magasin='{magasin_designation}', actif={active})",
-                    value=f"iduser={self.selected_user_id}",
-                )
-            except Exception:
-                pass
             
         except psycopg2.Error as err:
             self.conn.rollback()
@@ -398,28 +369,12 @@ class PageUsers(ctk.CTkFrame):
             return
             
         try:
-            old_username = ""
-            try:
-                self.cursor.execute("SELECT username FROM tb_users WHERE iduser=%s", (self.selected_user_id,))
-                r = self.cursor.fetchone()
-                old_username = r[0] if r and r[0] else ""
-            except Exception:
-                old_username = ""
             # Suppression logique (setting deleted=1)
             self.cursor.execute("UPDATE tb_users SET deleted = 1 WHERE iduser = %s", (self.selected_user_id,))
             self.conn.commit()
             self.load_users()
             self.clear_fields()
             messagebox.showinfo("Succès", "Utilisateur supprimé (logiquement) avec succès!")
-            try:
-                self._logger.log(
-                    action="Suppression utilisateur",
-                    element=old_username or f"iduser={self.selected_user_id}",
-                    details="Suppression logique utilisateur (deleted=1)",
-                    value=f"iduser={self.selected_user_id}",
-                )
-            except Exception:
-                pass
             
         except psycopg2.Error as err:
             self.conn.rollback()

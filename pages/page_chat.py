@@ -463,7 +463,6 @@ class PageChat(ctk.CTkFrame):
 
         # ── Démarrer le polling ───────────────────────────────────────────────
         self._start_refresh()
-        self.bind("<Destroy>", self._on_destroy, add="+")
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 1 — CONSTRUCTION UI
@@ -1047,11 +1046,14 @@ class PageChat(ctk.CTkFrame):
 
         # Message si aucun résultat
         if visible == 0:
-            self.lbl_no_contact.configure(
-                master=self.scroll_contacts,
-                text="Aucun collaborateur trouvé" if filtre_lower else "Aucun utilisateur",
-            )
-            self.lbl_no_contact.grid(padx=10, pady=20)
+            try:
+                if self.winfo_exists() and self.lbl_no_contact.winfo_exists():
+                    self.lbl_no_contact.configure(
+                        text="Aucun collaborateur trouvé" if filtre_lower else "Aucun utilisateur",
+                    )
+                    self.lbl_no_contact.grid(padx=10, pady=20)
+            except Exception:
+                pass
 
     def _on_search_change(self, *args):
         """Déclenché à chaque frappe dans la barre de recherche."""
@@ -1388,6 +1390,23 @@ class PageChat(ctk.CTkFrame):
         """Démarre la boucle de polling."""
         self._refresh_job = self.after(REFRESH_MS, self._refresh_loop)
 
+    def _stop_refresh(self):
+        """Arrête proprement la boucle de polling."""
+        if self._refresh_job is not None:
+            try:
+                self.after_cancel(self._refresh_job)
+            except Exception:
+                pass
+            self._refresh_job = None
+
+    def destroy(self):
+        """Surcharge destroy pour annuler le polling avant destruction."""
+        self._stop_refresh()
+        try:
+            super().destroy()
+        except Exception:
+            pass
+
     def _refresh_loop(self):
         """
         Boucle principale du polling :
@@ -1396,12 +1415,22 @@ class PageChat(ctk.CTkFrame):
           3. Actualise les badges de la sidebar
         """
         try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
+        try:
             self._verifier_nouveaux_messages()
         except Exception as e:
             print(f"[PageChat] Erreur refresh: {e}")
         finally:
-            # Toujours reprogram­mer même en cas d'erreur
-            self._refresh_job = self.after(REFRESH_MS, self._refresh_loop)
+            try:
+                if self.winfo_exists():
+                    self._refresh_job = self.after(REFRESH_MS, self._refresh_loop)
+                else:
+                    self._refresh_job = None
+            except Exception:
+                self._refresh_job = None
 
     def _verifier_nouveaux_messages(self):
         """
@@ -1615,36 +1644,12 @@ class PageChat(ctk.CTkFrame):
 
     def _on_mousewheel(self, event):
         """Gère le scroll molette (Windows + Linux)."""
-        if not self.winfo_exists():
-            return
-        if not hasattr(self, "msg_canvas") or not self.msg_canvas.winfo_exists():
-            return
-        try:
-            if event.num == 4:
-                self.msg_canvas.yview_scroll(-1, "units")
-            elif event.num == 5:
-                self.msg_canvas.yview_scroll(1, "units")
-            else:
-                self.msg_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        except tk.TclError:
-            # Le canvas a été détruit entre-temps (changement de page rapide)
-            return
-
-    def _on_destroy(self, event=None):
-        """Nettoyage des callbacks globaux et du polling à la destruction."""
-        if event is not None and event.widget is not self:
-            return
-        try:
-            if self._refresh_job is not None:
-                self.after_cancel(self._refresh_job)
-                self._refresh_job = None
-        except Exception:
-            pass
-        for ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            try:
-                self.unbind_all(ev)
-            except Exception:
-                pass
+        if event.num == 4:
+            self.msg_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self.msg_canvas.yview_scroll(1, "units")
+        else:
+            self.msg_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

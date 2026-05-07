@@ -32,9 +32,6 @@ from decimal import Decimal, InvalidOperation
 
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
-from settings_utils import open_file_if_enabled
-from log_utils import AppLogger
-from stock_snapshot import StockSnapshot
 
 # ── Imports ReportLab (impression PDF) ───────────────────────────────────────
 from reportlab.lib.pagesizes import A5, landscape
@@ -347,7 +344,6 @@ class PageAvoir(ctk.CTkFrame):
 
         # ── Paramètres d'impression (settings.json) ───────────────────────────
         self.settings = self._load_settings()
-        self._stock_snapshot_cache: dict[int, StockSnapshot] = {}
 
         # ── Layout principal : 6 rows ─────────────────────────────────────────
         self.grid_columnconfigure(0, weight=1)
@@ -363,7 +359,6 @@ class PageAvoir(ctk.CTkFrame):
         self.charger_client()
         self.charger_infos_societe()
         self.conn = self.connect_db()
-        self._logger = AppLogger(conn=self.conn, session_data={"user_id": self.id_user_connecte})
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 1 — CONNEXION BASE DE DONNÉES
@@ -410,7 +405,7 @@ class PageAvoir(ctk.CTkFrame):
             'Avoir_ImpressionTicket':       0,
         }
         try:
-            with open(get_config_path('settings.json'), 'r', encoding='utf-8') as f:
+            with open('settings.json', 'r', encoding='utf-8') as f:
                 settings = json.load(f)
             print("✅ Paramètres d'impression chargés depuis settings.json")
             return settings
@@ -576,7 +571,6 @@ class PageAvoir(ctk.CTkFrame):
             row=0, column=0, padx=(10, 6), pady=8, sticky="w")
         self.entry_designation = ctk.CTkEntry(
             card, **entry_kw, placeholder_text="Motif / description de l'avoir…",
-            state="disabled",
         )
         self.entry_designation.grid(row=0, column=1, padx=(0, 10), pady=8, sticky="ew")
 
@@ -659,9 +653,6 @@ class PageAvoir(ctk.CTkFrame):
         )
         self.btn_annuler_mod.grid(row=1, column=6, padx=(4, 10), pady=(0, 8), sticky="ew")
         self.btn_annuler_mod.grid_remove()  # visible seulement en mode modification
-
-        # Masquer la bande de saisie d'article par défaut
-        card.grid_remove()
 
     # ── Row 3 — Tableau Treeview ──────────────────────────────────────────────
 
@@ -826,7 +817,6 @@ class PageAvoir(ctk.CTkFrame):
             font=Fonts.bold(11),
             fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
             corner_radius=6, command=self.supprimer_detail,
-            state="disabled",
         )
         self.btn_supprimer_ligne.grid(row=0, column=1, padx=4, pady=6)
 
@@ -925,22 +915,109 @@ class PageAvoir(ctk.CTkFrame):
 
     def calculer_stock_article(self, idarticle, idunite_cible, idmag=None) -> float:
         """
-        Calcule le stock d'un article dans l'unité cible via StockManager.
-        Conserve les valeurs négatives (pas de clamp à 0).
+        Calcule le stock consolidé d'un article dans l'unité cible.
+        Prend en compte : livraisons, ventes, avoirs, sorties, transferts.
+        *** LOGIQUE MÉTIER — NE PAS MODIFIER ***
         """
+        conn = self.connect_db()
+        if not conn:
+            return 0
+
         try:
-            idmag_int = int(idmag) if idmag else 0
-            if idmag_int == 0:
-                return 0.0
+            cursor = conn.cursor()
 
-            snap = self._stock_snapshot_cache.get(idmag_int)
-            if snap is None:
-                snap = StockSnapshot.build(idmag_int)
-                self._stock_snapshot_cache[idmag_int] = snap
+            cursor.execute(
+                """
+                SELECT idunite, COALESCE(qtunite, 1) AS qtunite
+                FROM tb_unite WHERE idarticle = %s ORDER BY idunite ASC
+                """,
+                (idarticle,),
+            )
+            unites_article = cursor.fetchall()
 
-            return float(snap.stock_unite(int(idarticle), int(idunite_cible)))
+            if not unites_article:
+                return 0
+
+            facteurs_conversion: dict = {}
+            facteur_cumul = 1.0
+            for i, (id_unite, qt_unite) in enumerate(unites_article):
+                if i == 0:
+                    facteurs_conversion[id_unite] = 1.0
+                else:
+                    facteur_cumul *= qt_unite
+                    facteurs_conversion[id_unite] = facteur_cumul
+
+            facteur_cible = facteurs_conversion.get(idunite_cible, 1.0)
+            if facteur_cible == 0:
+                return 0
+
+            clause_mag = "AND idmag = %s" if idmag else ""
+            params_mag = [idmag] if idmag else []
+
+            stock_en_unite_base = 0.0
+
+            for idunite_source, _ in unites_article:
+                def qry(sql, params):
+                    cursor.execute(sql, params)
+                    return cursor.fetchone()[0] or 0
+
+                total_livraison = qry(
+                    f"SELECT COALESCE(SUM(qtlivrefrs),0) FROM tb_livraisonfrs "
+                    f"WHERE idarticle=%s AND idunite=%s {clause_mag}",
+                    [idarticle, idunite_source] + params_mag,
+                )
+                total_vente = qry(
+                    f"SELECT COALESCE(SUM(qtvente),0) FROM tb_ventedetail "
+                    f"WHERE idarticle=%s AND idunite=%s {clause_mag}",
+                    [idarticle, idunite_source] + params_mag,
+                )
+                total_avoir = qry(
+                    f"SELECT COALESCE(SUM(qtavoir),0) FROM tb_avoirdetail "
+                    f"WHERE idarticle=%s AND idunite=%s {clause_mag}",
+                    [idarticle, idunite_source] + params_mag,
+                )
+                total_sortie = qry(
+                    f"SELECT COALESCE(SUM(qtsortie),0) FROM tb_sortiedetail sd "
+                    f"INNER JOIN tb_sortie s ON sd.idsortie=s.id "
+                    f"WHERE sd.idarticle=%s AND sd.idunite=%s AND s.deleted=0 {clause_mag}",
+                    [idarticle, idunite_source] + params_mag,
+                )
+
+                p_ts = [idarticle, idunite_source]
+                q_ts = ("SELECT COALESCE(SUM(td.qttransfertsortie),0) "
+                        "FROM tb_transfertdetail td "
+                        "INNER JOIN tb_transfert t ON td.reftransfert=t.reftransfert "
+                        "WHERE td.idarticle=%s AND td.idunite=%s AND t.deleted=0")
+                if idmag:
+                    q_ts += " AND t.idmagsortie=%s"
+                    p_ts.append(idmag)
+                total_transfert_sortie = qry(q_ts, p_ts)
+
+                p_te = [idarticle, idunite_source]
+                q_te = ("SELECT COALESCE(SUM(td.qttransfertentree),0) "
+                        "FROM tb_transfertdetail td "
+                        "INNER JOIN tb_transfert t ON td.reftransfert=t.reftransfert "
+                        "WHERE td.idarticle=%s AND td.idunite=%s AND t.deleted=0")
+                if idmag:
+                    q_te += " AND t.idmagentree=%s"
+                    p_te.append(idmag)
+                total_transfert_entree = qry(q_te, p_te)
+
+                stock_source = (
+                    total_livraison + total_avoir + total_transfert_entree
+                    - total_vente - total_sortie - total_transfert_sortie
+                )
+                stock_en_unite_base += stock_source * facteurs_conversion.get(idunite_source, 1.0)
+
+            return stock_en_unite_base / facteur_cible
+
         except Exception:
-            return 0.0
+            return 0
+        finally:
+            if 'cursor' in locals() and cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 6 — CHARGEMENTS INITIAUX
@@ -1650,12 +1727,6 @@ class PageAvoir(ctk.CTkFrame):
         )
         tree.tag_configure("even", background=Colors.BG_CARD)
         tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
-        # Ligne désactivée si la facture a déjà un avoir associé
-        tree.tag_configure(
-            "disabled",
-            background=Colors.BG_CARD,
-            foreground=Colors.TEXT_MUTED,
-        )
 
         col_config = {
             "ID": (0, False), "Ref Vente": (120, True),
@@ -1689,34 +1760,30 @@ class PageAvoir(ctk.CTkFrame):
                 cursor.execute(
                     """
                     SELECT v.id, v.refvente, v.dateregistre,
-                           c.nomcli, COALESCE(v.totmtvente,0), u.nomuser,
-                           EXISTS(
-                               SELECT 1 FROM tb_avoir a
-                               WHERE a.deleted = 0
-                                 AND a.observation ILIKE '%%' || v.refvente || '%%'
-                           ) AS has_avoir
+                           c.nomcli, COALESCE(v.totmtvente,0), u.nomuser
                     FROM tb_vente v
                     LEFT JOIN tb_client c ON v.idclient = c.idclient
                     LEFT JOIN tb_users  u ON v.iduser   = u.iduser
                     WHERE v.deleted=0 AND v.statut='VALIDEE'
                       AND DATE(v.dateregistre) = %s
                       AND (v.refvente ILIKE %s OR v.description ILIKE %s OR c.nomcli ILIKE %s)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM tb_pmtavoir pa
+                          WHERE pa.refvente = v.refvente AND pa.deleted = 0
+                      )
                     ORDER BY v.dateregistre DESC
                     """,
                     (date_filtre, filtre_like, filtre_like, filtre_like),
                 )
                 for idx, row in enumerate(cursor.fetchall()):
-                    id_vente, ref_vente, date_vente, nom_cli, montant, nom_user, has_avoir = row
-                    tags = ("disabled",) if has_avoir else ("even" if idx % 2 == 0 else "odd",)
+                    id_vente, ref_vente, date_vente, nom_cli, montant, nom_user = row
                     tree.insert('', 'end', values=(
                         id_vente, ref_vente,
                         date_vente.strftime("%d/%m/%Y %H:%M:%S") if date_vente else "N/A",
                         nom_cli or "N/A",
                         self.formater_nombre(montant or 0.0),
                         nom_user or "Inconnu",
-                    ), tags=tags)
-                    if has_avoir:
-                        print(f"[AVOIR] Facture déjà associée à un avoir : {ref_vente}")
+                    ), tags=("even" if idx % 2 == 0 else "odd",))
             except Exception as e:
                 MessageDialog("Erreur SQL", f"Chargement factures : {e}", type_='error')
             finally:
@@ -1730,18 +1797,7 @@ class PageAvoir(ctk.CTkFrame):
             if not sel:
                 MessageDialog("Attention", "Sélectionnez une facture.", type_='warning')
                 return
-            item = sel[0]
-            tags = tree.item(item).get('tags', [])
-            if 'disabled' in tags:
-                ref_vente = tree.item(item)['values'][1]
-                print(f"[AVOIR] Sélection interdite : facture déjà avoirée {ref_vente}")
-                MessageDialog(
-                    "Attention",
-                    "Cette facture a déjà un avoir associé et ne peut plus être sélectionnée.",
-                    type_='warning'
-                )
-                return
-            idvente = tree.item(item)['values'][0]
+            idvente = tree.item(sel[0])['values'][0]
             fen.destroy()
             self.charger_vente_modification(idvente)
 
@@ -1825,7 +1881,6 @@ class PageAvoir(ctk.CTkFrame):
             self.entry_designation.configure(state="normal")
             self.entry_designation.delete(0, "end")
             self.entry_designation.insert(0, f"Avoir pour Facture {vente[1]} - {vente[3] or ''}".strip())
-            self.entry_designation.configure(state="disabled")
 
             self.detail_avoir = []
             for d in details:
@@ -1852,7 +1907,7 @@ class PageAvoir(ctk.CTkFrame):
             self.combo_magasin.configure(state="disabled")
             self.btn_recherche_article.configure(state="disabled")
             self.btn_ajouter.configure(state="normal")
-            self.btn_supprimer_ligne.configure(state="disabled")
+            self.btn_supprimer_ligne.configure(state="normal")
 
             # Activer l'enregistrement
             self.btn_enregistrer.configure(
@@ -2057,7 +2112,7 @@ class PageAvoir(ctk.CTkFrame):
                 )
                 self.btn_recherche_article.configure(state="disabled")
                 self.btn_ajouter.configure(state="normal")
-                self.btn_supprimer_ligne.configure(state="disabled")
+                self.btn_supprimer_ligne.configure(state="normal")
                 self.btn_imprimer.configure(state="disabled")
             except Exception:
                 pass
@@ -2128,6 +2183,43 @@ class PageAvoir(ctk.CTkFrame):
             conn = self.connect_db()
             if not conn:
                 return
+
+            # ── Vérification : un avoir existe-t-il déjà pour cette facture ? ──
+            if self.idvente_charge:
+                try:
+                    cur_check = conn.cursor()
+                    cur_check.execute(
+                        "SELECT refvente FROM tb_vente WHERE id = %s",
+                        (self.idvente_charge,),
+                    )
+                    row_ref = cur_check.fetchone()
+                    cur_check.close()
+                    if row_ref:
+                        refvente_verif = row_ref[0]
+                        cur_check2 = conn.cursor()
+                        cur_check2.execute(
+                            """
+                            SELECT pa.refavoir FROM tb_pmtavoir pa
+                            WHERE pa.refvente = %s AND pa.deleted = 0
+                            LIMIT 1
+                            """,
+                            (refvente_verif,),
+                        )
+                        avoir_existant = cur_check2.fetchone()
+                        cur_check2.close()
+                        if avoir_existant:
+                            MessageDialog(
+                                "Avoir déjà existant",
+                                f"La facture {refvente_verif} possède déjà un avoir "
+                                f"(N° {avoir_existant[0]}).\n"
+                                "Une seule note d'avoir est autorisée par facture.",
+                                type_='error',
+                            )
+                            return
+                except Exception as e_chk:
+                    MessageDialog("Erreur", f"Vérification avoir : {e_chk}", type_='error')
+                    return
+            # ── Fin vérification ──────────────────────────────────────────────
 
             ref_avoir    = self.entry_ref_avoir.get()
             date_str     = self.entry_date_avoir.get()
@@ -2255,16 +2347,6 @@ class PageAvoir(ctk.CTkFrame):
             self.btn_imprimer.grid()
             self.btn_enregistrer.configure(state="disabled", text="✔ Avoir Enregistré")
             success = True
-
-            try:
-                self._logger.log(
-                    action="Avoir enregistré",
-                    element=str(ref_avoir),
-                    details=f"Avoir enregistré ref: {ref_avoir}, montant: {self.formater_nombre(montant_total_avoir)} Ar, client: {client_nom}",
-                    value=f"{self.formater_nombre(montant_total_avoir)} Ar",
-                )
-            except Exception:
-                pass
 
             # Impression automatique
             impression_a5     = self.settings.get('Avoir_ImpressionA5', 1)
@@ -2750,7 +2832,7 @@ class PageAvoir(ctk.CTkFrame):
         """Ouvre un fichier avec l'application par défaut du système."""
         try:
             if sys.platform == 'win32':
-                open_file_if_enabled(filename, operation="open", setting_key="Avoir_ImpressionA5", setting_default=1)
+                os.startfile(filename)
             elif sys.platform == 'darwin':
                 os.system(f'open "{filename}"')
             else:
@@ -2952,7 +3034,6 @@ class PageAvoir(ctk.CTkFrame):
 
         self.entry_designation.configure(state="normal")
         self.entry_designation.delete(0, "end")
-        self.entry_designation.configure(state="disabled")
 
         self.entry_client.configure(state="normal")
         self.entry_client.delete(0, "end")
@@ -2978,7 +3059,7 @@ class PageAvoir(ctk.CTkFrame):
         )
         self.btn_recherche_article.configure(state="disabled")
         self.btn_ajouter.configure(state="normal")
-        self.btn_supprimer_ligne.configure(state="disabled")
+        self.btn_supprimer_ligne.configure(state="normal")
 
         if reset_imprimer:
             self.btn_imprimer.configure(state="disabled")

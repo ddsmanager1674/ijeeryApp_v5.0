@@ -124,7 +124,6 @@ class StockManager:
     # Types de mouvements reconnus (pour filtrage)
     # ─────────────────────────────────────────────────────────────
     TYPES_ENTREE = {
-        'ENTREE',
         'LIVRAISON',
         'INVENTAIRE',
         'AVOIR',
@@ -275,21 +274,6 @@ class StockManager:
         tous_mouvements AS (
 
             -- ── ENTRÉES ──────────────────────────────────────────────────
-
-            -- 0. Entrée directe (Bon d'Entrée)
-            SELECT
-                ed.idunite,
-                ed.idmag,
-                e.dateregistre              AS date_mouvement,
-                ed.qtentree                 AS quantite,
-                'ENTREE'                    AS type_mouvement,
-                1                           AS signe
-            FROM tb_entreedetail ed
-            JOIN tb_entree e ON e.id = ed.identree
-            WHERE ed.deleted = 0
-              AND e.deleted  = 0
-
-            UNION ALL
 
             -- 1. Livraison fournisseur
             SELECT

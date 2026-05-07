@@ -7,7 +7,6 @@ import json
 import os
 import sys
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 
 # Configuration du chemin pour les imports
@@ -39,9 +38,6 @@ class PageBaseListe(ctk.CTkFrame):
         if self.conn is None:
             messagebox.showerror("Erreur", "Impossible de se connecter à la base de données.")
             return
-
-        self.session_data = getattr(parent, "session_data", None) or {}
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
         
         # CORRECTION PRINCIPALE : Appeler setup_ui() dans __init__
         self.setup_ui()
@@ -166,15 +162,6 @@ class PageBaseListe(ctk.CTkFrame):
 
             self.cursor.execute("INSERT INTO tb_baseliste (nombase, designationbase) VALUES (%s, %s)", (nombase, designation))
             self.conn.commit()
-            try:
-                self._logger.log(
-                    action="Création base liste",
-                    element=str(nombase),
-                    details=f"Référentiel créé (base='{nombase}', designation='{designation}')",
-                    value="aucune valeur",
-                )
-            except Exception:
-                pass
             self.charger_base()
             self.vider()
             messagebox.showinfo("Succès", "Base enregistrée.")
@@ -188,11 +175,6 @@ class PageBaseListe(ctk.CTkFrame):
             return
         try:
             id_ = self.treeview.item(selected[0])['values'][0]
-            old_name = ""
-            try:
-                old_name = str(self.treeview.item(selected[0])['values'][1])
-            except Exception:
-                old_name = ""
             nombase = self.entry_nombase.get()
             designation = self.entry_designationbase.get()
             
@@ -200,15 +182,6 @@ class PageBaseListe(ctk.CTkFrame):
             self.cursor.execute("UPDATE tb_baseliste SET nombase=%s, designationbase=%s WHERE id=%s",
                                (nombase, designation, id_))
             self.conn.commit()
-            try:
-                self._logger.log(
-                    action="Modification base liste",
-                    element=old_name or f"id={id_}",
-                    details=f"Référentiel modifié en (base='{nombase}', designation='{designation}')",
-                    value=f"id={id_}",
-                )
-            except Exception:
-                pass
             self.charger_base()
             self.vider()
             messagebox.showinfo("Succès", "Base modifiée.")
@@ -223,22 +196,8 @@ class PageBaseListe(ctk.CTkFrame):
         if messagebox.askyesno("Confirmation", "Voulez-vous vraiment supprimer cet élément ?"):
             try:
                 id_ = self.treeview.item(selected[0])['values'][0]
-                old_name = ""
-                try:
-                    old_name = str(self.treeview.item(selected[0])['values'][1])
-                except Exception:
-                    old_name = ""
                 self.cursor.execute("DELETE FROM tb_baseliste WHERE id=%s", (id_,))
                 self.conn.commit()
-                try:
-                    self._logger.log(
-                        action="Suppression base liste",
-                        element=old_name or f"id={id_}",
-                        details="Suppression référentiel (Base Liste)",
-                        value=f"id={id_}",
-                    )
-                except Exception:
-                    pass
                 self.charger_base()
                 self.vider()
             except Exception as e:

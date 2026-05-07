@@ -8,10 +8,6 @@ import textwrap
 import subprocess
 import tempfile
 from resource_utils import get_config_path, safe_file_read
-from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
-from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
-from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
-from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A5, landscape
@@ -26,7 +22,14 @@ except ImportError:
 
 
 from .page_clientCrédit import PageClientCrédit
-from log_utils import AppLogger
+try:
+    from .page_retardCredit import PageRetardCredit
+except ImportError:
+    class PageRetardCredit(ctk.CTkFrame):
+        def __init__(self, master):
+            super().__init__(master)
+            from tkinter import messagebox
+            messagebox.showerror("Erreur", "Le fichier 'page_retardCredit.py' est manquant ou contient une erreur.")
 
 
 try:
@@ -101,8 +104,6 @@ class PageClient(ctk.CTkFrame):
         if self.conn:
             self.cursor = self.conn.cursor()
             self.create_table()
-
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data, fallback_user_id=self.id_user_connecte)
         
         self.sort_column = "Crédit en cours"
         self.sort_ascending = False
@@ -158,7 +159,7 @@ class PageClient(ctk.CTkFrame):
 
     def load_types(self):
         try:
-            self.cursor.execute("SELECT idtypeclient, designationtypeclient FROM tb_typeclient WHERE idtypeclient = 2")
+            self.cursor.execute("SELECT idtypeclient, designationtypeclient FROM tb_typeclient ORDER BY idtypeclient")
             types = self.cursor.fetchall()
             
             self.type_mapping = {t[1]: t[0] for t in types}
@@ -227,6 +228,14 @@ class PageClient(ctk.CTkFrame):
                                            fg_color="#e74c3c", font=_F(_FONT_SIZE_MD, "bold"))
         self.delete_button.pack(side="left", padx=5)
 
+        self.suivi_credit_button = ctk.CTkButton(
+            button_frame, text="⏰ Suivi Crédit",
+            command=self.open_suivi_credit_window,
+            fg_color="#8e44ad", hover_color="#6c3483",
+            font=_F(_FONT_SIZE_MD, "bold")
+        )
+        self.suivi_credit_button.pack(side="left", padx=5)
+
         self.credit_page_button = ctk.CTkButton(button_frame, text="Crédit", 
                                        command=self.open_credit_window,
                                        fg_color="#f39c12", hover_color="#e67e22",
@@ -267,32 +276,88 @@ class PageClient(ctk.CTkFrame):
         self.selected_cli_id = None
 
     def load_client(self):
+        """
+        Charge la liste des clients avec crédit en cours (solde).
+        Même logique que _compute_credit_status_fifo :
+          total_initial  = SUM(tb_pmtfacture idmode=4) + SUM(tb_autrecreance)
+          total_paye     = SUM(tb_pmtcredit tous modes)
+          credit_restant = MAX(total_initial - total_paye, 0)
+        """
         for item in self.tree.get_children():
             self.tree.delete(item)
-            
-        if not self.conn: return
+
+        if not self.conn:
+            return
 
         try:
             self.cursor.execute("""
-                SELECT c.idclient, c.nomcli, c.contactcli, c.adressecli, c.nifcli, c.credit, t.designationtypeclient
+                SELECT
+                    c.idclient,
+                    c.nomcli,
+                    c.contactcli,
+                    c.adressecli,
+                    c.nifcli,
+                    c.credit,
+                    COALESCE(t.designationtypeclient, '')      AS designationtypeclient,
+                    COALESCE(credits.total_credit, 0)
+                        + COALESCE(creances.total_creance, 0)  AS total_credit_initial,
+                    COALESCE(pmt.total_paye, 0)                AS total_paye,
+                    GREATEST(
+                        COALESCE(credits.total_credit, 0)
+                        + COALESCE(creances.total_creance, 0)
+                        - COALESCE(pmt.total_paye, 0),
+                        0
+                    )                                          AS credit_restant,
+                    GREATEST(
+                        COALESCE(credits.derniere_date, '-infinity'::timestamp),
+                        COALESCE(creances.derniere_date, '-infinity'::timestamp)
+                    )                                          AS derniere_date
                 FROM tb_client c
                 LEFT JOIN tb_typeclient t ON c.idtypeclient = t.idtypeclient
-                WHERE c.idtypeclient != 1
+                LEFT JOIN (
+                    SELECT idclient, SUM(mtpaye) AS total_credit, MAX(datepmt) AS derniere_date
+                    FROM tb_pmtfacture
+                    WHERE idmode = 4 AND deleted = 0
+                    GROUP BY idclient
+                ) credits ON credits.idclient = c.idclient
+                LEFT JOIN (
+                    SELECT idclient, SUM(montant) AS total_creance, MAX(dateregistre) AS derniere_date
+                    FROM tb_autrecreance
+                    GROUP BY idclient
+                ) creances ON creances.idclient = c.idclient
+                LEFT JOIN (
+                    SELECT idclient, COALESCE(SUM(mtpaye), 0) AS total_paye
+                    FROM tb_pmtcredit
+                    GROUP BY idclient
+                ) pmt ON pmt.idclient = c.idclient
+                WHERE c.deleted = 0
+                  AND c.idtypeclient = 2
+                ORDER BY credit_restant DESC
             """)
-            clients = self.cursor.fetchall()
-            
+            rows = self.cursor.fetchall()
+
+            today = datetime.now().date()
             clients_avec_credits = []
-            for cli in clients:
-                try:
-                    _, _, _, credit_restant, _ = self._compute_credit_status_fifo(cli[0])
-                except Exception:
-                    credit_restant = 0
-                dernier_credit = self._get_dernier_credit_label(cli[0])
-                clients_avec_credits.append((cli, credit_restant, dernier_credit))
-            
-            clients_avec_credits.sort(key=lambda x: x[1], reverse=True)
+            for row in rows:
+                (idcli, nom, contact, adresse, nif, plafond, type_cli,
+                 total_init, total_paye, credit_restant, derniere_date) = row
+
+                if derniere_date is None:
+                    dernier_label = "-"
+                else:
+                    try:
+                        date_ref = derniere_date.date() if hasattr(derniere_date, "date") else derniere_date
+                        jours = max((today - date_ref).days, 0)
+                        dernier_label = "Aujourd'hui" if jours == 0 else f"il y a {jours} jours"
+                    except (OverflowError, OSError, ValueError):
+                        dernier_label = "-"
+
+                cli_tuple = (idcli, nom, contact, adresse, nif, plafond, type_cli)
+                clients_avec_credits.append((cli_tuple, float(credit_restant or 0), dernier_label))
+
             self.all_clients_data = clients_avec_credits
             self.display_clients(clients_avec_credits)
+
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur lors du chargement : {err}")
 
@@ -307,11 +372,6 @@ class PageClient(ctk.CTkFrame):
                 cli[1], cli[2], cli[3], cli[4], credit_str, dernier_credit, cli[6]
             ), tags=(tag,))
 
-    def refresh_client_list(self):
-        self.load_client()
-        self.tree.update_idletasks()
-        if self.search_entry.get().strip():
-            self.filter_clients()
     def sort_by_column(self, column):
         if self.sort_column == column:
             self.sort_ascending = not self.sort_ascending
@@ -363,15 +423,6 @@ class PageClient(ctk.CTkFrame):
             self.load_client()
             self.clear_fields()
             messagebox.showinfo("Succès", "Client ajouté !")
-            try:
-                self._logger.log(
-                    action="Création du client",
-                    element=nomcli,
-                    details="Création client (CRUD Client)",
-                    value="aucune valeur",
-                )
-            except Exception:
-                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur : {err}")
@@ -379,13 +430,6 @@ class PageClient(ctk.CTkFrame):
     def modify_client(self):
         if not self.selected_cli_id: return
         try:
-            old_name = ""
-            try:
-                self.cursor.execute("SELECT nomcli FROM tb_client WHERE idclient=%s", (self.selected_cli_id,))
-                r = self.cursor.fetchone()
-                old_name = r[0] if r and r[0] else ""
-            except Exception:
-                old_name = ""
             id_type = self.type_mapping.get(self.type_combo.get())
             self.cursor.execute("""
                 UPDATE tb_client 
@@ -396,16 +440,6 @@ class PageClient(ctk.CTkFrame):
             self.conn.commit()
             self.load_client()
             messagebox.showinfo("Succès", "Client modifié !")
-            try:
-                new_name = self.nomCli_entry.get()
-                self._logger.log(
-                    action="Modification du client",
-                    element=old_name or f"idclient={self.selected_cli_id}",
-                    details=f"Client modifié en '{new_name}'",
-                    value=f"idclient={self.selected_cli_id}",
-                )
-            except Exception:
-                pass
         except psycopg2.Error as err:
             self.conn.rollback()
             messagebox.showerror("Erreur", f"Erreur : {err}")
@@ -414,26 +448,10 @@ class PageClient(ctk.CTkFrame):
         if not self.selected_cli_id: return
         if messagebox.askyesno("Confirmation", "Supprimer ce client ?"):
             try:
-                cli_name = ""
-                try:
-                    self.cursor.execute("SELECT nomcli FROM tb_client WHERE idclient=%s", (self.selected_cli_id,))
-                    r = self.cursor.fetchone()
-                    cli_name = r[0] if r and r[0] else ""
-                except Exception:
-                    cli_name = ""
                 self.cursor.execute("DELETE FROM tb_client WHERE idclient = %s", (self.selected_cli_id,))
                 self.conn.commit()
                 self.load_client()
                 self.clear_fields()
-                try:
-                    self._logger.log(
-                        action="Suppression du client",
-                        element=cli_name or f"idclient={self.selected_cli_id}",
-                        details="Suppression client (CRUD Client)",
-                        value=f"idclient={self.selected_cli_id}",
-                    )
-                except Exception:
-                    pass
             except psycopg2.Error as err:
                 messagebox.showerror("Erreur", f"Erreur : {err}")
 
@@ -499,6 +517,59 @@ class PageClient(ctk.CTkFrame):
         credit_window.grid_rowconfigure(0, weight=1)
         credit_page = PageClientCrédit(credit_window)
         credit_page.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+    def open_suivi_credit_window(self, page_livr_frs=None):
+        """
+        Ouvre la fenêtre de suivi des retards de paiement crédit.
+        Condition : si page_livr_frs est fourni (instance PageBonReception),
+        n'ouvre que si var_a_payer est False (= client crédit, pas fournisseur).
+        """
+        # ── Condition depuis page_livrFrs ─────────────────────────────
+        if page_livr_frs is not None:
+            try:
+                if page_livr_frs.var_a_payer.get():
+                    messagebox.showinfo(
+                        "Suivi Crédit",
+                        "Le switch 'Fournisseur à payer' est activé.\n"
+                        "Le suivi crédit s'affiche uniquement pour les clients crédit\n"
+                        "(switch désactivé)."
+                    )
+                    return
+            except Exception:
+                pass  # Si l'attribut n'existe pas, on ouvre quand même
+
+        main_window = self.winfo_toplevel()
+        main_window.update_idletasks()
+        mw = max(main_window.winfo_width(), 1)
+        mh = max(main_window.winfo_height(), 1)
+        mx = main_window.winfo_x()
+        my = main_window.winfo_y()
+
+        win_w = max(1100, int(mw * 0.85))
+        win_h = max(620, int(mh * 0.85))
+        pos_x = mx + (mw - win_w) // 2
+        pos_y = my + (mh - win_h) // 2
+
+        suivi_window = ctk.CTkToplevel(self)
+        suivi_window.title("⏰ Suivi des Retards de Paiement Crédit")
+        suivi_window.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+        suivi_window.attributes("-topmost", False)
+        suivi_window.grid_columnconfigure(0, weight=1)
+        suivi_window.grid_rowconfigure(0, weight=1)
+
+        try:
+            page = PageRetardCredit(suivi_window)
+            page.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        except Exception as e:
+            messagebox.showerror("Erreur", "Impossible d'ouvrir le Suivi Crédit :\n" + str(e))
+            suivi_window.destroy()
+            return
+
+        # ── Forcer la fenêtre au premier plan après rendu complet ────────
+        suivi_window.after(150, lambda: (
+            suivi_window.lift(),
+            suivi_window.focus_force()
+        ))
 
     def on_client_double_click(self, event):
         selected = self.tree.selection()
@@ -615,45 +686,84 @@ class PageClient(ctk.CTkFrame):
         table_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=(0, 5))
         table_frame.grid_columnconfigure(0, weight=1)
         table_frame.grid_columnconfigure(1, weight=0)
-        table_frame.grid_rowconfigure(0, weight=0)
-        table_frame.grid_rowconfigure(1, weight=1)
-        
-        ctk.CTkLabel(table_frame, text="Récapitulatif des Crédits", 
-                    font=_F(_FONT_SIZE_LG, "bold")).grid(
+        table_frame.grid_rowconfigure(0, weight=0)  # titre
+        table_frame.grid_rowconfigure(1, weight=1)  # treeview + scrollbar v
+        table_frame.grid_rowconfigure(2, weight=0)  # scrollbar h
+        table_frame.grid_rowconfigure(3, weight=0)  # barre totaux
+
+        ctk.CTkLabel(table_frame, text="Récapitulatif des Crédits",
+                     font=_F(_FONT_SIZE_LG, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
-        
+
         colonnes_credits = ("ID", "Type", "Date", "RefVente", "Montant", "Montant Payé", "Solde Restant", "Statut")
         tree_credits = ttk.Treeview(table_frame, columns=colonnes_credits, show='headings', height=10)
         tree_credits.tag_configure("complet", background="#D5F5E3", foreground="#1E8449")
         tree_credits.tag_configure("partiel", background="#FEF9E7", foreground="#9A6A00")
         tree_credits.tag_configure("impaye",  background="#FADBD8", foreground="#922B21")
-        
         for col in colonnes_credits:
             tree_credits.heading(col, text=col)
             if col == "ID":
                 tree_credits.column(col, width=0, stretch=False)
             elif col in ("Montant", "Montant Payé", "Solde Restant"):
-                tree_credits.column(col, width=100, anchor='e')
+                tree_credits.column(col, width=110, anchor='e')
             else:
                 tree_credits.column(col, width=110, anchor='w')
-        
-        scrollbar = ttk.Scrollbar(table_frame, command=tree_credits.yview)
-        tree_credits.configure(yscrollcommand=scrollbar.set)
-        tree_credits.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
-        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
-        
+
+        sb_cr_v = ttk.Scrollbar(table_frame, orient="vertical",   command=tree_credits.yview)
+        sb_cr_h = ttk.Scrollbar(table_frame, orient="horizontal", command=tree_credits.xview)
+        tree_credits.configure(yscrollcommand=sb_cr_v.set, xscrollcommand=sb_cr_h.set)
+        tree_credits.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=0)
+        sb_cr_v.grid(    row=1, column=1, sticky="ns",    padx=(0, 10), pady=0)
+        sb_cr_h.grid(    row=2, column=0, sticky="ew",    padx=(10, 0), pady=(0, 4))
+
+        # ── Barre totaux crédits
+        tot_cr = ctk.CTkFrame(table_frame, fg_color="#2C3E50", corner_radius=4)
+        tot_cr.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
+        for ci in range(7):
+            tot_cr.grid_columnconfigure(ci, weight=(1 if ci % 2 == 0 else 0))
+
+        ctk.CTkLabel(tot_cr, text="TOTAUX :", font=_F(_FONT_SIZE_SM, "bold"),
+                     text_color="#FFFFFF").grid(row=0, column=0, sticky="w", padx=(10,6), pady=5)
+        ctk.CTkLabel(tot_cr, text="Montant total :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=1, sticky="e", padx=(4,2), pady=5)
+        lbl_cr_montant = ctk.CTkLabel(tot_cr, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#F9E79F")
+        lbl_cr_montant.grid(row=0, column=2, sticky="w", padx=(2,10), pady=5)
+        ctk.CTkLabel(tot_cr, text="Total payé :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=3, sticky="e", padx=(4,2), pady=5)
+        lbl_cr_paye = ctk.CTkLabel(tot_cr, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#A9DFBF")
+        lbl_cr_paye.grid(row=0, column=4, sticky="w", padx=(2,10), pady=5)
+        ctk.CTkLabel(tot_cr, text="Solde restant :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=5, sticky="e", padx=(4,2), pady=5)
+        lbl_cr_solde = ctk.CTkLabel(tot_cr, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#F1948A")
+        lbl_cr_solde.grid(row=0, column=6, sticky="w", padx=(2,10), pady=5)
+
+        def _to_float(v):
+            try:
+                return float(str(v).replace("\xa0","").replace("\u202f","").replace(" ","").replace(".","").replace(",","."))
+            except Exception:
+                return 0.0
+
+        def _refresh_totaux_credits():
+            tm = tp = ts = 0.0
+            for iid in tree_credits.get_children():
+                vals = tree_credits.item(iid, "values")
+                tm += _to_float(vals[4])
+                tp += _to_float(vals[5])
+                ts += _to_float(vals[6])
+            lbl_cr_montant.configure(text=f"{self._formater_nombre(tm)} Ar")
+            lbl_cr_paye.configure(   text=f"{self._formater_nombre(tp)} Ar")
+            lbl_cr_solde.configure(  text=f"{self._formater_nombre(ts)} Ar")
+
         try:
             self._render_credit_table(tree_credits, idclient, label_montant_restant)
+            _refresh_totaux_credits()
 
             def on_paiement_global_click():
-                self._open_global_payment_window(
-                    idclient, detail_window, tree_credits, label_montant_restant,
-                    refresh_callback=refresh_payment_history)
-
+                self._open_global_payment_window(idclient, detail_window, tree_credits, label_montant_restant)
             btn_paiement_global.configure(command=on_paiement_global_click)
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur chargement crédits: {err}")
-        
+
         def on_credit_double_click(event):
             selected = tree_credits.selection()
             if not selected:
@@ -668,7 +778,6 @@ class PageClient(ctk.CTkFrame):
                 self._open_vente_detail_window(credit_id, detail_window)
             else:
                 self._open_creance_detail_window(credit_id, detail_window)
-
         tree_credits.bind("<Double-1>", on_credit_double_click)
 
         # ── Tableau paiements ─────────────────────────────────────────────────
@@ -676,18 +785,19 @@ class PageClient(ctk.CTkFrame):
         payment_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=(5, 0))
         payment_frame.grid_columnconfigure(0, weight=1)
         payment_frame.grid_columnconfigure(1, weight=0)
-        payment_frame.grid_rowconfigure(0, weight=0)
-        payment_frame.grid_rowconfigure(1, weight=1)
-        
-        ctk.CTkLabel(payment_frame, text="Historique des Paiements", 
-                    font=_F(_FONT_SIZE_LG, "bold")).grid(
+        payment_frame.grid_rowconfigure(0, weight=0)  # titre
+        payment_frame.grid_rowconfigure(1, weight=1)  # treeview + scrollbar v
+        payment_frame.grid_rowconfigure(2, weight=0)  # scrollbar h
+        payment_frame.grid_rowconfigure(3, weight=0)  # barre totaux
+
+        ctk.CTkLabel(payment_frame, text="Historique des Paiements",
+                     font=_F(_FONT_SIZE_LG, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=10, pady=(10, 5))
-        
+
         colonnes_paiements = ("ID", "Date Paiement", "Montant Payé", "Observation", "Utilisateur")
         tree_paiements = ttk.Treeview(payment_frame, columns=colonnes_paiements, show='headings', height=8)
         tree_paiements.tag_configure("even", background="#FFFFFF", foreground="#2C3E50")
         tree_paiements.tag_configure("odd",  background="#EBF5FB", foreground="#2C3E50")
-        
         for col in colonnes_paiements:
             tree_paiements.heading(col, text=col)
             if col == "ID":
@@ -698,55 +808,64 @@ class PageClient(ctk.CTkFrame):
                 tree_paiements.column(col, width=130, anchor='center')
             else:
                 tree_paiements.column(col, width=150, anchor='w')
-        
-        scrollbar_pmt = ttk.Scrollbar(payment_frame, command=tree_paiements.yview)
-        tree_paiements.configure(yscrollcommand=scrollbar_pmt.set)
-        tree_paiements.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=5)
-        scrollbar_pmt.grid(row=1, column=1, sticky="ns", padx=(0, 10), pady=5)
-        
-        empty_label = None
-        def refresh_payment_history():
-            nonlocal empty_label
-            for item in tree_paiements.get_children():
-                tree_paiements.delete(item)
-            if empty_label is not None:
-                try:
-                    empty_label.destroy()
-                except Exception:
-                    pass
-                empty_label = None
 
-            try:
-                self.cursor.execute("""
-                    SELECT p.id, p.datepmt, p.mtpaye, p.observation, 
-                           COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
-                    FROM tb_pmtcredit p
-                    LEFT JOIN tb_users u ON p.iduser = u.iduser
-                    WHERE p.idclient = %s
-                    ORDER BY p.datepmt DESC
-                """, (idclient,))
-                paiements = self.cursor.fetchall()
-                
-                for idx, pmt in enumerate(paiements):
-                    pmt_id, date_pmt, montant_pmt, observation, utilisateur = pmt
-                    tag = "even" if idx % 2 == 0 else "odd"
-                    tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
-                        pmt_id,
-                        date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
-                        f"{self._formater_nombre(float(montant_pmt or 0))}",
-                        observation or "",
-                        utilisateur or "N/A"
-                    ), tags=(tag,))
-                
-                if not paiements:
-                    empty_label = ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré", 
-                                              text_color="gray", font=_F(_FONT_SIZE_MD))
-                    empty_label.grid(row=1, column=0, pady=20)
-            except psycopg2.Error as err:
-                messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
+        sb_pmt_v = ttk.Scrollbar(payment_frame, orient="vertical",   command=tree_paiements.yview)
+        sb_pmt_h = ttk.Scrollbar(payment_frame, orient="horizontal", command=tree_paiements.xview)
+        tree_paiements.configure(yscrollcommand=sb_pmt_v.set, xscrollcommand=sb_pmt_h.set)
+        tree_paiements.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=0)
+        sb_pmt_v.grid(      row=1, column=1, sticky="ns",    padx=(0, 10), pady=0)
+        sb_pmt_h.grid(      row=2, column=0, sticky="ew",    padx=(10, 0), pady=(0, 4))
+
+        # ── Barre totaux paiements
+        tot_pmt = ctk.CTkFrame(payment_frame, fg_color="#1A5276", corner_radius=4)
+        tot_pmt.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
+        for ci in range(5):
+            tot_pmt.grid_columnconfigure(ci, weight=(1 if ci % 2 == 0 else 0))
+
+        ctk.CTkLabel(tot_pmt, text="TOTAUX :", font=_F(_FONT_SIZE_SM, "bold"),
+                     text_color="#FFFFFF").grid(row=0, column=0, sticky="w", padx=(10,6), pady=5)
+        ctk.CTkLabel(tot_pmt, text="Nombre :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=1, sticky="e", padx=(4,2), pady=5)
+        lbl_pmt_nb = ctk.CTkLabel(tot_pmt, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#AED6F1")
+        lbl_pmt_nb.grid(row=0, column=2, sticky="w", padx=(2,10), pady=5)
+        ctk.CTkLabel(tot_pmt, text="Total payé :", font=_F(_FONT_SIZE_SM),
+                     text_color="#BDC3C7").grid(row=0, column=3, sticky="e", padx=(4,2), pady=5)
+        lbl_pmt_total = ctk.CTkLabel(tot_pmt, text="—", font=_F(_FONT_SIZE_SM, "bold"), text_color="#A9DFBF")
+        lbl_pmt_total.grid(row=0, column=4, sticky="w", padx=(2,10), pady=5)
 
         try:
-            refresh_payment_history()
+            self.cursor.execute("""
+                SELECT p.id, p.datepmt, p.mtpaye, p.observation,
+                       COALESCE(CONCAT(u.prenomuser, ' ', u.nomuser), 'N/A') as utilisateur
+                FROM tb_pmtcredit p
+                LEFT JOIN tb_users u ON p.iduser = u.iduser
+                WHERE p.idclient = %s
+                ORDER BY p.datepmt DESC
+            """, (idclient,))
+            paiements = self.cursor.fetchall()
+
+            total_pmt_val = 0.0
+            for idx, pmt in enumerate(paiements):
+                pmt_id, date_pmt, montant_pmt, observation, utilisateur = pmt
+                tag = "even" if idx % 2 == 0 else "odd"
+                v = float(montant_pmt or 0)
+                total_pmt_val += v
+                tree_paiements.insert('', 'end', iid=f"pmt_{pmt_id}", values=(
+                    pmt_id,
+                    date_pmt.strftime("%d/%m/%Y %H:%M") if date_pmt else "N/A",
+                    f"{self._formater_nombre(v)}",
+                    observation or "",
+                    utilisateur or "N/A"
+                ), tags=(tag,))
+
+            lbl_pmt_nb.configure(   text=f"{len(paiements)} paiement(s)")
+            lbl_pmt_total.configure(text=f"{self._formater_nombre(total_pmt_val)} Ar")
+
+            if not paiements:
+                ctk.CTkLabel(payment_frame, text="Aucun paiement enregistré",
+                             text_color="gray", font=_F(_FONT_SIZE_MD)).grid(
+                    row=1, column=0, pady=20)
+
         except psycopg2.Error as err:
             messagebox.showerror("Erreur", f"Erreur chargement paiements: {err}")
 
@@ -965,8 +1084,6 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
                     font=_F(_FONT_SIZE_MD, "bold")).pack(padx=10, pady=5)
         entry_montant = ctk.CTkEntry(payment_window, width=350, font=_F(_FONT_SIZE_MD))
         entry_montant.pack(padx=10, pady=5)
-        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
-        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
         
         ctk.CTkLabel(payment_window, text="Observation (optionnel):",
                     font=_F(_FONT_SIZE_MD, "bold")).pack(padx=10, pady=(10, 5))
@@ -980,7 +1097,7 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
             modes = []
 
         mode_names = [m[1] for m in modes] if modes else []
-        mode_map = {m[1]: m[0] for m in modes} if modes else {}
+        mode_map   = {m[1]: m[0] for m in modes} if modes else {}
 
         ctk.CTkLabel(payment_window, text="Mode de Paiement:",
                      font=_F(_FONT_SIZE_MD, "bold")).pack(padx=10, pady=(10, 5))
@@ -992,7 +1109,7 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
         
         def enregistrer_paiement():
             try:
-                montant_paiement = float(entry_montant.get().replace('.', '').replace(',', '.'))
+                montant_paiement = float(entry_montant.get().replace(',', '.'))
                 observation = entry_obs.get().strip()
                 
                 if montant_paiement <= 0:
@@ -1020,15 +1137,13 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
                 os.makedirs(os.path.dirname(ticket_filename), exist_ok=True)
                 self._generate_ticket_80mm_payment(idclient, montant_paiement, idmode_sel, date_pmt, ticket_filename)
                 
-                settings = load_settings()
-                auto_print = is_setting_enabled("Client_PmtCredit_PrintX80", default=0, settings=settings)
-                if auto_print:
+                result = messagebox.askyesno("Imprimer", "Voulez-vous imprimer le reçu paiement sur X80?")
+                if result:
                     self._print_ticket_80mm(ticket_filename)
                 
                 for item in tree_credits.get_children():
                     tree_credits.delete(item)
                 
-                self.refresh_client_list()
                 try:
                     self.cursor.execute("""
                         SELECT id, 'Crédit Vente' as type, refvente, datepmt, mtpaye, dateecheance
@@ -1101,7 +1216,7 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
         ctk.CTkButton(btn_frame, text="Annuler", command=payment_window.destroy,
                      fg_color="#e74c3c", font=_F(_FONT_SIZE_MD, "bold")).pack(side="left", padx=5)
 
-    def _open_global_payment_window(self, idclient, parent_window, tree_credits, label_montant_restant, refresh_callback=None):
+    def _open_global_payment_window(self, idclient, parent_window, tree_credits, label_montant_restant):
         payment_window = ctk.CTkToplevel(parent_window)
         payment_window.title("Paiement Global des Crédits")
         parent_window.update_idletasks()
@@ -1130,6 +1245,8 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
         main_frame.grid_rowconfigure(4, weight=0)
         main_frame.grid_rowconfigure(5, weight=1)
         main_frame.grid_rowconfigure(6, weight=0)
+        main_frame.grid_rowconfigure(7, weight=0)
+        main_frame.grid_rowconfigure(8, weight=0)
 
         _, credit_total_initial, credit_total_paye, credit_total_restant, _ = self._compute_credit_status_fifo(idclient)
         
@@ -1151,8 +1268,6 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         ).grid(row=1, column=0, sticky="w", padx=8, pady=(0, 4))
         entry_montant = ctk.CTkEntry(main_frame, font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
-        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
-        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
         
         ctk.CTkLabel(
             main_frame, text="Observation (optionnel):",
@@ -1175,7 +1290,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             modes = []
 
         mode_names = [m[1] for m in modes] if modes else []
-        mode_map = {m[1]: m[0] for m in modes} if modes else {}
+        mode_map   = {m[1]: m[0] for m in modes} if modes else {}
 
         ctk.CTkLabel(main_frame, text="Mode de Paiement:",
                      font=_F(_FONT_SIZE_MD, "bold")).grid(
@@ -1186,11 +1301,84 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         if mode_names:
             default_mode = "Espèces" if "Espèces" in mode_names else mode_names[0]
             mode_combo_global.set(default_mode)
-        mode_combo_global.grid(row=7, column=0, sticky="ew", padx=8, pady=(0, 10))
-        
+        mode_combo_global.grid(row=7, column=0, sticky="ew", padx=8, pady=(0, 4))
+
+        # ── Notification solde restant selon mode de paiement ────────────
+        notif_frame = ctk.CTkFrame(
+            main_frame, fg_color="#eaf4fb",
+            corner_radius=8, border_width=1, border_color="#aed6f1"
+        )
+        notif_frame.grid(row=8, column=0, sticky="ew", padx=8, pady=(0, 8))
+        notif_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            notif_frame, text="💳", font=_F(18)
+        ).grid(row=0, column=0, padx=(10, 6), pady=8)
+
+        notif_label = ctk.CTkLabel(
+            notif_frame,
+            text=f"Mode sélectionné : {default_mode if mode_names else '-'}\n"
+                 f"Solde restant à régler : {self._formater_nombre(credit_total_restant)} Ar",
+            font=_F(_FONT_SIZE_MD, "bold"),
+            text_color="#1a5276",
+            justify="left", anchor="w"
+        )
+        notif_label.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=8)
+
+        solde_badge = ctk.CTkLabel(
+            notif_frame,
+            text=f"{self._formater_nombre(credit_total_restant)} Ar",
+            font=_F(_FONT_SIZE_LG, "bold"),
+            text_color="#ffffff",
+            fg_color="#e74c3c",
+            corner_radius=6, padx=10, pady=4
+        )
+        solde_badge.grid(row=0, column=2, padx=(0, 10), pady=8)
+
+        def _on_mode_change(selected_mode):
+            """Met à jour la notification quand le mode de paiement change."""
+            solde = credit_total_restant
+            # Couleur du badge selon urgence du solde
+            if solde <= 0:
+                badge_color = "#27ae60"   # vert : tout payé
+                frame_color = "#eafaf1"
+                border_color = "#a9dfbf"
+                txt_color = "#1e8449"
+                icone = "✅"
+            elif solde <= credit_total_initial * 0.25:
+                badge_color = "#f39c12"   # orange : presque soldé
+                frame_color = "#fef9e7"
+                border_color = "#f9e79f"
+                txt_color = "#7d6608"
+                icone = "⚠️"
+            else:
+                badge_color = "#e74c3c"   # rouge : solde important
+                frame_color = "#eaf4fb"
+                border_color = "#aed6f1"
+                txt_color = "#1a5276"
+                icone = "💳"
+
+            notif_frame.configure(fg_color=frame_color, border_color=border_color)
+            notif_label.configure(
+                text=f"Mode sélectionné : {selected_mode}\n"
+                     f"Solde restant à régler : {self._formater_nombre(solde)} Ar",
+                text_color=txt_color
+            )
+            solde_badge.configure(
+                text=f"{self._formater_nombre(solde)} Ar",
+                fg_color=badge_color
+            )
+            # Mettre à jour l'icône
+            notif_frame.winfo_children()[0].configure(text=icone)
+
+        mode_combo_global.configure(command=_on_mode_change)
+        # Déclencher une première fois pour coloriser dès l'ouverture
+        if mode_names:
+            _on_mode_change(default_mode if mode_names else "")
+
         def enregistrer_paiement_global():
             try:
-                montant_global = float(entry_montant.get().replace('.', '').replace(',', '.'))
+                montant_global = float(entry_montant.get().replace(',', '.'))
                 observation = entry_obs.get().strip()
                 
                 if montant_global <= 0:
@@ -1214,17 +1402,6 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 """, (date_pmt, montant_global, observation, 1, idclient, None, idmode_sel_global, None, ref_ticket, None, 1))
                 
                 self.conn.commit()
-
-                try:
-                    client_nom = self._get_client_name(idclient)
-                    self._logger.log(
-                        action="Paiement crédit client",
-                        element=client_nom or f"idclient={idclient}",
-                        details=f"Paiement global crédit client, ref={ref_ticket}, mode={selected_mode_global or 'N/A'}",
-                        value=f"{montant_global} Ar",
-                    )
-                except Exception:
-                    pass
                 
                 messagebox.showinfo("Succès", f"Paiement global de {self._formater_nombre(float(montant_global))} Ar enregistré avec succès!")
 
@@ -1233,38 +1410,19 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     societe_data.get('name', ''), societe_data.get('addr', ''),
                     societe_data.get('ville', ''), societe_data.get('tel', ''),
                 )
-                username = self._get_username_by_id(self._get_connected_user_id())
+                username = self._get_username_by_id(1)
                 client_nom = self._get_client_name(idclient)
                 articles = [("", "Paiement global crédit client", "", 1, float(montant_global), float(montant_global))]
 
-                settings = load_settings()
-                open_a5 = is_setting_enabled("Client_PmtCredit_OpenA5", default=0, settings=settings)
-                facture_path = self._generer_ticket_pdf_paiement_credit(
+                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le facture PDF de paiement ?")
+                self._generer_ticket_pdf_paiement_credit(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
                     refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
-                    observation=observation, date_paiement=date_pmt,
-                    open_after=open_a5, output_format="A5",
-                    open_setting_key="Client_PmtCredit_OpenA5", open_setting_default=0,
+                    observation=observation, date_paiement=date_pmt, open_after=result
                 )
-                if facture_path:
-                    messagebox.showinfo("Confirmation", "La facture PDF de paiement A5 a été générée.")
-                    open_ticket = is_setting_enabled("Client_PmtCredit_OpenTicket80", default=0, settings=settings)
-                    ticket_path = self._generer_ticket_pdf_paiement_credit(
-                        societe=societe_tuple, username=username, articles=articles,
-                        montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
-                        refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
-                        observation=observation, date_paiement=date_pmt,
-                        open_after=open_ticket, output_format="ticket80",
-                        open_setting_key="Client_PmtCredit_OpenTicket80", open_setting_default=0,
-                    )
-                    if open_ticket and ticket_path:
-                        messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
-
+                
                 self._render_credit_table(tree_credits, idclient, label_montant_restant)
-                if refresh_callback:
-                    refresh_callback()
-                self.refresh_client_list()
                 payment_window.destroy()
             
             except ValueError:
@@ -1274,7 +1432,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 messagebox.showerror("Erreur", f"Erreur enregistrement paiement: {err}")
         
         btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        btn_frame.grid(row=8, column=0, sticky="e", padx=8, pady=(6, 4))
+        btn_frame.grid(row=9, column=0, sticky="e", padx=8, pady=(6, 4))
         
         ctk.CTkButton(
             btn_frame, text="Effectuer le Paiement",
@@ -1293,28 +1451,6 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         if isinstance(nombre, (int, float)):
             return f"{nombre:,.0f}".replace(".", ",").replace(",", ".")
         return str(nombre)
-
-    def format_montant(self, entry_widget):
-        """Formate le montant avec séparateurs de milliers (format français: 1.234.567)."""
-        current = entry_widget.get()
-        if not current:
-            return
-
-        cleaned = current.replace('.', '').replace(',', '').replace(' ', '')
-        if not cleaned or not cleaned.isdigit():
-            entry_widget.delete(0, 'end')
-            entry_widget.insert(0, current)
-            return
-
-        formatted = ''
-        for i, digit in enumerate(reversed(cleaned)):
-            if i > 0 and i % 3 == 0:
-                formatted = '.' + formatted
-            formatted = digit + formatted
-
-        entry_widget.delete(0, 'end')
-        entry_widget.insert(0, formatted)
-        entry_widget.icursor(len(formatted))
 
     def _extract_days_from_label(self, label):
         if not label or "(" not in label:
@@ -1643,36 +1779,16 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             c.showPage()
             c.save()
             if open_after:
-                open_file_if_enabled(
-                    path,
-                    operation="open",
-                    setting_key="Client_Creance_OpenTicketPdf",
-                    setting_default=0,
-                )
+                if os.name == 'nt':
+                    os.startfile(path)
+                else:
+                    subprocess.Popen(['xdg-open', path])
             return path
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération PDF créance: {e}")
             return None
 
-    def _generer_ticket_pdf_paiement_credit(
-        self,
-        societe,
-        username,
-        articles,
-        montant,
-        mode_nom,
-        refpmt,
-        idclient,
-        client_nom,
-        observation,
-        date_paiement,
-        open_after=False,
-        output_format="A5",
-        operation_title="PAIEMENT DE CREDIT",
-        info_title="Infos Paiement Credit",
-        open_setting_key: str | None = None,
-        open_setting_default: int = 0,
-    ):
+    def _generer_ticket_pdf_paiement_credit(self, societe, username, articles, montant, mode_nom, refpmt, idclient, client_nom, observation, date_paiement, open_after=False):
         try:
             client_adresse = "-"
             client_contact = "-"
@@ -1690,108 +1806,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     pass
 
             temp_dir = tempfile.gettempdir()
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            if str(output_format).lower() == "ticket80":
-                path = os.path.join(temp_dir, f"Paiement_Credit_Ticket80_{refpmt}_{timestamp}.pdf")
-                ticket_width = 80 * mm
-                ticket_height = 200 * mm
-                c = canvas.Canvas(path, pagesize=(ticket_width, ticket_height))
-                y = ticket_height - 10 * mm
-                x_center = ticket_width / 2
-                margin = 5 * mm
-
-                nom_soc = societe[0] if societe else "IJEERY"
-                adr_soc = societe[1] if societe and len(societe) > 1 else ""
-                ville_soc = societe[2] if societe and len(societe) > 2 else ""
-                contact_soc = societe[3] if societe and len(societe) > 3 else ""
-
-                c.setFont("Helvetica-Bold", 12)
-                c.drawCentredString(x_center, y, (nom_soc or "IJEERY").upper())
-                y -= 5 * mm
-                c.setFont("Helvetica", 8)
-                if adr_soc:
-                    c.drawCentredString(x_center, y, adr_soc)
-                    y -= 4 * mm
-                if ville_soc:
-                    c.drawCentredString(x_center, y, ville_soc)
-                    y -= 4 * mm
-                if contact_soc:
-                    c.drawCentredString(x_center, y, f"Tél: {contact_soc}")
-                    y -= 6 * mm
-
-                c.line(margin, y, ticket_width - margin, y)
-                y -= 7 * mm
-                c.setFont("Helvetica-Bold", 11)
-                c.drawCentredString(x_center, y, "REÇU DE PAIEMENT CRÉDIT")
-                y -= 7 * mm
-                c.line(margin, y, ticket_width - margin, y)
-                y -= 7 * mm
-
-                c.setFont("Helvetica", 9)
-                c.drawString(margin, y, f"Date: {date_paiement.strftime('%d/%m/%Y %H:%M')}")
-                y -= 5 * mm
-                c.drawString(margin, y, f"Réf: {refpmt}")
-                y -= 5 * mm
-                c.drawString(margin, y, f"Client: {client_nom}")
-                y -= 5 * mm
-                c.drawString(margin, y, f"Mode: {mode_nom}")
-                y -= 5 * mm
-                c.drawString(margin, y, f"Opérateur: {username}")
-                y -= 7 * mm
-
-                c.line(margin, y, ticket_width - margin, y)
-                y -= 7 * mm
-                c.setFont("Helvetica-Bold", 10)
-                c.drawString(margin, y, "Montant payé :")
-                c.drawRightString(ticket_width - margin, y, f"{self._formater_nombre(montant)} Ar")
-                y -= 10 * mm
-                try:
-                    _, _, _, total_restant, _ = self._compute_credit_status_fifo(idclient)
-                except Exception:
-                    total_restant = 0
-                c.setFont("Helvetica", 9)
-                c.drawString(margin, y, "Reste de Crédit :")
-                c.drawRightString(ticket_width - margin, y, f"{self._formater_nombre(total_restant)} Ar")
-                y -= 10 * mm
-                c.line(margin, y, ticket_width - margin, y)
-                y -= 7 * mm
-
-                c.setFont("Helvetica-Bold", 9)
-                c.drawString(margin, y, "Observation :")
-                y -= 4 * mm
-                c.setFont("Helvetica", 8)
-                max_line_width = ticket_width - 2 * margin
-                current_line = ""
-                for mot in str(observation or "").split():
-                    test_line = (current_line + " " + mot).strip() if current_line else mot
-                    if c.stringWidth(test_line, "Helvetica", 8) <= max_line_width:
-                        current_line = test_line
-                    else:
-                        c.drawString(margin, y, current_line)
-                        y -= 4 * mm
-                        current_line = mot
-                if current_line:
-                    c.drawString(margin, y, current_line)
-                    y -= 7 * mm
-
-                c.line(margin, y, ticket_width - margin, y)
-                y -= 7 * mm
-                c.setFont("Helvetica", 8)
-                c.drawCentredString(x_center, y, "Merci de votre confiance")
-                y -= 4 * mm
-                c.drawCentredString(x_center, y, "Document non contractuel")
-                c.save()
-
-                if open_after:
-                    open_file_if_enabled(
-                        path,
-                        operation="open",
-                        setting_key=(open_setting_key or "Client_PmtCredit_OpenTicket80"),
-                        setting_default=open_setting_default,
-                    )
-                return path
-
-            path = os.path.join(temp_dir, f"Paiement_Credit_{refpmt}_{timestamp}.pdf")
+            path = os.path.join(temp_dir, f"Paiement_Credit_{refpmt}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
 
             page_width, _ = landscape(A5)
             margin = 5 * mm
@@ -1841,8 +1856,8 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 ("LEFTPADDING",(0,0),(-1,-1),6), ("RIGHTPADDING",(0,0),(-1,-1),6),
             ]))
 
-            op_title = Paragraph(
-                operation_title,
+            operation_title = Paragraph(
+                "PAIEMENT DE CREDIT",
                 ParagraphStyle("OpCreditTitle", parent=styles["Normal"], fontSize=14,
                                fontName="Helvetica-Bold", alignment=TA_CENTER, textColor=color_header))
             operation_info = Paragraph(
@@ -1851,7 +1866,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 f"<b>Mode de paiement :</b> {mode_nom}<br/>"
                 f"<b>Operateur :</b> {username}",
                 ParagraphStyle("OpCreditInfo", parent=styles["Normal"], fontSize=9, alignment=TA_LEFT, leading=12))
-            operation_table = Table([[op_title, operation_info]],
+            operation_table = Table([[operation_title, operation_info]],
                                     colWidths=[title_width, info_width], rowHeights=[header_height])
             operation_table.setStyle(TableStyle([
                 ("BOX",(0,0),(-1,-1),1,colors.black), ("ALIGN",(0,0),(0,0),"CENTER"),
@@ -1870,7 +1885,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             elements.append(Spacer(1, 3 * mm))
 
             elements.append(Paragraph(
-                f"<b><u>{info_title}</u></b><br/>",
+                "<b><u>Infos Paiement Credit</u></b><br/>",
                 ParagraphStyle("InfoCreditLine", parent=styles["Normal"], fontSize=9, alignment=TA_CENTER, leading=11)))
             elements.append(Spacer(1, 2 * mm))
 
@@ -1943,12 +1958,10 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
 
             doc.build(elements)
             if open_after:
-                open_file_if_enabled(
-                    path,
-                    operation="open",
-                    setting_key=(open_setting_key or "Client_PmtCredit_OpenA5"),
-                    setting_default=open_setting_default,
-                )
+                if os.name == 'nt':
+                    os.startfile(path)
+                else:
+                    subprocess.Popen(['xdg-open', path])
             return path
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération PDF paiement crédit: {e}")
@@ -2071,8 +2084,6 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         entry_montant = ctk.CTkEntry(main_frame, placeholder_text="Ex: 50000",
                                      font=_F(_FONT_SIZE_MD))
         entry_montant.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
-        entry_montant.bind("<KeyRelease>", lambda e, w=entry_montant: self.format_montant(w))
-        entry_montant.bind("<FocusOut>", lambda e, w=entry_montant: self.format_montant(w))
         
         def enregistrer_creance():
             try:
@@ -2083,7 +2094,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     messagebox.showwarning("Attention", "Veuillez remplir tous les champs.")
                     return
                 
-                montant = float(montant_str.replace('.', '').replace(',', '.'))
+                montant = float(montant_str.replace(',', '.'))
                 
                 if montant <= 0:
                     messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
@@ -2100,54 +2111,26 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     VALUES (%s, %s, %s, %s)
                 """, (idclient, datetime.now(), num_fact, montant))
                 self.conn.commit()
-
-                try:
-                    client_nom = self._get_client_name(idclient)
-                    self._logger.log(
-                        action="Création de créance client",
-                        element=client_nom or f"idclient={idclient}",
-                        details=f"Créance manuelle ref='{num_fact}'",
-                        value=f"{montant} Ar",
-                    )
-                except Exception:
-                    pass
                 
                 messagebox.showinfo("Succès", f"Créance de {self._formater_nombre(montant)} Ar enregistrée avec succès!")
                 
-                username = self._get_username_by_id(self._get_connected_user_id())
+                username = self._get_username_by_id(1)
                 societe_data = self._get_societe_info()
                 societe_tuple = (
                     societe_data.get('name', ''), societe_data.get('addr', ''),
                     societe_data.get('ville', ''), societe_data.get('tel', ''),
                 )
                 articles = [("", "Creance manuelle", "", 1, float(montant), float(montant))]
-                observation = f"Créance manuelle : {num_fact}"
-                settings = load_settings()
-                open_ticket = is_setting_enabled("Client_Creance_OpenTicketPdf", default=0, settings=settings)
-                ticket_path = self._generer_ticket_pdf_creance(
+                result = messagebox.askyesno("Imprimer", "Voulez-vous ouvrir le ticket PDF de créance ?")
+                self._generer_ticket_pdf_creance(
                     societe=societe_tuple, username=username, articles=articles,
                     montant=float(montant), mode_nom="Credit", refpmt=num_fact,
                     client_nom=self._get_client_name(idclient), montant_total=float(montant),
-                    open_after=open_ticket
+                    open_after=result
                 )
-                if ticket_path:
-                    messagebox.showinfo("Confirmation", "Le ticket PDF de créance a été généré.")
-                    open_a5 = is_setting_enabled("Client_Creance_OpenA5", default=0, settings=settings)
-                    facture_a5_path = self._generer_ticket_pdf_paiement_credit(
-                        societe=societe_tuple, username=username, articles=articles,
-                        montant=float(montant), mode_nom="Credit", refpmt=num_fact,
-                        idclient=idclient, client_nom=self._get_client_name(idclient),
-                        observation=observation, date_paiement=datetime.now(),
-                        open_after=open_a5, output_format="A5",
-                        operation_title="VALIDATION CREANCE", info_title="Infos Créance",
-                        open_setting_key="Client_Creance_OpenA5", open_setting_default=0,
-                    )
-                    if open_a5 and facture_a5_path:
-                        messagebox.showinfo("Confirmation", "La facture PDF A5 de créance a été générée.")
                 
                 creance_window.destroy()
                 parent_window.destroy()
-                self.refresh_client_list()
                 self.open_client_credit_details(idclient)
             
             except ValueError:

@@ -10,15 +10,12 @@ import psycopg2
 import json
 from resource_utils import get_config_path
 from app_theme import Colors, Fonts, styled
-from log_utils import AppLogger
 
 
 class PageInfosCharges(ctk.CTkFrame):
     def __init__(self, parent, iduser, **kwargs):
         super().__init__(parent, fg_color=Colors.BG_PAGE, **kwargs)
         self.iduser = iduser
-        self.session_data = getattr(parent, "session_data", None) or {"user_id": self.iduser}
-        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
 
         self._infos_charge_value = ""
 
@@ -137,15 +134,6 @@ class PageInfosCharges(ctk.CTkFrame):
                 (valeur, "infos_charge")
             )
             conn.commit()
-            try:
-                self._logger.log(
-                    action="Modification infos charges",
-                    element="infos_charge",
-                    details="Mise à jour texte infos charges",
-                    value=f"{len(valeur)} caractères",
-                )
-            except Exception:
-                pass
             self._infos_charge_value = valeur
             self.txt_infos_charge.configure(state="disabled")
             messagebox.showinfo("Succès", "Infos charges enregistrées.")

@@ -18,7 +18,21 @@ import os
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled, Theme
-from log_utils import AppLogger
+
+# ── Import Réception Directe ──────────────────────────────────────────────────
+PageReceptionDirecte = None
+for _mod, _cls in [
+    ("pages.page_receptiondirect", "PageReceptionDirecte"),
+    ("page_receptiondirect",       "PageReceptionDirecte"),
+    ("pages.page_ReceptionDirect", "PageReceptionDirecte"),
+    ("page_ReceptionDirect",       "PageReceptionDirecte"),
+]:
+    try:
+        import importlib as _il
+        PageReceptionDirecte = getattr(_il.import_module(_mod), _cls)
+        break
+    except Exception:
+        continue
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,8 +69,6 @@ class PageBonReception(ctk.CTkFrame):
         _apply_treeview_style()
 
         self.iduser   = iduser
-        self.session_data = getattr(parent, "session_data", None) or {"user_id": self.iduser}
-        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
         self.items_livraison  = []
         self.idcom_selectionne = None
         self.info_commande    = None
@@ -273,9 +285,20 @@ class PageBonReception(ctk.CTkFrame):
         self.tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
-        # Barre basse : Enregistrer à droite uniquement
+        # Barre basse : Réception directe à gauche | Enregistrer à droite
         bot = ctk.CTkFrame(card, fg_color="transparent")
         bot.pack(fill="x", padx=10, pady=(0, 6))
+
+        ctk.CTkButton(
+            bot,
+            text="📦 Réception directe",
+            font=Fonts.button(11),
+            fg_color=Colors.MIDNIGHT,
+            hover_color=Colors.MIDNIGHT_LIGHT,
+            text_color=Colors.TEXT_ON_DARK,
+            height=28, width=160, corner_radius=6,
+            command=self._ouvrir_reception_directe,
+        ).pack(side="left")
 
         styled.button_success(bot, text="💾 Enregistrer",
                               command=self.enregistrer_livraison, width=140, height=28
@@ -284,6 +307,34 @@ class PageBonReception(ctk.CTkFrame):
     # =========================================================================
     # LOGIQUE MÉTIER — inchangée
     # =========================================================================
+
+    def _ouvrir_reception_directe(self):
+        """Ouvre PageReceptionDirecte dans un CTkToplevel centré."""
+        if PageReceptionDirecte is None:
+            import os
+            messagebox.showerror(
+                "Module manquant",
+                "Le fichier 'page_receptiondirect.py' est introuvable.\n\n"
+                f"Dossier courant : {os.getcwd()}\n\n"
+                "Vérifiez que le fichier est bien dans le dossier 'pages/'."
+            )
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title("Réception Directe Fournisseur")
+        win.configure(fg_color=Colors.BG_PAGE)
+
+        w, h = 1280, 820
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+        win.grab_set()
+        win.focus_set()
+        Theme.apply_toplevel(win)
+
+        page = PageReceptionDirecte(win, iduser=self.iduser)
+        page.pack(fill="both", expand=True)
 
     def toggle_date_peremption(self):
         pass
@@ -562,15 +613,6 @@ class PageBonReception(ctk.CTkFrame):
 
             conn.commit()
             self.derniere_reflivfrs_enregistree = self.entry_ref.get()
-            try:
-                self._logger.log(
-                    action="Création livraison fournisseur",
-                    element=str(self.derniere_reflivfrs_enregistree),
-                    details=f"Livraison fournisseur enregistrée (commande_id={self.idcom_selectionne}, magasin_id={idmag}, lignes={len(self.items_livraison)}, factfrs='{numero_facture}', a_payer={a_payer})",
-                    value=f"{len(self.items_livraison)} lignes",
-                )
-            except Exception:
-                pass
 
             messagebox.showinfo("Succès",
                 f"Enregistrement effectué avec succès.\nRéférence: {self.derniere_reflivfrs_enregistree}"

@@ -10,8 +10,6 @@ import os
 import sys # Ajouté pour open_file sur Linux/macOS
 import textwrap # Ajouté pour le formatage du ticket de caisse
 from resource_utils import get_config_path, safe_file_read
-from settings_utils import open_file_if_enabled
-from stock_snapshot import StockSnapshot, format_nombre_auto
 
 
 # --- NOUVELLES IMPORTATIONS POUR L'IMPRESSION ---
@@ -219,7 +217,6 @@ class PageVente(ctk.CTkFrame):
         self.id_user_connecte = id_user_connecte 
         self.conn: Optional[psycopg2.connection] = None
         self.article_selectionne = None
-        self._stock_snapshot_cache: dict[int, StockSnapshot] = {}
         self.detail_vente = []
         self.index_ligne_selectionnee = None
         self.magasin_map = {}
@@ -271,8 +268,14 @@ class PageVente(ctk.CTkFrame):
     
     # --- FONCTIONS DE FORMATAGE ET DE CALCUL DE STOCK ---
     def formater_nombre(self, nombre):
-        """Format auto: 2 décimales sauf si ,00 => entier."""
-        return format_nombre_auto(nombre)
+        """Formate un nombre avec séparateur de milliers (1.000.000,00)"""
+        try:
+            nombre = float(nombre) 
+            # Utilise un formatage pour avoir des séparateurs de milliers
+            formatted = "{:,.2f}".format(nombre).replace(',', '_TEMP_').replace('.', ',').replace('_TEMP_', '.')
+            return formatted
+        except:
+            return "0,00"
     
     def parser_nombre(self, texte):
         """Convertit un nombre formaté (1.000.000,00) en float"""
@@ -329,23 +332,30 @@ class PageVente(ctk.CTkFrame):
                 cursor.close()
 
     
-    def _get_stock_snapshot(self, id_mag: int) -> StockSnapshot:
-        """Snapshot stock (StockManager) mis en cache par magasin."""
-        id_mag = int(id_mag)
-        snap = self._stock_snapshot_cache.get(id_mag)
-        if snap is None:
-            snap = StockSnapshot.build(id_mag)
-            self._stock_snapshot_cache[id_mag] = snap
-        return snap
-
     def calculer_stock_article(self, id_art, id_uni, id_mag):
-        """Calcule le stock via StockManager (sans clamp) pour article/unité/magasin."""
-        try:
-            snap = self._get_stock_snapshot(int(id_mag))
-            return float(snap.stock_unite(int(id_art), int(id_uni)))
-        except Exception as e:
-            print(f"Erreur calcul stock (StockManager): {e}")
-            return 0.0
+        """Calcule le stock actuel pour un article, une unité et un magasin précis."""
+        conn = self.connect_db()
+        stock_total = 0
+        if conn:
+            try:
+                cursor = conn.cursor()
+                query = """
+                SELECT 
+                    (SELECT COALESCE(SUM(quantite), 0) FROM tb_entree_stock 
+                     WHERE idarticle = %s AND idunite = %s AND idmagasin = %s) -
+                                        (SELECT COALESCE(SUM(quantite), 0) FROM tb_ligne_vente lv
+                                         JOIN tb_vente v ON lv.idvente = v.idvente
+                                         WHERE lv.idarticle = %s AND lv.idunite = %s AND v.idmagasin = %s
+                                             AND v.statut = 'VALIDEE')
+            """
+                cursor.execute(query, (id_art, id_uni, id_mag, id_art, id_uni, id_mag))
+                res = cursor.fetchone()
+                stock_total = res[0] if res else 0
+                cursor.close()
+                conn.close()
+            except Exception as e:
+                print(f"Erreur calcul stock: {e}")
+        return stock_total
     
     def charger_stocks(self):
         """Charge tous les stocks dans le Treeview"""
@@ -944,9 +954,6 @@ class PageVente(ctk.CTkFrame):
         for item in self.tree_art.get_children():
             self.tree_art.delete(item)
 
-        # Invalider le cache si la liste des magasins change (sécurité)
-        # (le cache est par idmagasin; la liste self.magasins ne doit pas changer souvent)
-
         search_query = self.entry_search_art.get().lower()
         conn = self.connect_db()
         if not conn: return
@@ -1249,7 +1256,7 @@ class PageVente(ctk.CTkFrame):
         style.configure("Treeview", rowheight=22, font=('Segoe UI', 8), background="#FFFFFF", foreground="#000000", fieldbackground="#FFFFFF", borderwidth=0)
         style.configure("Treeview.Heading", font=('Segoe UI', 8, 'bold'), background="#E8E8E8", foreground="#000000")
 
-        tree.heading("ID", text="ID")
+        tree_frame.heading("ID", text="ID")
         tree.heading("Ref Vente", text="N° Facture")
         tree.heading("Date", text="Date", command=lambda: self.sort_tree(tree, "Date"))
         tree.heading("Description", text="Description")
@@ -1722,18 +1729,12 @@ class PageVente(ctk.CTkFrame):
         if result == "A5 PDF (Paysage)":
             filename = f"Facture_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             self.generate_pdf_a5(data, filename)
-            try:
-                open_file_if_enabled(filename, operation="open", setting_key="Vente_ImpressionA5", setting_default=1)
-            except Exception:
-                self.open_file(filename)
+            self.open_file(filename)
             messagebox.showinfo("Impression PDF", f"Le fichier PDF '{filename}' a été généré avec succès.")
         elif result == "Ticket 80mm":
             filename = f"Ticket_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
             self.generate_ticket_80mm(data, filename)
-            try:
-                open_file_if_enabled(filename, operation="open", setting_key="Vente_ImpressionTicket", setting_default=0)
-            except Exception:
-                self.open_file(filename)
+            self.open_file(filename)
             messagebox.showinfo("Impression Ticket", f"Le fichier Ticket '{filename}' (texte brut) a été généré avec succès.")
         else:
             messagebox.showinfo("Annulation", "Impression annulée.")
@@ -1742,16 +1743,12 @@ class PageVente(ctk.CTkFrame):
     def open_file(self, filename):
         """Ouvre le fichier généré avec le programme par défaut."""
         try:
-            setting_key = None
-            try:
-                base = os.path.basename(str(filename)).lower()
-                if base.startswith("facture_"):
-                    setting_key = "Vente_ImpressionA5"
-                elif base.startswith("ticket_"):
-                    setting_key = "Vente_ImpressionTicket"
-            except Exception:
-                setting_key = None
-            open_file_if_enabled(filename, operation="open", setting_key=setting_key, setting_default=1)
+            if sys.platform == 'win32':
+                os.startfile(filename)
+            elif sys.platform == 'darwin':
+                os.system(f'open "{filename}"')
+            else:
+                os.system(f'xdg-open "{filename}"')
         except Exception as e:
             pass # Ignorer les erreurs d'ouverture de fichier
 

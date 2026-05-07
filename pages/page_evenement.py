@@ -1,339 +1,316 @@
-import customtkinter as ctk
+import tkinter as tk
 from tkinter import ttk, messagebox
 import psycopg2
 from datetime import datetime
+import winsound # Utilisé pour des sons, peut être retiré si non désiré
+import json # Non utilisé dans cette section, peut être retiré si non désiré
+import customtkinter as ctk
 import json
-from resource_utils import get_config_path
-from app_theme import Colors, Fonts
-from log_utils import AppLogger
+import os
+import sys
+from resource_utils import get_config_path, safe_file_read
 
 
-class PageEvenement(ctk.CTkFrame):
-    """Historique des actions utilisateur basé sur tb_log_evenements."""
+# Ensure the parent directory is in the Python path for absolute imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-    def __init__(self, master, db_conn=None, session_data=None, db_config=None, **kwargs):
-        super().__init__(master, fg_color=Colors.BG_PAGE, **kwargs)
-        self.db_conn = db_conn
-        self.session_data = session_data
-        self.db_config = db_config
-        self.conn = self.connect_db()
-        self.sort_column = "datetime"
-        self.sort_desc = True
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data or {})
-        self._build_ui()
-        self._apply_table_style()
-        self._load_users_filter()
-        self.refresh_data()
+class DatabaseManager:
+    def __init__(self):
+        self.db_params = self._load_db_config()
+        self.conn = None
+        self.cursor = None
 
-    def connect_db(self):
+    def _load_db_config(self):
+        """Loads database configuration from 'config.json'."""
         try:
-            with open(get_config_path("config.json"), "r", encoding="utf-8") as f:
+            # Assurez-vous que le chemin vers config.json est correct
+            config_path = get_config_path('config.json')
+            with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            db_config = config["database"]
-            return psycopg2.connect(
-                host=db_config["host"],
-                user=db_config["user"],
-                password=db_config["password"],
-                database=db_config["database"],
-                port=db_config["port"],
-            )
-        except Exception as err:
-            messagebox.showerror("Erreur de connexion", f"Connexion PostgreSQL impossible : {err}")
+                return config['database']
+        except FileNotFoundError:
+            print("Error: 'config.json' not found.")
+            return None
+        except KeyError:
+            print("Error: 'database' key is missing in 'config.json'.")
+            return None
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in 'config.json': {e}")
+            return None
+        except UnicodeDecodeError as e:
+            print(f"Error: Encoding problem in 'config.json': {e}")
             return None
 
-    def _build_ui(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+    def connect(self):
+        """Establishes a new database connection."""
+        if self.db_params is None:
+            print("Cannot connect: Database configuration is missing.")
+            return False
 
-        header = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        header.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 2))
-        for col in range(10):
-            header.grid_columnconfigure(col, weight=1)
-        header.grid_columnconfigure(3, weight=2)
-
-        ctk.CTkLabel(
-            header,
-            text="Historique des actions utilisateur",
-            font=Fonts.heading(16),
-            text_color=Colors.TEXT_PRIMARY,
-        ).grid(row=0, column=0, columnspan=10, sticky="w", padx=10, pady=(8, 4))
-
-        label_style = dict(font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY, anchor="w")
-        entry_style = dict(
-            fg_color=Colors.BG_INPUT,
-            border_color=Colors.BORDER,
-            height=32,
-            corner_radius=6,
-            font=Fonts.input(11),
-        )
-
-        ctk.CTkLabel(header, text="Recherche globale", **label_style).grid(row=1, column=0, padx=(10, 4), sticky="w")
-        self.search_entry = ctk.CTkEntry(header, placeholder_text="Date, utilisateur, description...", **entry_style)
-        self.search_entry.grid(row=2, column=0, columnspan=4, padx=(10, 4), pady=(0, 8), sticky="ew")
-        self.search_entry.bind("<KeyRelease>", lambda _e: self.refresh_data())
-
-        ctk.CTkLabel(header, text="Utilisateur", **label_style).grid(row=1, column=4, padx=4, sticky="w")
-        self.user_filter = ctk.CTkComboBox(
-            header,
-            values=["Tous"],
-            state="readonly",
-            button_color=Colors.MIDNIGHT,
-            dropdown_fg_color=Colors.BG_CARD,
-            **entry_style,
-        )
-        self.user_filter.grid(row=2, column=4, padx=4, pady=(0, 8), sticky="ew")
-        self.user_filter.set("Tous")
-        self.user_filter.configure(command=lambda _v: self.refresh_data())
-
-        ctk.CTkLabel(header, text="Date de (YYYY-MM-DD)", **label_style).grid(row=1, column=5, padx=4, sticky="w")
-        self.date_from_entry = ctk.CTkEntry(header, placeholder_text="2026-01-01", **entry_style)
-        self.date_from_entry.grid(row=2, column=5, padx=4, pady=(0, 8), sticky="ew")
-        self.date_from_entry.bind("<KeyRelease>", lambda _e: self.refresh_data())
-
-        ctk.CTkLabel(header, text="Date à (YYYY-MM-DD)", **label_style).grid(row=1, column=6, padx=4, sticky="w")
-        self.date_to_entry = ctk.CTkEntry(header, placeholder_text="2026-12-31", **entry_style)
-        self.date_to_entry.grid(row=2, column=6, padx=4, pady=(0, 8), sticky="ew")
-        self.date_to_entry.bind("<KeyRelease>", lambda _e: self.refresh_data())
-
-        ctk.CTkButton(
-            header,
-            text="Actualiser",
-            font=Fonts.bold(11),
-            fg_color=Colors.PRIMARY,
-            hover_color=Colors.PRIMARY_HOVER,
-            corner_radius=6,
-            height=32,
-            command=self._refresh_with_log,
-        ).grid(row=2, column=7, padx=4, pady=(0, 8), sticky="ew")
-
-        ctk.CTkButton(
-            header,
-            text="Réinitialiser",
-            font=Fonts.bold(11),
-            fg_color=Colors.TEXT_MUTED,
-            hover_color=Colors.TEXT_SECONDARY,
-            corner_radius=6,
-            height=32,
-            command=self._reset_with_log,
-        ).grid(row=2, column=8, padx=4, pady=(0, 8), sticky="ew")
-
-        table_wrap = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        table_wrap.grid(row=1, column=0, sticky="nsew")
-        table_wrap.grid_columnconfigure(0, weight=1)
-        table_wrap.grid_rowconfigure(0, weight=1)
-
-        columns = ("datetime", "user", "description")
-        self.tree = ttk.Treeview(table_wrap, columns=columns, show="headings", style="Evenements.Treeview")
-        self.tree.heading("datetime", text="Date & Heure", command=lambda: self._toggle_sort("datetime"))
-        self.tree.heading("user", text="Utilisateur", command=lambda: self._toggle_sort("user"))
-        self.tree.heading("description", text="Description", command=lambda: self._toggle_sort("description"))
-        self.tree.column("datetime", width=180, anchor="center")
-        self.tree.column("user", width=180, anchor="w")
-        self.tree.column("description", width=700, anchor="w")
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
-        self.tree.tag_configure("row_even", background=Colors.BG_CARD)
-        self.tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
-
-        y_scroll = ctk.CTkScrollbar(table_wrap, command=self.tree.yview)
-        y_scroll.grid(row=0, column=1, sticky="ns", padx=(0, 8), pady=8)
-        self.tree.configure(yscrollcommand=y_scroll.set)
-
-        footer = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        footer.grid(row=2, column=0, sticky="ew", padx=0, pady=(2, 0))
-        footer.grid_columnconfigure(0, weight=1)
-        self.result_count_label = ctk.CTkLabel(
-            footer,
-            text="0 résultat(s)",
-            font=Fonts.small(11),
-            text_color=Colors.TEXT_SECONDARY,
-            anchor="w",
-        )
-        self.result_count_label.grid(row=0, column=0, sticky="w", padx=10, pady=8)
-
-    def _apply_table_style(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure(
-            "Evenements.Treeview",
-            rowheight=24,
-            font=("Segoe UI", 9),
-            background=Colors.BG_CARD,
-            foreground=Colors.TEXT_PRIMARY,
-            fieldbackground=Colors.BG_CARD,
-            borderwidth=0,
-        )
-        style.configure(
-            "Evenements.Treeview.Heading",
-            background=Colors.BG_HEADER,
-            foreground=Colors.TEXT_ON_DARK,
-            font=("Segoe UI", 9, "bold"),
-            relief="flat",
-        )
-        style.map(
-            "Evenements.Treeview",
-            background=[("selected", Colors.PRIMARY)],
-            foreground=[("selected", Colors.TEXT_ON_DARK)],
-        )
-
-    def _load_users_filter(self):
-        if not self.conn:
-            return
         try:
-            with self.conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT DISTINCT COALESCE("user", '')
-                    FROM tb_log_evenements
-                    ORDER BY COALESCE("user", '') ASC
-                    """
+            self.conn = psycopg2.connect(
+                host=self.db_params['host'],
+                user=self.db_params['user'],
+                password=self.db_params['password'],
+                database=self.db_params['database'],
+                port=self.db_params['port']
+            )
+            self.cursor = self.conn.cursor()
+            print("Connection to the database successful!")
+            return True
+        except psycopg2.OperationalError as e:
+            print(f"Error connecting to the database: {e}")
+            self.conn = None
+            self.cursor = None
+            return False
+
+    def get_connection(self):
+        """Returns the database connection if connected, otherwise attempts to connect."""
+        if self.conn is None or self.conn.closed:
+            if self.connect():
+                return self.conn
+            else:
+                return None
+        return self.conn
+
+class PageEvenement(ctk.CTkFrame):
+    def __init__(self, master, db_conn=None, session_data=None, db_config=None, **kwargs):
+        super().__init__(master, **kwargs)
+
+        self.conn = None
+        self.cursor = None
+        self.connect_to_db()
+
+        self.create_widgets()
+        self.load_events()
+
+    def connect_to_db(self):
+        """Tente d'établir une connexion à la base de données PostgreSQL."""
+        # Instantiate DatabaseManager and establish a connection
+        db_manager = DatabaseManager()
+        self.conn = db_manager.get_connection()
+
+        if self.conn is None:
+            messagebox.showerror("Erreur de connexion", "Impossible de se connecter à la base de données.")
+            return
+
+        try:
+            self.cursor = self.conn.cursor()
+            self.cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tb_evenement (
+                    id SERIAL PRIMARY KEY,
+                    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Ajout de DEFAULT pour une date automatique
+                    evenements VARCHAR(200) NOT NULL
                 )
-                users = [row[0] for row in cursor.fetchall() if row[0]]
-            self.user_filter.configure(values=["Tous"] + users)
-            self.user_filter.set("Tous")
-        except Exception as err:
-            messagebox.showerror("Erreur", f"Chargement des utilisateurs impossible : {err}")
-
-    def _toggle_sort(self, column):
-        if self.sort_column == column:
-            self.sort_desc = not self.sort_desc
-        else:
-            self.sort_column = column
-            self.sort_desc = True
-        self.refresh_data()
-
-    def _refresh_row_colors(self):
-        for idx, item in enumerate(self.tree.get_children()):
-            self.tree.item(item, tags=("row_even" if idx % 2 == 0 else "row_odd",))
-
-    def reset_filters(self):
-        self.search_entry.delete(0, "end")
-        self.user_filter.set("Tous")
-        self.date_from_entry.delete(0, "end")
-        self.date_to_entry.delete(0, "end")
-        self.sort_column = "datetime"
-        self.sort_desc = True
-        self.refresh_data()
-
-    def _refresh_with_log(self):
-        try:
-            self._logger.log(
-                action="Consultation événements",
-                element="Événements",
-                details="Actualiser historique des actions utilisateur",
-                value="refresh",
+                """
             )
-        except Exception:
-            pass
-        self.refresh_data()
+            self.conn.commit()
+        except psycopg2.Error as err:
+            messagebox.showerror("Erreur de connexion à la base de données", f"Erreur : {err}")
+            # Gérer l'échec de la connexion, par exemple désactiver certaines fonctionnalités
+            self.conn = None
+            self.cursor = None
 
-    def _reset_with_log(self):
-        try:
-            self._logger.log(
-                action="Consultation événements",
-                element="Événements",
-                details="Réinitialiser filtres historique",
-                value="reset_filters",
-            )
-        except Exception:
-            pass
-        self.reset_filters()
+    def create_widgets(self):
+        """Crée les widgets de la page des événements."""
 
-    def _build_where_clause(self):
-        where_parts = []
-        params = []
+        # --- Champ de saisie pour l'événement ---
+        input_frame = ctk.CTkFrame(self, fg_color="transparent")
+        input_frame.pack(pady=20, padx=20, fill="x")
 
-        search_text = self.search_entry.get().strip()
-        if search_text:
-            where_parts.append(
-                """(
-                    COALESCE(description, '') ILIKE %s
-                    OR COALESCE("user", '') ILIKE %s
-                    OR TO_CHAR(datetime, 'YYYY-MM-DD HH24:MI:SS') ILIKE %s
-                )"""
-            )
-            like_value = f"%{search_text}%"
-            params.extend([like_value, like_value, like_value])
+        self.event_label = ctk.CTkLabel(input_frame, text="Description de l'événement:", font=("Arial", 16))
+        self.event_label.pack(side="left", padx=(0, 10))
 
-        selected_user = self.user_filter.get().strip()
-        if selected_user and selected_user != "Tous":
-            where_parts.append('COALESCE("user", \'\') = %s')
-            params.append(selected_user)
+        self.event_entry = ctk.CTkEntry(input_frame, width=400, font=("Arial", 14))
+        self.event_entry.pack(side="left", fill="x", expand=True)
 
-        date_from = self.date_from_entry.get().strip()
-        if date_from:
-            try:
-                datetime.strptime(date_from, "%Y-%m-%d")
-                where_parts.append("datetime >= %s::date")
-                params.append(date_from)
-            except ValueError:
-                pass
+        # --- Boutons d'action ---
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.pack(pady=10, padx=20)
 
-        date_to = self.date_to_entry.get().strip()
-        if date_to:
-            try:
-                datetime.strptime(date_to, "%Y-%m-%d")
-                where_parts.append("datetime < (%s::date + INTERVAL '1 day')")
-                params.append(date_to)
-            except ValueError:
-                pass
+        self.add_button = ctk.CTkButton(button_frame, text="Ajouter", command=self.add_event, font=("Arial", 14, "bold"), fg_color="#28a745", hover_color="#218838")
+        self.add_button.grid(row=0, column=0, padx=10)
 
-        if where_parts:
-            return f"WHERE {' AND '.join(where_parts)}", params
-        return "", params
+        self.modify_button = ctk.CTkButton(button_frame, text="Modifier", command=self.modify_event, font=("Arial", 14, "bold"), fg_color="#007bff", hover_color="#0069d9")
+        self.modify_button.grid(row=0, column=1, padx=10)
 
-    def refresh_data(self):
+        self.delete_button = ctk.CTkButton(button_frame, text="Supprimer", command=self.delete_event, font=("Arial", 14, "bold"), fg_color="#dc3545", hover_color="#c82333")
+        self.delete_button.grid(row=0, column=2, padx=10)
+
+        # --- Treeview pour afficher les événements ---
+        tree_frame = ctk.CTkFrame(self, fg_color="transparent")
+        tree_frame.pack(pady=20, padx=20, fill="both", expand=True)
+
+        # Style pour le Treeview (CustomTkinter ne stylise pas directement ttk.Treeview)
+        # Vous devrez utiliser un style Tkinter normal pour personnaliser l'apparence
+        style = ttk.Style()
+        style.theme_use("clam") # 'clam', 'alt', 'default'
+
+        # Configurez les couleurs de la Treeview
+        # Ces couleurs peuvent ne pas être parfaites avec votre thème CustomTkinter,
+        # vous devrez peut-être les ajuster pour correspondre.
+        style.configure("Treeview",
+                        background="#FFFFFF",
+                        foreground="#000000",
+                        rowheight=22,
+                        fieldbackground="#FFFFFF",
+                        borderwidth=0,
+                        font=('Segoe UI', 8))
+        style.map('Treeview',
+                  background=[('selected', '#347083')])
+
+        style.configure("Treeview.Heading",
+                        font=('Segoe UI', 8, 'bold'),
+                        background="#E8E8E8",
+                        foreground="#000000")
+
+        # Création du Treeview
+        self.tree = ttk.Treeview(tree_frame, columns=("ID", "Date", "Description"), show="headings")
+        self.tree.heading("ID", text="ID")
+        self.tree.heading("Date", text="Date")
+        self.tree.heading("Description", text="Description de l'événement")
+
+        # Ajuster les largeurs des colonnes
+        self.tree.column("ID", width=50, anchor="center")
+        self.tree.column("Date", width=150, anchor="center")
+        self.tree.column("Description", width=450, anchor="w") # 'w' pour aligner à gauche
+
+        self.tree.pack(side="left", fill="both", expand=True)
+
+        # --- Scrollbar verticale ---
+        self.scrollbar = ctk.CTkScrollbar(tree_frame, command=self.tree.yview)
+        self.scrollbar.pack(side="right", fill="y")
+        self.tree.configure(yscrollcommand=self.scrollbar.set)
+
+        # Événement de sélection dans le Treeview
+        self.tree.bind("<ButtonRelease-1>", self.select_event)
+
+    def load_events(self):
+        """Charge tous les événements depuis la base de données et les affiche dans le Treeview."""
         if not self.conn:
-            return
+            return # Ne rien faire si la connexion échoue
 
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        order_map = {
-            "datetime": "datetime",
-            "user": 'COALESCE("user", \'\')',
-            "description": "description",
-        }
-        order_by = order_map.get(self.sort_column, "datetime")
-        order_dir = "DESC" if self.sort_desc else "ASC"
-        where_clause, params = self._build_where_clause()
+        try:
+            self.cursor.execute("SELECT id, date, evenements FROM tb_evenement ORDER BY date DESC")
+            events = self.cursor.fetchall()
+            for event in events:
+                # Formater la date pour un affichage plus lisible
+                formatted_date = event[1].strftime('%Y-%m-%d %H:%M') if event[1] else ''
+                self.tree.insert("", "end", values=(event[0], formatted_date, event[2]))
+        except psycopg2.Error as e:
+            messagebox.showerror("Erreur de chargement", f"Erreur lors du chargement des événements : {e}")
 
-        query = f"""
-            SELECT datetime, COALESCE("user", ''), description
-            FROM tb_log_evenements
-            {where_clause}
-            ORDER BY {order_by} {order_dir}, id_log DESC
-        """
+    def add_event(self):
+        """Ajoute un nouvel événement à la base de données."""
+        if not self.conn:
+            return
+
+        event_description = self.event_entry.get().strip()
+        if not event_description:
+            messagebox.showwarning("Saisie manquante", "Veuillez entrer une description pour l'événement.")
+            return
 
         try:
-            with self.conn.cursor() as cursor:
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
+            # La date est définie automatiquement par DEFAULT CURRENT_TIMESTAMP dans la table
+            self.cursor.execute("INSERT INTO tb_evenement (evenements) VALUES (%s)", (event_description,))
+            self.conn.commit()
+            winsound.Beep(500, 200) # Petit son de succès
+            messagebox.showinfo("Succès", "Événement ajouté avec succès !")
+            self.event_entry.delete(0, ctk.END) # Efface le champ de saisie
+            self.load_events() # Recharge les événements dans le Treeview
+        except psycopg2.Error as e:
+            messagebox.showerror("Erreur d'ajout", f"Erreur lors de l'ajout de l'événement : {e}")
+            self.conn.rollback() # Annule la transaction en cas d'erreur
 
-            for row in rows:
-                dt = row[0].strftime("%Y-%m-%d %H:%M:%S") if row[0] else ""
-                self.tree.insert("", "end", values=(dt, row[1], row[2] or ""))
+    def modify_event(self):
+        """Modifie un événement sélectionné et actualise la date à l'heure actuelle."""
+        if not self.conn:
+            return
 
-            self._refresh_row_colors()
-            self.result_count_label.configure(text=f"{len(rows)} résultat(s)")
-        except Exception as err:
-            messagebox.showerror("Erreur", f"Chargement des événements impossible : {err}")
+        selected_item = self.tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Aucune sélection", "Veuillez sélectionner un événement à modifier.")
+            return
+
+        event_id = self.tree.item(selected_item, "values")[0]
+        new_description = self.event_entry.get().strip()
+
+        if not new_description:
+            messagebox.showwarning("Saisie manquante", "Veuillez entrer la nouvelle description de l'événement.")
+            return
+
+        try:
+            # Modification ici : on ajoute 'date = CURRENT_TIMESTAMP'
+            self.cursor.execute(
+                "UPDATE tb_evenement SET evenements = %s, date = CURRENT_TIMESTAMP WHERE id = %s", 
+                (new_description, event_id)
+            )
+            self.conn.commit()
+            winsound.Beep(500, 200)
+            messagebox.showinfo("Succès", "Événement et date mis à jour avec succès !")
+            self.event_entry.delete(0, ctk.END)
+            self.load_events()
+        except psycopg2.Error as e:
+            messagebox.showerror("Erreur de modification", f"Erreur lors de la modification : {e}")
+            self.conn.rollback()
+
+    def delete_event(self):
+        """Supprime un événement sélectionné de la base de données."""
+        if not self.conn:
+            return
+
+        selected_item = self.tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Aucune sélection", "Veuillez sélectionner un événement à supprimer.")
+            return
+
+        event_id = self.tree.item(selected_item, "values")[0]
+        
+        if messagebox.askyesno("Confirmer la suppression", "Êtes-vous sûr de vouloir supprimer cet événement ?"):
+            try:
+                self.cursor.execute("DELETE FROM tb_evenement WHERE id = %s", (event_id,))
+                self.conn.commit()
+                winsound.Beep(500, 200)
+                messagebox.showinfo("Succès", "Événement supprimé avec succès !")
+                self.event_entry.delete(0, ctk.END)
+                self.load_events()
+            except psycopg2.Error as e:
+                messagebox.showerror("Erreur de suppression", f"Erreur lors de la suppression de l'événement : {e}")
+                self.conn.rollback()
+
+    def select_event(self, event):
+        """Charge la description de l'événement sélectionné dans le champ de saisie."""
+        selected_item = self.tree.focus()
+        if selected_item:
+            values = self.tree.item(selected_item, "values")
+            self.event_entry.delete(0, ctk.END)
+            self.event_entry.insert(0, values[2]) # La description est à l'index 2
 
     def __del__(self):
-        if hasattr(self, "conn") and self.conn:
-            try:
-                self.conn.close()
-            except Exception:
-                pass
+        """Ferme la connexion à la base de données lors de la destruction de l'objet."""
+        if self.cursor:
+            self.cursor.close()
+        if self.conn:
+            self.conn.close()
 
-
+# --- Exemple d'utilisation de la classe PageEvenement ---
 if __name__ == "__main__":
-    ctk.set_appearance_mode("Light")
-    ctk.set_default_color_theme("blue")
-
     app = ctk.CTk()
-    app.title("Historique des événements")
-    app.geometry("1200x700")
+    app.title("Gestion des Événements")
+    app.geometry("800x600")
 
-    page = PageEvenement(app)
-    page.pack(fill="both", expand=True)
+    # Définir le thème de CustomTkinter (optionnel, mais recommandé)
+    ctk.set_appearance_mode("Light")  # Modes: "System" (par défaut), "Dark", "Light"
+    ctk.set_default_color_theme("blue")  # Thèmes: "blue" (par défaut), "dark-blue", "green"
+
+    event_page = PageEvenement(app)
+    event_page.pack(fill="both", expand=True, padx=20, pady=20)
+
     app.mainloop()

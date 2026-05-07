@@ -9,9 +9,6 @@ import json
 import sys
 from resource_utils import get_config_path, safe_file_read
 
-from app_theme import Colors, Fonts, styled, Layout
-from log_utils import AppLogger
-
 
 # Ensure the parent directory is in the Python path for absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -105,22 +102,14 @@ db_manager = DatabaseManager()
 class PageTauxHoraire(ctk.CTkFrame):
     # Ajoutez un paramètre 'app_root' pour la fenêtre principale
     def __init__(self, master, app_root):
-        # [UI] Thème iJeery (Taux Horaire)
-        super().__init__(master, fg_color=Colors.BG_PAGE)
-        self.pack(fill="both", expand=True)
+        super().__init__(master, fg_color="transparent")
+        self.pack(fill="both", expand=True) # Ce pack peut rester ici si cette page est le contenu principal du master
 
-        self.app_root = app_root
+        self.app_root = app_root # Stockez une référence à la fenêtre racine de l'application
         self.conn = None
         self.cursor = None
-        self.session_data = getattr(master, "session_data", None) or {}
-        self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
-        self.entry_widgets = {}  # legacy (plus utilisé)
-        self.selected_personnel_id: int | None = None
-        self.selected_personnel_name = ctk.StringVar(value="")
-        self.current_rate_var = ctk.StringVar(value="")
-        self.new_rate_var = ctk.StringVar(value="")
+        self.entry_widgets = {} # Stores references to the tk.Entry widgets for hourly rates
 
-        self._setup_treeview_style()
         self._connect_db()
         self._create_widgets()
         # Utilisez self.app_root.after au lieu de self.master.after
@@ -161,157 +150,50 @@ class PageTauxHoraire(ctk.CTkFrame):
             messagebox.showerror("Erreur de connexion", f"Erreur : {err}")
             self.conn = None # Set to None to indicate failed connection
 
-    def _setup_treeview_style(self):
-        # [UI] Style P.Treeview cohérent avec le reste du module Personnel
-        s = ttk.Style()
-        try:
-            s.theme_use("clam")
-        except Exception:
-            pass
-        s.configure(
-            "P.Treeview",
-            background=Colors.BG_CARD,
-            foreground=Colors.TEXT_PRIMARY,
-            fieldbackground=Colors.BG_CARD,
-            rowheight=26,
-            borderwidth=0,
-            font=("Segoe UI", 10),
-        )
-        s.configure(
-            "P.Treeview.Heading",
-            background=Colors.MIDNIGHT,
-            foreground=Colors.TEXT_ON_DARK,
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            padding=(6, 5),
-        )
-        s.map("P.Treeview", background=[("selected", Colors.PRIMARY_LIGHT)])
-        s.map("P.Treeview.Heading", background=[("active", Colors.MIDNIGHT_LIGHT)])
-
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background=Colors.BG_CARD)
-        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
+        tree.tag_configure("row_even", background="#FFFFFF")
+        tree.tag_configure("row_odd", background="#D9EEED")
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):
             tree.item(item, tags=("row_even" if idx % 2 == 0 else "row_odd",))
 
     def _create_widgets(self):
-        """[UI] Interface structurée : sélection personnel → saisie taux → enregistrement."""
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        """Creates and arranges the UI widgets, including the search bar."""
+        # --- Search Bar ---
+        self.search_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.search_frame.pack(pady=10, padx=10, fill="x")
 
-        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        left = styled.frame(header)
-        left.pack(side="left", padx=14)
-        ctk.CTkLabel(left, text="💲", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
-        inner = styled.frame(left)
-        inner.pack(side="left")
-        ctk.CTkLabel(inner, text="Taux Horaire", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
-        ctk.CTkLabel(inner, text="Enregistrement du taux horaire par personnel", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
+        self.search_label = ctk.CTkLabel(self.search_frame, text="Rechercher par nom/prénom :")
+        self.search_label.pack(side="left", padx=(0, 10))
 
-        # Toolbar recherche
-        toolbar = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        toolbar.grid(row=1, column=0, padx=10, pady=(10, 6), sticky="ew")
-        toolbar.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(toolbar, text="Recherche", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=0, padx=(12, 8), pady=10, sticky="w")
-        self.search_entry = ctk.CTkEntry(
-            toolbar, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(11), placeholder_text="Nom ou prénom…"
-        )
-        self.search_entry.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="ew")
-        self.search_entry.bind("<KeyRelease>", self._filter_personnel)
-        styled.button_secondary(toolbar, text="Actualiser", icon="↻", width=120, height=32, command=self._filter_personnel).grid(
-            row=0, column=2, padx=(0, 12), pady=10, sticky="e"
-        )
+        self.search_entry = ctk.CTkEntry(self.search_frame, placeholder_text="Saisir le nom ou le prénom...")
+        self.search_entry.pack(side="left", fill="x", expand=True)
+        self.search_entry.bind("<KeyRelease>", self._filter_personnel) # Bind search logic
 
-        # Contenu: liste personnel (gauche) + fiche taux (droite)
-        content = ctk.CTkFrame(self, fg_color="transparent")
-        content.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 6))
-        content.grid_columnconfigure(0, weight=3)
-        content.grid_columnconfigure(1, weight=2)
-        content.grid_rowconfigure(0, weight=1)
+        # --- Treeview ---
+        self.tree_frame = tk.Frame(self)
+        self.tree_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        list_card = ctk.CTkFrame(content, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        list_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        list_card.grid_columnconfigure(0, weight=1)
-        list_card.grid_rowconfigure(0, weight=1)
-
-        self.tree = ttk.Treeview(list_card, columns=("nom", "prenom", "tauxhoraire"), show="headings", style="P.Treeview", selectmode="browse")
+        self.tree = ttk.Treeview(self.tree_frame, columns=("nom", "prenom", "tauxhoraire"), show="headings")
         self._configure_table_alternating_colors(self.tree)
         self.tree.heading("nom", text="Nom")
         self.tree.heading("prenom", text="Prénom")
-        self.tree.heading("tauxhoraire", text="Taux actuel")
-        self.tree.column("nom", width=180, anchor="w")
-        self.tree.column("prenom", width=180, anchor="w")
-        self.tree.column("tauxhoraire", width=140, anchor="e")
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
-        vsb = ttk.Scrollbar(list_card, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        vsb.grid(row=0, column=1, sticky="ns", pady=6)
-        self.tree.bind("<<TreeviewSelect>>", self._on_select_personnel)
+        self.tree.heading("tauxhoraire", text="Taux Horaire (Ariary)")
 
-        self.label_count = ctk.CTkLabel(list_card, text="Personnel affichés : 0", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY)
-        self.label_count.grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 10))
+        self.tree.column("nom", width=200)
+        self.tree.column("prenom", width=200)
+        self.tree.column("tauxhoraire", width=150)
+        self.tree.pack(side="left", fill="both", expand=True)
 
-        form_card = ctk.CTkFrame(content, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        form_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        form_card.grid_columnconfigure(0, weight=1)
+        # Scrollbar
+        self.scrollbar = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscroll=self.scrollbar.set)
+        self.scrollbar.pack(side="right", fill="y")
 
-        ctk.CTkLabel(form_card, text="Fiche taux horaire", font=Fonts.bold(12), text_color=Colors.TEXT_PRIMARY).grid(
-            row=0, column=0, padx=12, pady=(12, 6), sticky="w"
-        )
-        ctk.CTkLabel(form_card, text="Personnel sélectionné", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=1, column=0, padx=12, pady=(6, 2), sticky="w"
-        )
-        self.personnel_entry = ctk.CTkEntry(
-            form_card, textvariable=self.selected_personnel_name, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(11), state="readonly"
-        )
-        self.personnel_entry.grid(row=2, column=0, padx=12, pady=(0, 10), sticky="ew")
-
-        ctk.CTkLabel(form_card, text="Taux actuel", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=3, column=0, padx=12, pady=(0, 2), sticky="w"
-        )
-        self.current_rate_entry = ctk.CTkEntry(
-            form_card, textvariable=self.current_rate_var, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(11), state="readonly"
-        )
-        self.current_rate_entry.grid(row=4, column=0, padx=12, pady=(0, 10), sticky="ew")
-
-        ctk.CTkLabel(form_card, text="Historique (derniers enregistrements)", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=5, column=0, padx=12, pady=(0, 2), sticky="w"
-        )
-        hist_card = ctk.CTkFrame(form_card, fg_color=Colors.BG_CARD, corner_radius=10, border_width=1, border_color=Colors.BORDER)
-        hist_card.grid(row=6, column=0, padx=12, pady=(0, 10), sticky="nsew")
-        hist_card.grid_columnconfigure(0, weight=1)
-        hist_card.grid_rowconfigure(0, weight=1)
-        self.history_tree = ttk.Treeview(hist_card, columns=("date", "taux"), show="headings", style="P.Treeview", height=5, selectmode="browse")
-        self.history_tree.heading("date", text="Date")
-        self.history_tree.heading("taux", text="Taux")
-        self.history_tree.column("date", width=160, anchor="w")
-        self.history_tree.column("taux", width=120, anchor="e")
-        self.history_tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
-        hvsb = ttk.Scrollbar(hist_card, orient="vertical", command=self.history_tree.yview)
-        self.history_tree.configure(yscrollcommand=hvsb.set)
-        hvsb.grid(row=0, column=1, sticky="ns", pady=6)
-        self._configure_table_alternating_colors(self.history_tree)
-
-        ctk.CTkLabel(form_card, text="Nouveau taux (Ariary)", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(
-            row=7, column=0, padx=12, pady=(0, 2), sticky="w"
-        )
-        self.new_rate_entry = ctk.CTkEntry(
-            form_card, textvariable=self.new_rate_var, height=36, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            corner_radius=8, font=Fonts.body(12), placeholder_text="Ex: 15000"
-        )
-        self.new_rate_entry.grid(row=8, column=0, padx=12, pady=(0, 12), sticky="ew")
-
-        actions = ctk.CTkFrame(form_card, fg_color="transparent")
-        actions.grid(row=9, column=0, padx=12, pady=(0, 12), sticky="ew")
-        styled.button_success(actions, text="Enregistrer", icon="💾", width=160, height=34, command=self._enregistrer_taux).pack(side="left")
-        styled.button_secondary(actions, text="Vider", icon="↺", width=120, height=34, command=self._clear_form).pack(side="left", padx=(10, 0))
+        # --- Enregistrer button ---
+        self.btn_enregistrer = ctk.CTkButton(self, text="Enregistrer", command=self._enregistrer_taux)
+        self.btn_enregistrer.pack(pady=10)
 
     def _charger_personnel(self):
         """Fetches all professor data from the database."""
@@ -333,7 +215,7 @@ class PageTauxHoraire(ctk.CTkFrame):
         return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn').lower()
 
     def _filter_personnel(self, event=None):
-        """Filters the Treeview based on the search input (liste à gauche)."""
+        """Filters the Treeview based on the search input and re-adds entry fields."""
         # Normalize the search term for comparison
         search_term = self._normalize_string(self.search_entry.get())
 
@@ -342,9 +224,14 @@ class PageTauxHoraire(ctk.CTkFrame):
             self.tree.delete(item)
         self._refresh_table_alternating_colors(self.tree)
         
+        # Destroy and clear entry widgets for visible rows
+        for entry_widget in self.entry_widgets.values():
+            if entry_widget.winfo_exists():
+                entry_widget.destroy()
+        self.entry_widgets.clear()
+
         # Reload and filter professors
         all_personnel = self._charger_personnel()
-        inserted = 0
         for prof in all_personnel:
             idpers, nom, prenom = prof
             # Normalize professor's name and prenom for comparison
@@ -364,129 +251,92 @@ class PageTauxHoraire(ctk.CTkFrame):
 
             # Check if the normalized search term is in the normalized name or prenom
             if search_term in normalized_nom or search_term in normalized_prenom:
-                nom_disp = (nom or "").strip() if nom is not None else ""
-                prenom_disp = (prenom or "").strip() if prenom is not None else ""
-                nom_disp = nom_disp if nom_disp else "-"
-                prenom_disp = prenom_disp if prenom_disp else "-"
-                self.tree.insert("", "end", iid=idpers, values=(nom_disp, prenom_disp, current_taux))
-                inserted += 1
+                self.tree.insert("", "end", iid=idpers, values=(nom, prenom, current_taux))
         self._refresh_table_alternating_colors(self.tree)
-        if hasattr(self, "label_count"):
-            self.label_count.configure(text=f"Personnel affichés : {inserted}")
+        
+        # Re-add entry widgets for the filtered, visible rows
+        self._add_entry_fields()
 
-    def _clear_form(self):
-        self.selected_personnel_id = None
-        self.selected_personnel_name.set("")
-        self.current_rate_var.set("")
-        self.new_rate_var.set("")
-        if hasattr(self, "history_tree"):
-            for item in self.history_tree.get_children():
-                self.history_tree.delete(item)
+    def _add_entry_fields(self):
+        """Adds Tkinter Entry widgets into the 'tauxhoraire' column of the Treeview."""
+        for item in self.tree.get_children():
+            bbox = self.tree.bbox(item, column=2)
+            if bbox and len(bbox) == 4:
+                x, y, width, height = bbox
+                
+                # Check if an entry widget already exists for this item and destroy it if it does
+                if item in self.entry_widgets and self.entry_widgets[item].winfo_exists():
+                    self.entry_widgets[item].destroy()
 
-    def _on_select_personnel(self, event=None):
-        sel = self.tree.selection()
-        if not sel:
-            return
-        try:
-            pid = int(sel[0])
-        except Exception:
-            return
-        values = self.tree.item(sel[0], "values")
-        nom = values[0] if len(values) > 0 else "-"
-        prenom = values[1] if len(values) > 1 else "-"
-        taux = values[2] if len(values) > 2 else ""
-        self.selected_personnel_id = pid
-        nom_disp = (str(nom).strip() if nom is not None else "") or "-"
-        prenom_disp = (str(prenom).strip() if prenom is not None else "") or "-"
-        self.selected_personnel_name.set(f"{nom_disp} {prenom_disp}".strip())
-        self.current_rate_var.set(str(taux) if taux is not None else "")
-        self.new_rate_var.set("")
-        self._load_history(pid)
-        try:
-            self.new_rate_entry.focus_set()
-        except Exception:
-            pass
+                taux_entry = tk.Entry(self.tree)
+                
+                # Insert current value from treeview into the entry field
+                current_value = self.tree.item(item, 'values')[2]
+                if current_value:
+                    taux_entry.insert(0, current_value)
 
-    def _load_history(self, idpers: int, limit: int = 8):
-        # [LOGIQUE] Lecture historique depuis tb_tauxhoraire
-        if not getattr(self, "cursor", None) or not hasattr(self, "history_tree"):
-            return
-        for item in self.history_tree.get_children():
-            self.history_tree.delete(item)
-        try:
-            self.cursor.execute(
-                "SELECT dateregistre, tauxhoraire FROM tb_tauxhoraire WHERE idpers=%s ORDER BY dateregistre DESC LIMIT %s",
-                (int(idpers), int(limit)),
-            )
-            rows = self.cursor.fetchall()
-            for d, t in rows:
-                d_str = d.strftime("%Y-%m-%d %H:%M") if hasattr(d, "strftime") else str(d)
-                try:
-                    t_val = float(t) if t is not None else 0.0
-                    t_str = f"{t_val:,.2f}".replace(",", " ").replace(".", ",")
-                except Exception:
-                    t_str = str(t)
-                self.history_tree.insert("", "end", values=(d_str, t_str))
-            self._refresh_table_alternating_colors(self.history_tree)
-        except Exception:
-            return
+                taux_entry.place(x=x, y=y, width=width, height=height)
+                self.entry_widgets[item] = taux_entry
 
     def _enregistrer_taux(self):
-        """Saves the entered hourly rate to the database (1 personnel)."""
+        """Saves the entered hourly rates to the database."""
         if not self.conn or not self.cursor:
             messagebox.showerror("Erreur", "Connexion à la base de données non établie.")
             return
 
-        if not self.selected_personnel_id:
-            messagebox.showerror("Erreur", "Veuillez sélectionner un personnel dans la liste.")
-            return
-        taux_in = (self.new_rate_var.get() or "").strip().replace(" ", "").replace(",", ".")
-        if not taux_in:
-            messagebox.showerror("Erreur", "Veuillez saisir le nouveau taux.")
-            return
-        try:
-            taux_float = float(taux_in)
-            if taux_float <= 0:
-                messagebox.showerror("Erreur", "Le taux doit être supérieur à zéro.")
-                return
-        except ValueError:
-            messagebox.showerror("Erreur", "Veuillez entrer un nombre valide pour le taux.")
-            return
-
         now = datetime.now()
-        try:
-            self.cursor.execute(
-                """
-                INSERT INTO tb_tauxhoraire (tauxhoraire, idpers, dateregistre)
-                VALUES (%s, %s, %s)
-                """,
-                (taux_float, int(self.selected_personnel_id), now),
-            )
-            self.conn.commit()
-            try:
-                self._logger.log(
-                    action="Création taux horaire",
-                    element=f"idpers={self.selected_personnel_id}",
-                    details=f"Taux horaire enregistré (taux={taux_float}, date={now})",
-                    value=str(taux_float),
-                )
-            except Exception:
-                pass
-            messagebox.showinfo("Succès", "Taux horaire enregistré avec succès.")
-            pid = self.selected_personnel_id
-            self._filter_personnel()
-            if pid:
-                # reselect and refresh history
+        success_count = 0
+        error_occurred = False
+
+        # Iterate over all professors currently displayed in the treeview
+        for idpers_str in self.tree.get_children():
+            # Get the associated entry widget for this professor, if it exists
+            entry = self.entry_widgets.get(idpers_str)
+            if not entry: # Skip if no entry widget is found (e.g., if it was removed/destroyed)
+                continue
+
+            taux = entry.get().strip()
+            
+            # Get the current value from the treeview item to compare
+            current_tree_value = self.tree.item(idpers_str, 'values')[2]
+
+            if taux and (taux != current_tree_value): # Process if there's input and it's different
                 try:
-                    self.tree.selection_set(str(pid))
-                    self.tree.see(str(pid))
-                except Exception:
-                    pass
-                self._load_history(pid)
-            self._clear_form()
-        except Exception as e:
-            self.conn.rollback()
-            messagebox.showerror("Erreur SQL", f"Erreur lors de l'enregistrement : {e}")
+                    idpers = int(idpers_str)
+                    taux_float = float(taux)
+
+                    # Always insert a new record to keep a history of changes
+                    self.cursor.execute(
+                        """
+                        INSERT INTO tb_tauxhoraire (tauxhoraire, idpers, dateregistre)
+                        VALUES (%s, %s, %s)
+                        """,
+                        (taux_float, idpers, now)
+                    )
+                    success_count += 1
+                except ValueError:
+                    messagebox.showerror("Erreur de saisie", f"Veuillez entrer un nombre valide pour le taux horaire du personnel ID {idpers_str}.")
+                    self.conn.rollback()
+                    error_occurred = True
+                    break # Stop processing on first error
+                except Exception as e:
+                    self.conn.rollback()
+                    messagebox.showerror("Erreur SQL", f"Erreur pour ID {idpers_str} : {e}")
+                    error_occurred = True
+                    break # Stop processing on first error
+            elif not taux and current_tree_value: # If field is cleared but there was a value
+                # You might want to handle deletion or setting to NULL here if a cleared field means something
+                pass # For now, we'll just ignore cleared fields if they had a value
+
+        if not error_occurred:
+            self.conn.commit()
+            if success_count > 0:
+                messagebox.showinfo("Succès", f"{success_count} taux horaires enregistrés ou mis à jour avec succès.")
+            else:
+                messagebox.showinfo("Information", "Aucun changement détecté ou enregistré.")
+            self._filter_personnel() # Refresh the view after saving
+        else:
+            messagebox.showerror("Erreur", "Une erreur est survenue lors de l'enregistrement. Les modifications ont été annulées.")
 
 
     def _on_closing(self):

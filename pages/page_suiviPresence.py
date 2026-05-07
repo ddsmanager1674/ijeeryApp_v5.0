@@ -111,12 +111,6 @@ class ChromeTabs(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        # [UI] Évite les redraws après destruction (Tkinter: invalid command name)
-        try:
-            if not self.winfo_exists():
-                return
-        except Exception:
-            return
         for w in self.winfo_children():
             if w is not self._canvas:
                 w.destroy()
@@ -142,36 +136,20 @@ class ChromeTabs(ctk.CTkFrame):
         self._draw_indicator()
 
     def _draw_indicator(self):
-        # [UI] Le canvas peut déjà être détruit si la page est fermée rapidement
-        try:
-            if not self.winfo_exists() or not self._canvas.winfo_exists():
-                return
-            self._canvas.delete("ind")
-            x0 = self._active * self.TAB_W
-            self._canvas.create_rectangle(
-                x0, 0, x0 + self.TAB_W, self.IND_H,
-                fill=Colors.PRIMARY, outline="", tags="ind"
-            )
-        except Exception:
-            return
+        self._canvas.delete("ind")
+        x0 = self._active * self.TAB_W
+        self._canvas.create_rectangle(
+            x0, 0, x0 + self.TAB_W, self.IND_H,
+            fill=Colors.PRIMARY, outline="", tags="ind"
+        )
 
     def _select(self, idx):
-        try:
-            if not self.winfo_exists():
-                return
-        except Exception:
-            return
         self._active = idx
         self._build()
         if self._command:
             self._command(self._tabs[idx])
 
     def set(self, name):
-        try:
-            if not self.winfo_exists():
-                return
-        except Exception:
-            return
         if name in self._tabs:
             self._active = self._tabs.index(name)
             self._build()
@@ -647,16 +625,6 @@ class PageSuiviPresence(ctk.CTkFrame):
         if p:
             df.to_excel(p, index=False)
             messagebox.showinfo("Succès", "Export réussi.")
-            try:
-                from log_utils import AppLogger
-                AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
-                    action="Export Excel",
-                    element="Suivi de présence",
-                    details=f"export suivi présence (mise à jour), lignes={len(df)}, fichier={os.path.basename(p)}",
-                    value=p,
-                )
-            except Exception:
-                pass
 
     def _update_stats(self):
         stats = {k: 0 for k in STATE_ORDER}

@@ -19,19 +19,6 @@ WITH mouvements_bruts AS (
     UNION ALL
 
     SELECT
-        ed.idarticle,
-        ed.idmag,
-        COALESCE(u.qtunite, 1) as qtunite_source,
-        ed.qtentree as quantite,
-        'entree' as type_mouvement
-    FROM tb_entreedetail ed
-    INNER JOIN tb_entree e ON e.id = ed.identree AND e.deleted = 0
-    INNER JOIN tb_unite u ON ed.idarticle = u.idarticle AND ed.idunite = u.idunite
-    WHERE ed.deleted = 0 AND u.codearticle = '0070374501'
-
-    UNION ALL
-
-    SELECT
         vd.idarticle,
         v.idmag,
         COALESCE(u.qtunite, 1) as qtunite_source,
@@ -116,7 +103,6 @@ solde_base_par_mag AS (
         SUM(
             CASE type_mouvement
                 WHEN 'reception'     THEN  quantite * qtunite_source
-                WHEN 'entree'        THEN  quantite * qtunite_source
                 WHEN 'transfert_in'  THEN  quantite * qtunite_source
                 WHEN 'inventaire'    THEN  quantite * qtunite_source
                 WHEN 'avoir'         THEN  quantite * qtunite_source

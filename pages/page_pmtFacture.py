@@ -24,10 +24,8 @@ import os
 import subprocess
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
-from settings_utils import is_global_print_enabled, open_file_if_enabled
 
 from app_theme import Colors, Fonts
-from log_utils import AppLogger
 
 # ── ReportLab ────────────────────────────────────────────────────────────────
 from reportlab.pdfgen import canvas
@@ -82,7 +80,7 @@ class PagePmtFacture(ctk.CTkToplevel):
     └────────────────────────────────────────────────────────────┘
     """
 
-    def __init__(self, master, paiement_data, iduser=None):
+    def __init__(self, master, paiement_data, iduser=None, username=None):
         super().__init__(master)
 
         # ── Données ───────────────────────────────────────────────────────────
@@ -91,9 +89,68 @@ class PagePmtFacture(ctk.CTkToplevel):
         self.refvente           = self.data.get('refvente', 'N/A')
         self.montant_total_str  = self.data.get('montant_total', '0,00')
         self.client             = self.data.get('client', 'Client Inconnu')
-        self.iduser             = iduser if iduser is not None else 1
-        self.session_data       = getattr(master, "session_data", None) or {"user_id": self.iduser}
-        self._logger            = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
+        # ── Résolution iduser / username ─────────────────────────────────
+        # Priorité : paramètre explicite > paiement_data > master > master.master
+        #            > master.master.master > fallback DB (iduser=1)
+        # On remonte jusqu'à 3 niveaux d'ancêtres pour trouver les valeurs
+        # de session définies au login (current_iduser, current_username …).
+
+        def _first_truthy(obj, *attr_names):
+            """Retourne la première valeur non-nulle parmi les attributs donnés."""
+            for a in attr_names:
+                v = getattr(obj, a, None)
+                if v:
+                    return v
+            return None
+
+        # Collecter les ancêtres jusqu'à 3 niveaux
+        _ancestors = []
+        _cur = master
+        for _ in range(3):
+            if _cur is None:
+                break
+            _ancestors.append(_cur)
+            _cur = (getattr(_cur, "master", None)
+                    or getattr(_cur, "_master", None))
+
+        # iduser : paramètre > paiement_data > ancêtres
+        # On cherche 'current_iduser', 'id_user_connecte' (nom App) et 'iduser'
+        _iduser_found = None
+        if iduser:
+            _iduser_found = iduser
+        elif self.data.get('iduser'):
+            _iduser_found = self.data.get('iduser')
+        else:
+            for _anc in _ancestors:
+                _v = _first_truthy(_anc, 'current_iduser', 'id_user_connecte', 'iduser')
+                if _v:
+                    _iduser_found = _v
+                    break
+        self.iduser = _iduser_found or 1
+
+        # username : paramètre > paiement_data > ancêtres
+        # On cherche 'current_username' et 'username'
+        _username_found = None
+        if username:
+            _username_found = username
+        elif self.data.get('username'):
+            _username_found = self.data.get('username')
+        else:
+            for _anc in _ancestors:
+                _v = _first_truthy(_anc, 'current_username', 'username')
+                if _v:
+                    _username_found = _v
+                    break
+        self._username_session = _username_found
+
+        # ── Diagnostic complet ───────────────────────────────────────────
+        print(f"[PagePmtFacture] iduser={self.iduser!r}  username_session={self._username_session!r}")
+        for _i, _anc in enumerate(_ancestors):
+            _anc_attrs = {a: getattr(_anc, a) for a in
+                ["current_username", "username", "current_iduser", "iduser", "current_user"]
+                if hasattr(_anc, a)}
+            print(f"  ancêtre[{_i}] type={type(_anc).__name__}  attrs={_anc_attrs}")
+        print(f"  → iduser final={self.iduser!r}  username final={self._username_session!r}")
 
         try:
             montant_nettoyé         = str(self.montant_total_str).replace(' ', '').replace(',', '.')
@@ -608,7 +665,7 @@ class PagePmtFacture(ctk.CTkToplevel):
     def charger_settings(self):
         """Charge les paramètres depuis settings.json"""
         try:
-            with open(get_config_path('settings.json'), 'r') as f:
+            with open('settings.json', 'r') as f:
                 return json.load(f)
         except Exception as e:
             print(f"⚠️ Impossible de charger settings.json : {e}")
@@ -619,6 +676,7 @@ class PagePmtFacture(ctk.CTkToplevel):
         Charge les modes de paiement UNE SEULE FOIS avant la construction UI.
         Résultat mis en cache dans self._modes_cache.
         self.liste_modes est aussi rempli ici pour la logique métier.
+        Tous les modes sont affichés pour tous les utilisateurs.
         """
         conn = self.connect_db()
         if not conn:
@@ -629,7 +687,8 @@ class PagePmtFacture(ctk.CTkToplevel):
             cursor.execute("SELECT idmode, modedepaiement FROM tb_modepaiement")
             rows = cursor.fetchall()
             self.liste_modes = {row[1]: row[0] for row in rows}
-            return list(self.liste_modes.keys()) or ["Especes"]
+            modes = list(self.liste_modes.keys()) or ["Crédit"]
+            return modes
         except Exception:
             self.liste_modes = {"Especes": 1}
             return ["Especes"]
@@ -1009,9 +1068,13 @@ class PagePmtFacture(ctk.CTkToplevel):
             client_adresse = res_client[1] if res_client else ""
             client_contact = res_client[2] if res_client else ""
             
-            cursor.execute("SELECT username FROM tb_users WHERE iduser = %s", (self.iduser,))
-            res_user = cursor.fetchone()
-            username = res_user[0] if res_user else "Inconnu"
+            # Priorite : username transmis depuis la session login
+            if self._username_session:
+                username = self._username_session
+            else:
+                cursor.execute("SELECT username FROM tb_users WHERE iduser = %s", (self.iduser,))
+                res_user = cursor.fetchone()
+                username = res_user[0] if res_user else "Inconnu"
 
             magasin_nom = f"Magasin {idmag_facture}" if idmag_facture else "N/A"
             if idmag_facture:
@@ -1201,19 +1264,6 @@ class PagePmtFacture(ctk.CTkToplevel):
                 print(f"\n{'='*70}")
                 print(f"✅ VALIDATION RÉUSSIE - Tous les changements sont validés")
                 print(f"{'='*70}\n")
-                try:
-                    self._logger.log(
-                        action="Paiement facture client",
-                        element=str(self.refvente),
-                        details=(
-                            f"Paiement ref: {refpmt} pour facture {self.refvente}, "
-                            f"client: {self.client}, mode: {nom_mode_pmt}, "
-                            f"montant: {montant_saisi:.0f} Ar"
-                        ),
-                        value=f"{montant_saisi:.0f} Ar",
-                    )
-                except Exception:
-                    pass
 
             except Exception as e:
                 conn.rollback()
@@ -1236,8 +1286,6 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             settings = self.charger_settings()
             imprimer_ticket = settings.get('ClientAPayer_ImpressionTicket', 1)
-            if not is_global_print_enabled(settings=settings, default=1):
-                imprimer_ticket = 0
             
             print(f"📋 ClientAPayer_ImpressionTicket = {imprimer_ticket}")
             
@@ -1245,6 +1293,22 @@ class PagePmtFacture(ctk.CTkToplevel):
                 info_soc, username, articles_pdf, montant_saisi, nom_mode_pmt,
                 refpmt, date_echeance, imprimer_ticket, description
             )
+            # ── Ticket PDF A5 pour tout mode hors Espèces ────────────────
+            # imprimer_ticket forcé à 1 : le reçu A5 s'ouvre toujours,
+            # indépendamment du paramètre ClientAPayer_ImpressionTicket
+            # qui ne concerne que le ticket 80mm caisse.
+            if nom_mode_pmt.strip().lower() not in ("espèces", "especes", "espece", "espèce"):
+                self._generer_ticket_a5(
+                    info_soc=info_soc,
+                    username=username,
+                    articles_pdf=articles_pdf,
+                    montant_paye=montant_saisi,
+                    mode_paiement=nom_mode_pmt,
+                    refpmt=refpmt,
+                    date_echeance=date_echeance,
+                    description=description,
+                    imprimer_ticket=1  # Toujours ouvrir le reçu A5
+                )
             if nom_mode_pmt.lower() == "crédit":
                 self._generer_etat_credit_pdf(
                     info_soc=info_soc,
@@ -1481,12 +1545,10 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             if imprimer_ticket == 1:
                 try:
-                    open_file_if_enabled(
-                        output_path,
-                        operation="open",
-                        setting_key="Credit_Acceptation_OpenA5",
-                        setting_default=1,
-                    )
+                    if os.name == 'nt':
+                        os.startfile(output_path)
+                    elif os.name == 'posix':
+                        subprocess.call(['xdg-open', output_path])
                     print(f"✅ État crédit ouvert : {output_path}")
                 except Exception as e:
                     print(f"⚠️ Erreur ouverture état crédit : {e}")
@@ -1495,6 +1557,188 @@ class PagePmtFacture(ctk.CTkToplevel):
 
         except Exception as e:
             print(f"❌ Erreur génération état crédit PDF : {e}")
+            traceback.print_exc()
+
+    def _generer_ticket_a5(self, info_soc, username, articles_pdf, montant_paye,
+                            mode_paiement, refpmt, date_echeance=None,
+                            description="", imprimer_ticket=1):
+        """
+        Génère un reçu de paiement au format A5 portrait.
+        Appelé pour tout mode de paiement autre que Espèces.
+        """
+        try:
+            temp_dir = tempfile.gettempdir()
+            output_path = os.path.join(
+                temp_dir,
+                f"Recu_A5_{self.refvente}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            )
+
+            margin = 12 * mm
+            doc = SimpleDocTemplate(
+                output_path,
+                pagesize=A5,
+                rightMargin=margin, leftMargin=margin,
+                topMargin=margin, bottomMargin=margin,
+            )
+            elements = []
+            styles = getSampleStyleSheet()
+            color_midnight = colors.HexColor("#2C3E50")
+            color_success  = colors.HexColor("#1E8449")
+            color_grey     = colors.HexColor("#7F8C8D")
+
+            # ── Infos société ──────────────────────────────────────────────
+            nom_soc     = info_soc[0] if info_soc else "SOCIÉTÉ"
+            adr_soc     = info_soc[1] if info_soc and len(info_soc) > 1 else ""
+            contact_soc = info_soc[2] if info_soc and len(info_soc) > 2 else ""
+            ville_soc   = info_soc[3] if info_soc and len(info_soc) > 3 else ""
+
+            page_w, _ = A5
+            usable_w  = page_w - 2 * margin
+
+            # ── En-tête société ────────────────────────────────────────────
+            soc_lines = f"<b>{nom_soc}</b>"
+            if adr_soc:     soc_lines += f"<br/>{adr_soc}"
+            if ville_soc:   soc_lines += f"<br/>{ville_soc}"
+            if contact_soc: soc_lines += f"<br/>Tél : {contact_soc}"
+
+            header_p = Paragraph(
+                soc_lines,
+                ParagraphStyle("HdrA5", parent=styles["Normal"],
+                               fontSize=9, alignment=TA_CENTER,
+                               textColor=colors.black, leading=13)
+            )
+            hdr_tbl = Table([[header_p]], colWidths=[usable_w])
+            hdr_tbl.setStyle(TableStyle([
+                ("BOX",           (0, 0), (-1, -1), 0.8, colors.HexColor("#CCCCCC")),
+                ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#F2F2F2")),
+                ("TOPPADDING",    (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            elements.append(hdr_tbl)
+            elements.append(Spacer(1, 4 * mm))
+
+            # ── Titre ─────────────────────────────────────────────────────
+            titre_p = Paragraph(
+                "ACCEPTATION CREDIT",
+                ParagraphStyle("TitreA5", parent=styles["Normal"],
+                               fontSize=13, alignment=TA_CENTER,
+                               textColor=colors.black, fontName="Helvetica-Bold")
+            )
+            titre_tbl = Table([[titre_p]], colWidths=[usable_w])
+            titre_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#F2F2F2")),
+                ("TOPPADDING",    (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ]))
+            elements.append(titre_tbl)
+            elements.append(Spacer(1, 4 * mm))
+
+            # ── Bloc infos paiement ────────────────────────────────────────
+            echeance_str = date_echeance.strftime('%d/%m/%Y') if date_echeance else "-"
+            info_data = [
+                ["Référence paiement :", refpmt],
+                ["Facture N°          :", self.refvente],
+                ["Date                :", datetime.now().strftime('%d/%m/%Y %H:%M')],
+                ["Client              :", self.client],
+                ["Utilisateur         :", username],
+                ["Mode de paiement    :", mode_paiement],
+            ]
+            if mode_paiement.lower() == "crédit" and date_echeance:
+                info_data.append(["Échéance            :", echeance_str])
+            if (description or "").strip():
+                info_data.append(["Observation         :", (description or "").strip()])
+
+            lbl_style = ParagraphStyle("LblA5", parent=styles["Normal"],
+                                       fontSize=9, textColor=color_grey,
+                                       fontName="Helvetica-Bold")
+            val_style = ParagraphStyle("ValA5", parent=styles["Normal"],
+                                       fontSize=9, textColor=color_midnight)
+
+            info_rows = [[Paragraph(k, lbl_style), Paragraph(v, val_style)]
+                         for k, v in info_data]
+            info_tbl = Table(info_rows, colWidths=[usable_w * 0.42, usable_w * 0.58])
+            info_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, -1), colors.HexColor("#F8F9FA")),
+                ("BOX",           (0, 0), (-1, -1), 0.5, colors.HexColor("#BDC3C7")),
+                ("INNERGRID",     (0, 0), (-1, -1), 0.3, colors.HexColor("#D5D8DC")),
+                ("TOPPADDING",    (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+            ]))
+            elements.append(info_tbl)
+            elements.append(Spacer(1, 4 * mm))
+
+            # ── Ligne total ────────────────────────────────────────────────
+            color_light_grey = colors.HexColor("#F2F2F2")
+            total_style = ParagraphStyle("TotalA5", parent=styles["Normal"],
+                                         fontSize=11, fontName="Helvetica-Bold",
+                                         textColor=colors.black, alignment=TA_CENTER)
+            total_label = Paragraph("MONTANT CREDIT", total_style)
+            total_value = Paragraph(f"{montant_paye:,.2f} Ar", total_style)
+            total_tbl   = Table([[total_label, total_value]],
+                                 colWidths=[usable_w * 0.5, usable_w * 0.5])
+            total_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0, 0), (-1, -1), color_light_grey),
+                ("TOPPADDING",    (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+                ("BOX",           (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ]))
+            elements.append(total_tbl)
+            elements.append(Spacer(1, 4 * mm))
+
+            # ── Montant en lettres ─────────────────────────────────────────
+            if num2words:
+                try:
+                    lettres = num2words(montant_paye, lang='fr') + " Ariary"
+                    elements.append(Paragraph(
+                        f"<i>Arrêté le présent reçu à la somme de : {lettres.upper()}</i>",
+                        ParagraphStyle("LettresA5", parent=styles["Normal"],
+                                       fontSize=8, textColor=color_grey)
+                    ))
+                    elements.append(Spacer(1, 3 * mm))
+                except Exception:
+                    pass
+
+            # ── Signatures ────────────────────────────────────────────────
+            sig_style = ParagraphStyle("SigA5", parent=styles["Normal"],
+                                       fontSize=9, alignment=TA_CENTER)
+            sig_tbl = Table(
+                [[Paragraph("<u>Le Responsable</u>", sig_style),
+                  "",
+                  Paragraph("<u>Le Client</u>", sig_style)]],
+                colWidths=[usable_w * 0.35, usable_w * 0.30, usable_w * 0.35]
+            )
+            sig_tbl.setStyle(TableStyle([
+                ("TOPPADDING",    (0, 0), (-1, -1), 14),
+                ("ALIGN",         (0, 0), (0, 0),  "LEFT"),
+                ("ALIGN",         (2, 0), (2, 0),  "RIGHT"),
+            ]))
+            elements.append(sig_tbl)
+            elements.append(Spacer(1, 3 * mm))
+
+            # ── Pied de page ───────────────────────────────────────────────
+            elements.append(Paragraph(
+                f"<font color='#7F8C8D' size='7'>Document généré le "
+                f"{datetime.now().strftime('%d/%m/%Y à %H:%M')} — Merci de votre confiance !</font>",
+                ParagraphStyle("FootA5", parent=styles["Normal"], alignment=TA_CENTER)
+            ))
+
+            doc.build(elements)
+
+            if imprimer_ticket == 1:
+                try:
+                    if os.name == 'nt':
+                        os.startfile(output_path)
+                    elif os.name == 'posix':
+                        subprocess.call(['xdg-open', output_path])
+                    print(f"✅ Reçu A5 ouvert : {output_path}")
+                except Exception as e:
+                    print(f"⚠️ Erreur ouverture reçu A5 : {e}")
+            else:
+                print(f"📄 Reçu A5 généré (impression désactivée) : {output_path}")
+
+        except Exception as e:
+            print(f"❌ Erreur génération reçu A5 : {e}")
             traceback.print_exc()
 
     def _generer_ticket_pdf(self, info_soc, username, articles, montant_paye,
@@ -1537,7 +1781,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             y -= 5 * mm
 
             c.setFont("Helvetica-Bold", 11)
-            c.drawCentredString(largeur / 2, y, "REÇU DE PAIEMENT")
+            c.drawCentredString(largeur / 2, y, "ACCEPTATION CREDIT")
             y -= 5 * mm
 
             c.setFont("Helvetica", 8)
@@ -1584,7 +1828,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             y -= 5 * mm
 
             c.setFont("Helvetica-Bold", 10)
-            c.drawString(5 * mm, y, "MONTANT PAYÉ:")
+            c.drawString(5 * mm, y, "MONTANT CREDIT:")
             montant_paye_str = f"{montant_paye:,.2f} Ar".replace(',', ' ')
             c.drawRightString(largeur - 5 * mm, y, montant_paye_str)
             y -= 6 * mm
@@ -1634,12 +1878,10 @@ class PagePmtFacture(ctk.CTkToplevel):
 
             if imprimer_ticket == 1:
                 try:
-                    open_file_if_enabled(
-                        filename,
-                        operation="open",
-                        setting_key="Facture_Paiement_OpenTicket80Pdf",
-                        setting_default=1,
-                    )
+                    if os.name == 'nt':
+                        os.startfile(filename)
+                    elif os.name == 'posix':
+                        subprocess.call(['xdg-open', filename])
                     print(f"✅ Ticket de caisse ouvert : {filename}")
                 except Exception as e:
                     print(f"⚠️ Erreur lors de l'ouverture du PDF : {e}")

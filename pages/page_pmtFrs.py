@@ -9,7 +9,6 @@ import tempfile
 import os
 import subprocess
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 
 # Importation pour la génération PDF
@@ -31,8 +30,6 @@ class PagePmtFrs(ctk.CTkToplevel):
         self.refcom = self.data.get('refcom', 'N/A')
         self.montant_total_str = self.data.get('montant_total', '0,00')
         self.fournisseur = self.data.get('fournisseur', 'Fournisseur Inconnu')
-        self.session_data = getattr(master, "session_data", None) or {"user_id": self.id_user}
-        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.id_user)
 
         try:
             montant_nettoyé = str(self.montant_total_str).replace(' ', '').replace(',', '.')
@@ -84,13 +81,15 @@ class PagePmtFrs(ctk.CTkToplevel):
         if not conn:
             return []
         try:
-            with conn: # Gère automatiquement le commit ou le rollback
-                with conn.cursor() as cursor: # Fermeture automatique du curseur
-                    cursor.execute("SELECT idmode, modedepaiement FROM tb_modepaiement ORDER BY idmode")
+            with conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT idmode, modedepaiement FROM tb_modepaiement ORDER BY idmode"
+                    )
                     rows = cursor.fetchall()
                     self.liste_modes = {row[1]: row[0] for row in rows}
                     return list(self.liste_modes.keys())
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
             return []
         finally:
@@ -175,15 +174,6 @@ class PagePmtFrs(ctk.CTkToplevel):
             self._generer_pdf_paiement(montant_saisi, nom_mode_pmt, refpmt)
             
             messagebox.showinfo("Succès", "Paiement enregistré et ticket généré.")
-            try:
-                self._logger.log(
-                    action="Paiement dette fournisseur",
-                    element=str(self.refcom),
-                    details=f"Paiement ref: {refpmt} pour commande {self.refcom}, facture: {self.factfrs}, fournisseur: {self.fournisseur}, mode: {nom_mode_pmt}, montant: {montant_saisi:.0f} Ar",
-                    value=f"{montant_saisi:.0f} Ar",
-                )
-            except Exception:
-                pass
             self.on_closing()
 
         except psycopg2.Error as e:

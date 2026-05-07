@@ -1,0 +1,240 @@
+═══════════════════════════════════════════════════════════════════════════════
+  GUIDE DE MIGRATION - Corriger les chemins de fichiers pour PyInstaller EXE
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️ PROBLÈME CRITIQUE RÉSOLU:
+    Votre EXE n'arrive pas à trouver config.json car les chemins relatifs
+    ne fonctionnent pas dans PyInstaller. La solution: utiliser resource_utils.py
+
+═══════════════════════════════════════════════════════════════════════════════
+ ÉTAPE 1: Importer la fonction depuis resource_utils.py
+═══════════════════════════════════════════════════════════════════════════════
+
+Au TOP de chaque fichier pages/*.py, ajoutez cette ligne:
+
+    from resource_utils import get_resource_path, get_config_path, safe_file_read
+
+Exemple:
+    # -*- coding: utf-8 -*-
+    import os
+    import json
+    import psycopg2
+    from tkinter import messagebox
+    from resource_utils import get_config_path, safe_file_read  ← AJOUTER CETTE LIGNE
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ ÉTAPE 2: Remplacer TOUS les chemins relatifs
+═══════════════════════════════════════════════════════════════════════════════
+
+❌ AVANT (ne fonctionne PAS en EXE):
+    with open('config.json') as f:
+        config = json.load(f)
+
+✅ APRÈS (fonctionne PARTOUT):
+    config_path = get_config_path('config.json')
+    with open(config_path) as f:
+        config = json.load(f)
+
+
+════════════════════════════════════════════════════════════════════════════════
+ PATTERN COMPLET A UTILISER POUR TOUTES LES PAGES
+════════════════════════════════════════════════════════════════════════════════
+
+Cherchez dans vos fichiers pages/*.py ces patterns problématiques:
+
+┌─ PATTERN 1: open('config.json') ─────────────────────────────────────────────┐
+│                                                                               │
+│ ❌ AVANT:                                                                     │
+│   with open('config.json') as f:                                            │
+│       config = json.load(f)                                                  │
+│                                                                               │
+│ ✅ APRÈS:                                                                     │
+│   from resource_utils import get_config_path                                │
+│   ...                                                                        │
+│   config_path = get_config_path('config.json')                              │
+│   with open(config_path) as f:                                              │
+│       config = json.load(f)                                                  │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─ PATTERN 2: open('session.json') ───────────────────────────────────────────┐
+│                                                                               │
+│ ❌ AVANT:                                                                     │
+│   with open('session.json', 'w') as f:                                      │
+│       json.dump(data, f)                                                     │
+│                                                                               │
+│ ✅ APRÈS:                                                                     │
+│   from resource_utils import get_session_path                               │
+│   ...                                                                        │
+│   session_path = get_session_path('session.json')                           │
+│   with open(session_path, 'w') as f:                                        │
+│       json.dump(data, f)                                                     │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─ PATTERN 3: os.path.join(parent_dir, 'config.json') ──────────────────────────┐
+│ (Problème: parent_dir peut être une variable incorrecte en EXE)              │
+│                                                                               │
+│ ❌ AVANT:                                                                     │
+│   config_path = os.path.join(parent_dir, 'config.json')                     │
+│   with open(config_path) as f:                                              │
+│       config = json.load(f)                                                  │
+│                                                                               │
+│ ✅ APRÈS:                                                                     │
+│   from resource_utils import get_config_path                                │
+│   ...                                                                        │
+│   config_path = get_config_path('config.json')                              │
+│   with open(config_path) as f:                                              │
+│       config = json.load(f)                                                  │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─ PATTERN 4: safe_file_read('config.json') ──────────────────────────────────┐
+│                                                                               │
+│ ❌ AVANT:                                                                     │
+│   config_content, encoding = safe_file_read('config.json')                  │
+│                                                                               │
+│ ✅ APRÈS:                                                                     │
+│   from resource_utils import get_config_path, safe_file_read                │
+│   ...                                                                        │
+│   config_path = get_config_path('config.json')                              │
+│   config_content, encoding = safe_file_read(config_path)                    │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FICHIERS IDENTIFIÉS À CORRIGER (PRIORITÉ)
+═══════════════════════════════════════════════════════════════════════════════
+
+CRITIQUE (utilisent config.json):
+  ✓ page_login.py                 → DÉJÀ CORRIGÉ
+  □ page_home.py                  → À CORRIGER
+  □ page_vente.py                 → À CORRIGER
+  □ page_venteParMsin.py          → À CORRIGER  
+  □ page_users.py                 → À CORRIGER
+  □ page_unite.py                 → À CORRIGER
+  □ page_typePmt.py               → À CORRIGER
+  □ page_transfertBanque.py       → À CORRIGER
+
+IMPORTANT (utilisent session.json ou settings.json):
+  □ Tous les fichiers qui écrivent en session.json
+  □ Tous les fichiers qui lisent settings.json
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ EXEMPLE COMPLET: Corriger page_home.py
+═══════════════════════════════════════════════════════════════════════════════
+
+Au début du fichier:
+    from resource_utils import get_config_path
+
+Dans la méthode load_database_config():
+    ❌ AVANT:
+        config_path = os.path.join(parent_dir, 'config.json')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    
+    ✅ APRÈS:
+        config_path = get_config_path('config.json')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ COMMENT CORRIGER RAPIDEMENT BEAUCOUP DE FICHIERS (Find & Replace)
+═══════════════════════════════════════════════════════════════════════════════
+
+Utilisez Find & Replace dans VS Code (Ctrl+H):
+
+1️⃣ CHERCHER: open\('config\.json'\)
+   REMPLACER PAR: open(get_config_path('config.json'))
+   
+   ⚠️ Assurez-vous d'ajouter en haut du fichier:
+       from resource_utils import get_config_path
+
+2️⃣ CHERCHER: safe_file_read\('config\.json'\)
+   REMPLACER PAR: safe_file_read(get_config_path('config.json'))
+
+3️⃣ CHERCHER: open\('session\.json'
+   REMPLACER PAR: open(get_session_path('session.json')
+   
+   ⚠️ Assurez-vous d'ajouter en haut du fichier:
+       from resource_utils import get_session_path
+
+4️⃣ CHERCHER: open\('settings\.json'
+   REMPLACER PAR: open(get_resource_path('settings.json')
+   
+   ⚠️ Assurez-vous d'ajouter en haut du fichier:
+       from resource_utils import get_resource_path
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ ÉTAPE 3: Tester en Python d'abord, puis régénérer l'EXE
+═══════════════════════════════════════════════════════════════════════════════
+
+1️⃣ Après chaque correction, testez en Python:
+   > python page_login.py
+   ou en debugger depuis app_main.py
+
+2️⃣ Quand tous les fichiers sont corrigés, régénérez l'EXE avec le PROMPT #3:
+   
+   Supprimer anciennement build/dist:
+   Remove-Item -Recurse -Force build, dist, "iJeery_V5.0.spec", __pycache__ -ErrorAction SilentlyContinue
+   
+   Générer nouveau EXE:
+   .\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 `
+   --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" `
+   --add-data "config.json;." --add-data "config.ini;." `
+   --add-data "settings.json;." --add-data "session.json;." `
+   --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab `
+   --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py
+   
+   Copier config:
+   Copy-Item -Path "config.json", "config.ini", "settings.json" -Destination "dist\iJeery_V5.0\" -Force
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ VÉRIFICATION: Comment savoir si c'est correct?
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ SUCCÈS - Dans les clients, l'EXE se connectera au serveur:
+   - Pas d'erreur "config.json not found"
+   - Les clients se connectent à la BD du serveur
+   - Les menus s'affichent correctement
+
+❌ PROBLÈME - Il manque encore des corrections:
+   - Recherchez dans la console d'erreur les messages "file not found"
+   - Cherchez les fichiers .py qui utilisent encore des chemins relatifs
+   - Appliquez le même pattern de correction
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ RESSOURCES
+═══════════════════════════════════════════════════════════════════════════════
+
+Fichier utilitaire: resource_utils.py
+  - Fonctions disponibles:
+    • get_resource_path(relative_path)
+    • get_config_path(filename='config.json')
+    • get_session_path(filename='session.json')
+    • safe_file_read(file_path)
+    • is_running_as_exe()
+    • log_debug_info()
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ BESOIN D'AIDE?
+═══════════════════════════════════════════════════════════════════════════════
+
+Si vous rencontrez encore des erreurs de connexion après ces modifications:
+
+1️⃣ Exécutez ceci en Python pour diagnostiquer:
+   from resource_utils import log_debug_info
+   log_debug_info()
+
+2️⃣ Cherchez les fichiers qui utilisent encore 'config.json' directement:
+   grep -r "open.*config\.json" pages/
+
+3️⃣ Vérifiez que config.json est bien dans dist/iJeery_V5.0/
+   ls dist/iJeery_V5.0/*.json

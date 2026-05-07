@@ -31,7 +31,6 @@ import os
 import subprocess
 from datetime import datetime
 from resource_utils import get_config_path
-from settings_utils import load_settings, is_global_print_enabled
 
 
 class EtatPDFMouvements:
@@ -476,15 +475,8 @@ class EtatPDFMouvements:
             doc.build(elements)
             print(f"✅ PDF généré avec succès: {output_path}")
             
-            # Ouverture automatique (selon settings)
-            try:
-                settings = load_settings()
-                auto_open = int(settings.get("Mouvements_ImpressionAutoOpen", 1) or 0) == 1
-            except Exception:
-                auto_open = True
-
-            if auto_open and is_global_print_enabled():
-                self._open_pdf_in_chrome(output_path)
+            # Ouvrir automatiquement dans Google Chrome
+            self._open_pdf_in_chrome(output_path)
             
             return True
         except Exception as e:

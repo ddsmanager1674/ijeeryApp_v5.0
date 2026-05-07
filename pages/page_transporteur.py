@@ -4,7 +4,6 @@ import psycopg2
 import json
 from datetime import datetime
 from resource_utils import get_config_path
-from log_utils import AppLogger
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -276,8 +275,6 @@ class PageTransporteur(ctk.CTkFrame):
     def __init__(self, parent, iduser):
         super().__init__(parent)
         self.iduser         = iduser
-        self.session_data = getattr(parent, "session_data", None) or {"user_id": self.iduser}
-        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
         self.transporteur_selectionne = None   # dict courant pour édition
 
         self._assurer_table()
@@ -641,15 +638,6 @@ class PageTransporteur(ctk.CTkFrame):
                     WHERE idtransporteur = %s
                 """, (nom, contact, adresse, self.transporteur_selectionne['id']))
                 conn.commit()
-                try:
-                    self._logger.log(
-                        action="Modification transporteur",
-                        element=f"idtransporteur={self.transporteur_selectionne['id']}",
-                        details=f"Transporteur modifié en '{nom}' (contact='{contact}', adresse='{adresse}')",
-                        value=f"idtransporteur={self.transporteur_selectionne['id']}",
-                    )
-                except Exception:
-                    pass
                 messagebox.showinfo("Succès", f"Transporteur « {nom} » modifié avec succès.")
             else:
                 # INSERT
@@ -660,15 +648,6 @@ class PageTransporteur(ctk.CTkFrame):
                 """, (nom, contact, adresse))
                 new_id = cursor.fetchone()[0]
                 conn.commit()
-                try:
-                    self._logger.log(
-                        action="Création transporteur",
-                        element=nom,
-                        details=f"Transporteur créé (idtransporteur={new_id}, contact='{contact}', adresse='{adresse}')",
-                        value=f"idtransporteur={new_id}",
-                    )
-                except Exception:
-                    pass
                 messagebox.showinfo("Succès",
                     f"Transporteur « {nom} » créé (ID #{new_id}).")
 
@@ -704,15 +683,6 @@ class PageTransporteur(ctk.CTkFrame):
                 WHERE idtransporteur = %s
             """, (self.transporteur_selectionne['id'],))
             conn.commit()
-            try:
-                self._logger.log(
-                    action="Suppression transporteur",
-                    element=nom,
-                    details="Suppression logique transporteur (deleted=1)",
-                    value=f"idtransporteur={self.transporteur_selectionne['id']}",
-                )
-            except Exception:
-                pass
             messagebox.showinfo("Succès", f"Transporteur « {nom} » supprimé.")
             self.reinitialiser_formulaire()
             self.charger_transporteurs()

@@ -7,7 +7,6 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import os
 import subprocess
 from datetime import datetime
-from settings_utils import open_file_if_enabled, is_global_print_enabled
 
 
 class EtatCreditTemporaire:
@@ -23,8 +22,6 @@ class EtatCreditTemporaire:
     def _open_pdf_in_chrome(self, pdf_path):
         """Ouvre le PDF genere dans Chrome, sinon lecteur par defaut."""
         try:
-            if not is_global_print_enabled():
-                return
             abs_path = os.path.abspath(pdf_path)
             chrome_paths = [
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -41,7 +38,10 @@ class EtatCreditTemporaire:
                     except Exception:
                         continue
 
-            open_file_if_enabled(abs_path, operation="open", setting_key="Credit_Temporaire_OpenA5", setting_default=0)
+            if os.name == "nt":
+                os.startfile(abs_path)
+            else:
+                subprocess.Popen(["open", abs_path])
         except Exception as e:
             print(f"Impossible d'ouvrir le PDF automatiquement: {e}")
 

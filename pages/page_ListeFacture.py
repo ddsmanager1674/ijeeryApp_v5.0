@@ -7,7 +7,6 @@ from datetime import datetime
 from tkcalendar import DateEntry
 import os
 from resource_utils import get_config_path, get_session_path, safe_file_read
-from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -16,6 +15,81 @@ try:
 except ImportError:
     _T = False
 
+
+
+def nombre_en_lettres_fr(montant: float) -> str:
+    """
+    Convertit un montant numérique en sa représentation en lettres en français.
+    Gère correctement : 70-79 (soixante et onze...), 80-89 (quatre-vingts...),
+    90-99 (quatre-vingt-dix...), centaines, milliers, millions, milliards.
+    """
+    from math import floor
+
+    if montant is None:
+        return ""
+    try:
+        montant = round(float(montant), 2)
+    except ValueError:
+        return ""
+
+    unites   = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"]
+    dix_a_19 = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize",
+                 "dix-sept", "dix-huit", "dix-neuf"]
+
+    def _simple(n):
+        """Convertit un nombre 1-99 en lettres."""
+        if n == 0:  return ""
+        if n < 10:  return unites[n]
+        if n < 20:  return dix_a_19[n - 10]
+        d, u = divmod(n, 10)
+        if d == 2: return "vingt"     + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 3: return "trente"    + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 4: return "quarante"  + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 5: return "cinquante" + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 6: return "soixante"  + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 7: return "soixante"  + (" et onze" if u == 1 else ("-" + dix_a_19[u] if u else "-dix"))
+        if d == 8: return "quatre-vingt" + ("-" + unites[u] if u else "s")
+        if d == 9: return "quatre-vingt" + ("-" + dix_a_19[u] if u else "-dix")
+        return ""
+
+    def _bloc(n):
+        """Convertit un nombre 1-999 en lettres."""
+        if n == 0: return ""
+        if n < 100: return _simple(n)
+        c, r = divmod(n, 100)
+        s = ("cent" if c == 1 else _simple(c) + " cent")
+        if r == 0 and c > 1:
+            s += "s"          # deux cents, trois cents...
+        elif r:
+            s += " " + _bloc(r)
+        return s
+
+    entier   = floor(montant)
+    centimes = int(round((montant - entier) * 100))
+
+    milliard = entier // 1_000_000_000
+    million  = (entier % 1_000_000_000) // 1_000_000
+    mille    = (entier % 1_000_000) // 1_000
+    unite_r  = entier % 1_000
+
+    parts = []
+    if milliard:
+        parts.append(_bloc(milliard) + (" milliards" if milliard > 1 else " milliard"))
+    if million:
+        parts.append(_bloc(million) + (" millions" if million > 1 else " million"))
+    if mille:
+        prefix = "" if mille == 1 else _bloc(mille) + " "
+        parts.append(prefix + "mille")
+    if unite_r:
+        parts.append(_bloc(unite_r))
+    if not parts:
+        parts.append("zéro")
+
+    res = " ".join(parts).strip()
+    if centimes:
+        res += " et " + _bloc(centimes) + " centimes"
+
+    return res.capitalize()
 
 class _C:
     MIDNIGHT       = "#2C3E50"
@@ -194,13 +268,6 @@ class PageDetailFacture(ctk.CTkToplevel):
             ).pack(pady=4)
 
         self.charger_details(idvente)
-        try:
-            session_data = {}
-            if parent_page and hasattr(parent_page, "session_data") and isinstance(parent_page.session_data, dict):
-                session_data = parent_page.session_data
-            self._logger = AppLogger(session_data=session_data)
-        except Exception:
-            self._logger = None
 
     # ====================================================================
     # LOGIQUE MÉTIER — inchangée
@@ -231,7 +298,7 @@ class PageDetailFacture(ctk.CTkToplevel):
 
             sql = """
                 SELECT u.codearticle, a.designation, vd.qtvente, vd.prixunit,
-                       (vd.qtvente * (vd.prixunit - vd.remise)) as total
+                       (vd.qtvente * vd.prixunit) as total
                 FROM tb_ventedetail vd
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
@@ -262,10 +329,12 @@ class PageDetailFacture(ctk.CTkToplevel):
             sql = """
                 SELECT v.refvente, v.dateregistre, v.description,
                        u.nomuser, u.prenomuser,
-                       c.nomcli, c.adressecli, c.contactcli, v.totmtvente
+                       c.nomcli, c.adressecli, c.contactcli, v.totmtvente,
+                       COALESCE(m.designationmag, '')
                 FROM tb_vente v
                 INNER JOIN tb_users u ON v.iduser = u.iduser
                 LEFT JOIN tb_client c ON v.idclient = c.idclient
+                LEFT JOIN tb_magasin m ON v.idmag = m.idmag
                 WHERE v.id = %s
             """
             cursor.execute(sql, (self.idvente,))
@@ -276,11 +345,11 @@ class PageDetailFacture(ctk.CTkToplevel):
                 return
 
             (refvente, dateregistre, description, nomuser, prenomuser,
-             nomcli, adressecli, contactcli, totmtvente) = result
+             nomcli, adressecli, contactcli, totmtvente, designationmag) = result
 
             sql_details = """
                 SELECT u.codearticle, a.designation, u.designationunite,
-                       vd.qtvente, vd.prixunit, vd.remise, m.designationmag
+                       vd.qtvente, vd.prixunit, COALESCE(vd.remise, 0), m.designationmag
                 FROM tb_ventedetail vd
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
@@ -309,6 +378,7 @@ class PageDetailFacture(ctk.CTkToplevel):
                     'refvente': refvente,
                     'dateregistre': dateregistre.strftime("%d/%m/%Y %H:%M"),
                     'description': description,
+                    'magasin': designationmag,
                 },
                 'utilisateur': {'nomuser': nomuser, 'prenomuser': prenomuser},
                 'client': {
@@ -317,9 +387,12 @@ class PageDetailFacture(ctk.CTkToplevel):
                     'contactcli': contactcli or "N/A",
                 },
                 'details': [
-                    {'code_article': r[0], 'designation': r[1], 'unite': r[2],
-                     'qte': r[3], 'prixunit': r[4], 'remise': r[5], 'magasin': r[6],
-                     'montant': r[3] * (float(r[4]) - float(r[5]))}
+                    {
+                        'code_article': r[0], 'designation': r[1], 'unite': r[2],
+                        'qte': float(r[3]), 'prixunit': float(r[4]),
+                        'remise': float(r[5]), 'magasin': r[6],
+                        'montant_ttc': max(0, float(r[3]) * float(r[4]) - float(r[5]) * float(r[3])),
+                    }
                     for r in details_rows
                 ]
             }
@@ -332,23 +405,10 @@ class PageDetailFacture(ctk.CTkToplevel):
                 f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
 
             self.generate_pdf_a5_duplicata(data, filename, page_vente)
-            messagebox.showinfo(parent=self, title="Succès", message=f"Duplicata généré avec succès !\n{filename}")
+            messagebox.showinfo("Succès", f"Duplicata généré avec succès !\n{filename}")
 
             if os.path.exists(filename):
                 os.startfile(filename)
-
-            try:
-                if self._logger:
-                    self._logger.log(
-                        action="Impression duplicata facture",
-                        element=refvente,
-                        details=f"Duplicata généré, fichier={os.path.basename(filename)}",
-                        value=filename,
-                    )
-            except Exception:
-                pass
-            
-            self.destroy()
 
         except Exception as e:
             messagebox.showerror("Erreur",
@@ -359,8 +419,8 @@ class PageDetailFacture(ctk.CTkToplevel):
     def annuler_facture(self):
         """Annule la facture (change le statut à 'ANNULE')"""
         if messagebox.askyesno(
-                parent=self, title="Confirmation",
-                message=f"Voulez-vous annuler la facture {self.refvente} ?"):
+                "Confirmation",
+                f"Voulez-vous annuler la facture {self.refvente} ?"):
             try:
                 with open(get_config_path('config.json')) as f:
                     config = json.load(f)
@@ -371,18 +431,7 @@ class PageDetailFacture(ctk.CTkToplevel):
                     ("ANNULE", self.refvente))
                 conn.commit()
                 messagebox.showinfo(
-                    parent=self, title="Succès", message=f"La facture {self.refvente} a été annulée.")
-
-                try:
-                    if self._logger:
-                        self._logger.log(
-                            action="Annulation de facture",
-                            element=self.refvente,
-                            details="Facture annulée (statut -> ANNULE)",
-                            value="ANNULE",
-                        )
-                except Exception:
-                    pass
+                    "Succès", f"La facture {self.refvente} a été annulée.")
                 self.statut = "ANNULE"
                 if hasattr(self, 'btn_annuler'):
                     self.btn_annuler.pack_forget()
@@ -411,7 +460,7 @@ class PageDetailFacture(ctk.CTkToplevel):
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas
         from reportlab.platypus import Table, TableStyle, Paragraph
-        from pages.page_vente import nombre_en_lettres_fr
+        # nombre_en_lettres_fr définie localement
 
         MAX_ARTICLES_PAGE1     = 25
         MAX_ARTICLES_SUIVANTES = 30
@@ -464,11 +513,12 @@ class PageDetailFacture(ctk.CTkToplevel):
                 f"NIF: {nifsociete} | STAT: {statsociete}"
             )
             suite_label = " <i>(suite)</i>" if is_continuation else ""
+            magasin_label = f"Magasin {vente.get('magasin', '')}" if vente.get('magasin') else ''
             droite_text = (
                 f"<b>Facture N°: {vente['refvente']}{suite_label}</b><br/>"
                 f"{vente['dateregistre']}<br/>"
-                f"<b>Magasin: {data['details'][0]['magasin'] if data['details'] else 'N/A'}</b><br/>"
-                f"<b>Client: {client['nomcli']}</b><br/>"
+                f"<b>{magasin_label}</b><br/>"
+                f"<b>CLIENT: {client['nomcli']}</b><br/>"
                 f"<font size='8'>Op: {user_name}</font>"
             )
             gauche = Paragraph(gauche_text, style_p)
@@ -482,40 +532,67 @@ class PageDetailFacture(ctk.CTkToplevel):
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
             ]))
             ht.wrapOn(c, width, height)
-            ht.drawOn(c, MARGIN, height - 48*mm)
+            ht.drawOn(c, MARGIN, height - 52*mm)
 
         def draw_duplicata_label():
             c.setFont("Helvetica-Bold", 14)
             c.setFillColor(colors.HexColor("#D32F2F"))
-            c.drawCentredString(width / 2, height - 51*mm, "DUPLICATA")
+            c.drawCentredString(width / 2, height - 55*mm, "DUPLICATA")
             c.setFillColor(colors.HexColor("#000000"))
 
         def draw_footer(total_montant, table_bottom):
             usable_width    = width - 2 * MARGIN
-            montant_lettres = nombre_en_lettres_fr(int(total_montant)).upper()
-            full_text       = f"ARRETE A LA SOMME DE {montant_lettres}"
+            montant_lettres = nombre_en_lettres_fr(int(round(total_montant))).upper()
             styles  = getSampleStyleSheet()
+
+            # ── Bande TOTAL séparée (sous le tableau) ─────────────────────────
+            band_h = 14*mm
+            band_y = table_bottom - band_h
+            c.setLineWidth(1.2)
+            c.rect(MARGIN, band_y, usable_width, band_h)
+
+            mid_y = band_y + band_h / 2
+            c.setLineWidth(0.5)
+            c.line(MARGIN, mid_y, MARGIN + usable_width, mid_y)
+
+            sep_x = MARGIN + usable_width * 0.60
+            c.line(sep_x, band_y, sep_x, band_y + band_h)
+
+            c.setFont("Helvetica-Bold", 10)
+            c.drawRightString(sep_x - 3, band_y + band_h/2 + 1.5*mm, "TOTAL ARIARY:")
+            c.setFont("Helvetica-Bold", 11)
+            c.drawRightString(MARGIN + usable_width - 3, band_y + band_h/2 + 1.5*mm,
+                              fmt(total_montant))
+
+            c.setFont("Helvetica-BoldOblique", 9)
+            c.drawRightString(sep_x - 3, band_y + band_h/2 - 5.5*mm, "TOTAL en FMG:")
+            c.setFont("Helvetica-Bold", 9)
+            c.drawRightString(MARGIN + usable_width - 3, band_y + band_h/2 - 5.5*mm,
+                              fmt(total_montant * 5))
+
+            # ── Texte en lettres + mentions ────────────────────────────────────
             style_b = ParagraphStyle('footer_bold', parent=styles['Normal'],
                                      fontName='Helvetica-Bold', fontSize=9,
                                      leading=12, alignment=1)
             style_i = ParagraphStyle('footer_italic', parent=styles['Normal'],
                                      fontName='Helvetica-Oblique', fontSize=8,
                                      leading=10, alignment=1)
-            p_lettre   = Paragraph(full_text, style_b)
+            p_lettre   = Paragraph(
+                f"ARRETE A LA SOMME DE {montant_lettres} ARIARY TTC", style_b)
             p_mention1 = Paragraph(
                 "Nous déclinons la responsabilité des marchandises "
                 "non livrées au-delà de 5 jours", style_i)
             p_mention2 = Paragraph("CECI EST UN DUPLICATA DE LA FACTURE", style_i)
-            _, h_l  = p_lettre.wrap(usable_width, 40*mm)
-            _, h_m1 = p_mention1.wrap(usable_width, 20*mm)
-            _, h_m2 = p_mention2.wrap(usable_width, 20*mm)
-            gap        = 3 * mm
-            y_lettre   = table_bottom - gap - h_l
-            y_mention1 = y_lettre   - 2*mm - h_m1
-            y_mention2 = y_mention1 - 1*mm - h_m2
+            _, h_l  = p_lettre.wrap(usable_width, 20*mm)
+            _, h_m1 = p_mention1.wrap(usable_width, 15*mm)
+            _, h_m2 = p_mention2.wrap(usable_width, 15*mm)
+            y_lettre   = band_y - 2*mm - h_l
+            y_mention1 = y_lettre   - 1.5*mm - h_m1
+            y_mention2 = y_mention1 - 1*mm   - h_m2
             p_lettre.drawOn(c,   MARGIN, y_lettre)
             p_mention1.drawOn(c, MARGIN, y_mention1)
             p_mention2.drawOn(c, MARGIN, y_mention2)
+
             sig_y = 15*mm
             c.setFont("Helvetica-Bold", 10)
             c.drawString(MARGIN, sig_y, "Le Client")
@@ -524,34 +601,33 @@ class PageDetailFacture(ctk.CTkToplevel):
 
         def draw_article_table(table_top, table_bottom, rows,
                                show_totals, total_montant=0):
+            from reportlab.platypus import Paragraph as _Para
+            from reportlab.lib.styles import ParagraphStyle as _PS
             frame_height = table_top - table_bottom
-            col_widths   = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+            col_widths   = [12*mm, 15*mm, 50*mm, 17*mm, 17*mm, 17*mm]
             row_height_est   = 5.5 * mm
             max_rows_visible = int(frame_height / row_height_est)
-            reserved_bottom  = 1 if show_totals else 0
-            content_slots    = max_rows_visible - 1 - reserved_bottom
-            body = list(rows)
+            content_slots    = max_rows_visible - 1
+
+            ps_desig = _PS('desig', fontName='Helvetica', fontSize=8,
+                           leading=9, wordWrap='LTR')
+
+            def make_row(r):
+                row = list(r)
+                if row[2] and isinstance(row[2], str):
+                    row[2] = _Para(row[2], ps_desig)
+                return row
+
+            body = [make_row(r) for r in rows]
             for _ in range(max(0, content_slots - len(body))):
-                body.append(['', '', '', '', ''])
-            if show_totals:
-                total_row  = ['', '', 'TOTAL Ar :', fmt(total_montant), '']
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']] \
-                             + body + [total_row]
-            else:
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']] \
-                             + body
-            c.setLineWidth(1)
-            c.rect(MARGIN, table_bottom, width - 2*MARGIN, frame_height)
-            x_pos = MARGIN
-            for w in col_widths[:-1]:
-                x_pos += w
-                c.line(x_pos, table_top, x_pos, table_bottom)
-            actual_rh   = frame_height / len(table_data)
-            row_heights = [actual_rh] * len(table_data)
+                body.append(['', '', '', '', '', ''])
+
+            table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'P.REMISE', 'MONTANT']] + body
+            row_heights = [row_height_est] + [None] * len(body)
+
             style_cmds = [
-                ('BACKGROUND',    (0, 0),  (-1, 0),  colors.lightgrey),
                 ('FONTNAME',      (0, 0),  (-1, 0),  'Helvetica-Bold'),
-                ('FONTSIZE',      (0, 0),  (-1, 0),  10),
+                ('FONTSIZE',      (0, 0),  (-1, 0),  9),
                 ('LINEBELOW',     (0, 0),  (-1, 0),  1, colors.black),
                 ('FONTSIZE',      (0, 1),  (-1, -1),  8),
                 ('ALIGN',         (3, 0),  (-1, -1), 'RIGHT'),
@@ -559,33 +635,36 @@ class PageDetailFacture(ctk.CTkToplevel):
                 ('VALIGN',        (0, 0),  (-1, -1), 'MIDDLE'),
                 ('LEFTPADDING',   (0, 0),  (-1, -1),  2),
                 ('RIGHTPADDING',  (3, 0),  (-1, -1),  2),
-                ('TOPPADDING',    (0, 0),  (-1, -1),  0),
-                ('BOTTOMPADDING', (0, 0),  (-1, -1),  0),
+                ('TOPPADDING',    (0, 0),  (-1, -1),  1),
+                ('BOTTOMPADDING', (0, 0),  (-1, -1),  1),
+                ('GRID',          (0, 0),  (-1, -1),  0.3, colors.Color(0.75, 0.75, 0.75)),
+                ('LINEBELOW',     (0, 0),  (-1, 0),   1, colors.black),
             ]
-            if show_totals:
-                style_cmds += [
-                    ('BACKGROUND', (0, -1), (-1, -1), colors.Color(0.93, 0.93, 0.93)),
-                    ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
-                    ('FONTSIZE',   (0, -1), (-1, -1),  9),
-                    ('LINEABOVE',  (0, -1), (-1, -1),  1, colors.black),
-                    ('ALIGN',      (2, -1), (2, -1),  'RIGHT'),
-                ]
             t = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
             t.setStyle(TableStyle(style_cmds))
-            t.wrapOn(c, width, height)
-            t.drawOn(c, MARGIN, table_top - len(table_data) * actual_rh)
-            return table_bottom
+            tw, th = t.wrapOn(c, width - 2*MARGIN, frame_height)
+            t.drawOn(c, MARGIN, table_top - th)
+            c.setLineWidth(1); c.rect(MARGIN, table_top - th, width - 2*MARGIN, th)
+            x_pos = MARGIN
+            for w in col_widths[:-1]:
+                x_pos += w
+                c.line(x_pos, table_top, x_pos, table_top - th)
+            return table_top - th
 
         total_montant = 0
         all_rows = []
         for detail in data['details']:
             montant        = detail.get('montant_ttc', detail.get('montant', 0))
             total_montant += montant
+            pu     = detail.get('prixunit', 0)
+            remise = detail.get('remise', 0)
+            prix_remise = max(0, float(pu) - float(remise)) if float(remise) > 0 else ''
             all_rows.append([
                 str(int(detail.get('qte', 0))),
                 str(detail.get('unite', '')),
                 str(detail.get('designation', '')),
-                fmt(detail.get('prixunit', 0)),
+                fmt(pu),
+                fmt(prix_remise) if prix_remise != '' else '',
                 fmt(montant),
             ])
 
@@ -604,8 +683,8 @@ class PageDetailFacture(ctk.CTkToplevel):
             draw_verset()
             draw_header(is_continuation=(page_type == 'continuation'))
             draw_duplicata_label()
-            table_top    = height - 55*mm
-            table_bottom = 65*mm if is_last else 15*mm
+            table_top    = height - 59*mm
+            table_bottom = 79*mm if is_last else 15*mm
             tb = draw_article_table(table_top, table_bottom, rows,
                                     show_totals=is_last,
                                     total_montant=total_montant)
@@ -634,7 +713,7 @@ class PageListeFacture(ctk.CTkFrame):
 
     def __init__(self, parent, session_data=None):
         super().__init__(parent, fg_color=C.BG_PAGE)
-        self.session_data             = session_data or {}
+        self.session_data             = session_data
         self.id_user_connecte         = self.get_connected_user_id(parent, session_data)
         self.magasin_map              = {}
         self.user_default_magasin_nom = None
@@ -646,7 +725,6 @@ class PageListeFacture(ctk.CTkFrame):
 
         self.setup_ui()
         self.charger_donnees()
-        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.id_user_connecte)
 
     # ====================================================================
     # setup_ui — REFONTE DESIGN UNIQUEMENT
@@ -970,12 +1048,3 @@ class PageListeFacture(ctk.CTkFrame):
             messagebox.showinfo(
                 "Export réussi",
                 f"Le fichier a été enregistré sous :\n{file_path}")
-            try:
-                self._logger.log(
-                    action="Export Excel",
-                    element="Liste Facture",
-                    details=f"export factures, lignes={len(lignes)}, fichier={os.path.basename(file_path)}",
-                    value=file_path,
-                )
-            except Exception:
-                pass

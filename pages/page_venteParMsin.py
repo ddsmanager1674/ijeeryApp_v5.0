@@ -21,6 +21,7 @@ import sys
 import json
 import traceback
 import textwrap
+import threading
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -30,8 +31,6 @@ from typing import Optional, Dict, Any, List
 import customtkinter as ctk
 from tkinter import ttk
 import psycopg2
-import psycopg2.pool
-from resource_utils import get_config_path
 
 # PDF via ReportLab
 from reportlab.lib.pagesizes import A5
@@ -44,11 +43,88 @@ from reportlab.lib import colors
 # ──────────────────────────────────────────────────────────────────────────────
 from app_theme import Colors, Fonts, styled, Theme
 from resource_utils import get_config_path, safe_file_read
-from settings_utils import open_file_if_enabled
 from pages.page_avoir import PageAvoir
 from pages.page_proforma import PageCommandeCli
-from log_utils import AppLogger
-from stock_snapshot import StockSnapshot
+
+
+# ==============================================================================
+# UTILITAIRES DE PERFORMANCE
+# ==============================================================================
+
+class _DBPool:
+    """
+    Pool minimaliste de connexions PostgreSQL (thread-safe).
+    Évite d'ouvrir une nouvelle connexion à chaque opération.
+    """
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._conn = None
+                cls._instance._cfg  = None
+        return cls._instance
+
+    def _load_cfg(self):
+        from resource_utils import get_config_path
+        with open(get_config_path('config.json')) as f:
+            return json.load(f)['database']
+
+    def get(self):
+        """Retourne une connexion valide (ouvre ou rouvre si nécessaire)."""
+        with self._lock:
+            try:
+                if self._conn is None or self._conn.closed:
+                    raise Exception("connexion fermée")
+                self._conn.cursor().execute("SELECT 1")   # ping léger
+            except Exception:
+                try:
+                    if self._cfg is None:
+                        self._cfg = self._load_cfg()
+                    self._conn = psycopg2.connect(
+                        host=self._cfg['host'],
+                        user=self._cfg['user'],
+                        password=self._cfg['password'],
+                        database=self._cfg['database'],
+                        port=self._cfg['port'],
+                        connect_timeout=10,
+                    )
+                    self._conn.autocommit = False
+                except Exception as e:
+                    self._conn = None
+                    raise e
+            return self._conn
+
+    def invalidate(self):
+        """Force la réouverture à la prochaine utilisation."""
+        with self._lock:
+            try:
+                if self._conn and not self._conn.closed:
+                    self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+
+_db_pool = _DBPool()
+
+
+def _debounce(widget, delay_ms: int, func):
+    """
+    Annule et replanifie `func` chaque fois qu'elle est appelée,
+    afin de n'exécuter la vraie logique qu'après `delay_ms` ms d'inactivité.
+    Retourne une fonction wrapper à brancher sur les événements Tkinter.
+    """
+    _id = [None]
+
+    def wrapper(*args, **kwargs):
+        if _id[0] is not None:
+            widget.after_cancel(_id[0])
+        _id[0] = widget.after(delay_ms, lambda: func(*args, **kwargs))
+
+    return wrapper
 
 
 # ==============================================================================
@@ -279,7 +355,8 @@ class SimpleDialogWithChoice(ctk.CTkToplevel):
 def nombre_en_lettres_fr(montant: float) -> str:
     """
     Convertit un montant numérique en sa représentation en lettres en français.
-    Gère les Millions et les Milliers correctement.
+    Gère correctement : 70-79 (soixante et onze...), 80-89 (quatre-vingts...),
+    90-99 (quatre-vingt-dix...), centaines, milliers, millions, milliards.
     """
     from math import floor
 
@@ -290,50 +367,65 @@ def nombre_en_lettres_fr(montant: float) -> str:
     except ValueError:
         return ""
 
-    unites       = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"]
-    dix_a_16     = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize"]
-    dizaines     = ["", "dix", "vingt", "trente", "quarante", "cinquante",
-                    "soixante", "soixante", "quatre-vingt", "quatre-vingt"]
+    unites   = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"]
+    dix_a_19 = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize",
+                 "dix-sept", "dix-huit", "dix-neuf"]
 
     def _simple(n):
-        if n == 0: return ""
-        if n < 10: return unites[n]
-        if n < 17: return dix_a_16[n - 10]
-        if n < 20: return "dix-" + unites[n - 10]
-        d, u = n // 10, n % 10
-        p = dizaines[d]
-        if d in (2,) and u == 1: p += " et"
-        if d in (7, 9): return p + "-" + _simple(n - d * 10) if u else p + "-" + _simple(10)
-        if u:
-            if d > 6 and u == 1: p += " et"
-            return p + "-" + unites[u]
-        return p
+        """Convertit un nombre 1-99 en lettres."""
+        if n == 0:  return ""
+        if n < 10:  return unites[n]
+        if n < 20:  return dix_a_19[n - 10]
+        d, u = divmod(n, 10)
+        if d == 2: return "vingt"     + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 3: return "trente"    + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 4: return "quarante"  + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 5: return "cinquante" + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 6: return "soixante"  + (" et un" if u == 1 else ("-" + unites[u]   if u else ""))
+        if d == 7: return "soixante"  + (" et onze" if u == 1 else ("-" + dix_a_19[u] if u else "-dix"))
+        if d == 8: return "quatre-vingt" + ("-" + unites[u] if u else "s")
+        if d == 9: return "quatre-vingt" + ("-" + dix_a_19[u] if u else "-dix")
+        return ""
 
     def _bloc(n):
+        """Convertit un nombre 1-999 en lettres."""
         if n == 0: return ""
         if n < 100: return _simple(n)
-        c, r = n // 100, n % 100
-        s = ("" if c == 1 else _simple(c) + "-") + "cent"
-        if r == 0 and c > 1: s += "s"
-        return s + ("-" + _bloc(r) if r else "")
+        c, r = divmod(n, 100)
+        s = ("cent" if c == 1 else _simple(c) + " cent")
+        if r == 0 and c > 1:
+            s += "s"          # deux cents, trois cents...
+        elif r:
+            s += " " + _bloc(r)
+        return s
 
     entier   = floor(montant)
     centimes = int(round((montant - entier) * 100))
-    million  = entier // 1_000_000
+
+    milliard = entier // 1_000_000_000
+    million  = (entier % 1_000_000_000) // 1_000_000
     mille    = (entier % 1_000_000) // 1_000
     unite_r  = entier % 1_000
 
     parts = []
-    if million: parts.append(_bloc(million) + (" millions" if million > 1 else " million"))
-    if mille:   parts.append(_bloc(mille) + " mille")
-    if unite_r: parts.append(_bloc(unite_r))
-    if not parts: parts.append("zéro")
+    if milliard:
+        parts.append(_bloc(milliard) + (" milliards" if milliard > 1 else " milliard"))
+    if million:
+        parts.append(_bloc(million) + (" millions" if million > 1 else " million"))
+    if mille:
+        prefix = "" if mille == 1 else _bloc(mille) + " "
+        parts.append(prefix + "mille")
+    if unite_r:
+        parts.append(_bloc(unite_r))
+    if not parts:
+        parts.append("zéro")
 
-    res = " ".join(parts).strip().replace("  ", " ").replace("-", " ")
+    res = " ".join(parts).strip()
     if centimes:
-        res += " et " + _bloc(centimes).replace("-", " ") + " centimes"
+        res += " et " + _bloc(centimes) + " centimes"
 
-    return res.capitalize().replace(" et-", " et ")
+    return res.capitalize()
+
 
 
 # ==============================================================================
@@ -355,12 +447,7 @@ class PageVenteParMsin(ctk.CTkFrame):
       Row 4 — Barre d'actions (boutons)
     """
 
-    def __init__(
-        self,
-        master=None,
-        id_user_connecte: Optional[int] = None,
-        vente_tab_no: Optional[int] = None,
-    ) -> None:
+    def __init__(self, master=None, id_user_connecte: Optional[int] = None) -> None:
         super().__init__(master)
 
         # ── Vérification utilisateur ──────────────────────────────────────────
@@ -371,12 +458,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.id_user_connecte = id_user_connecte
             print(f"✅ Utilisateur connecté — ID: {self.id_user_connecte}")
 
-        self.vente_tab_no = vente_tab_no
-        self._logger = AppLogger(session_data={"user_id": self.id_user_connecte} if self.id_user_connecte else {})
-
         # ── État interne ──────────────────────────────────────────────────────
-        self.conn: Optional[psycopg2.connection] = None
-        self._pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
+        # self.conn: Optional[psycopg2.connection] = None
         self.article_selectionne: Optional[Dict] = None
         self.stock_temporaire_selection: Optional[float] = None
         self.detail_vente: List[Dict] = []
@@ -413,8 +496,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         # ── Construction de l'interface ───────────────────────────────────────
         self._setup_ui()
 
-        # ── Initialisation pool DB et chargements initiaux ────────────────────
-        self._init_pool()
+        # ── Initialisation du pool DB et chargements initiaux ─────────────────
+        # Le pool (_db_pool) est partagé ; les écritures utilisent _connect_db()
         self.generer_reference()
         self.charger_magasins()
         self.charger_client()
@@ -427,47 +510,42 @@ class PageVenteParMsin(ctk.CTkFrame):
     # SECTION 1 — CONNEXION DATABASE
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _connect_db(self) -> Optional[psycopg2.connection]:
+    def _connect_db(self):
         """
-        Récupère une connexion du pool (ou ouvre une nouvelle si pool indisponible).
-        Retourne None en cas d'erreur.
+        Retourne une connexion PostgreSQL dédiée (hors pool) pour les opérations
+        qui nécessitent leur propre transaction (INSERT/UPDATE/DELETE).
+        Les lectures légères utilisent _read_cursor() via le pool partagé.
         """
-        return self._get_conn()
+        try:
+            with open(get_config_path('config.json')) as f:
+                cfg = json.load(f)['database']
+            return psycopg2.connect(
+                host=cfg['host'], user=cfg['user'],
+                password=cfg['password'], database=cfg['database'],
+                port=cfg['port'], connect_timeout=10,
+            )
+        except FileNotFoundError:
+            MessageDialog("Config manquante", "Fichier 'config.json' introuvable.", 'error')
+        except psycopg2.Error as e:
+            MessageDialog("Connexion DB", f"Impossible de se connecter : {e}", 'error')
+        return None
+
+    def _pool_cursor(self):
+        """
+        Retourne un curseur sur la connexion du pool (lecture seule).
+        En cas d'échec, retourne None — l'appelant doit vérifier.
+        """
+        try:
+            conn = _db_pool.get()
+            return conn.cursor()
+        except Exception as e:
+            print(f"⚠ Pool DB indisponible : {e}")
+            _db_pool.invalidate()
+            return None
 
     # Alias public conservé pour compatibilité avec le code existant
     def connect_db(self):
         return self._connect_db()
-
-    def _init_pool(self):
-        """Initialise le pool de connexions PostgreSQL."""
-        try:
-            with open(get_config_path('config.json')) as f:
-                cfg = json.load(f)['database']
-            self._pool = psycopg2.pool.SimpleConnectionPool(
-                minconn=1, maxconn=24,
-                host=cfg['host'], user=cfg['user'],
-                password=cfg['password'], database=cfg['database'],
-                port=cfg['port'], connect_timeout=5
-            )
-        except Exception as e:
-            MessageDialog("Pool DB", f"Impossible d'initialiser le pool : {e}", 'error')
-            self._pool = None
-
-    def _get_conn(self) -> Optional[psycopg2.connection]:
-        """Récupère une connexion du pool."""
-        if self._pool:
-            try:
-                return self._pool.getconn()
-            except psycopg2.pool.PoolError:
-                MessageDialog("Pool DB", "Pool épuisé, réinitialisation.", 'warning')
-                self._init_pool()
-                return self._pool.getconn() if self._pool else None
-        return None
-
-    def _put_conn(self, conn: psycopg2.connection):
-        """Remet une connexion dans le pool."""
-        if self._pool and conn:
-            self._pool.putconn(conn)
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 2 — PARAMÈTRES D'IMPRESSION
@@ -484,7 +562,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             'Avoir_ImpressionTicket': 0,
         }
         try:
-            with open(get_config_path('settings.json'), 'r', encoding='utf-8') as f:
+            with open('settings.json', 'r', encoding='utf-8') as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"⚠ settings.json : {e} — paramètres par défaut appliqués.")
@@ -766,7 +844,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         # ── Colonnes ─────────────────────────────────────────────────────────
         cols = ("ID_Article", "ID_Unite", "ID_Magasin",
                 "Code Article", "Désignation", "Magasin",
-                "Unité", "Remise (Ar)", "Prix Unitaire",
+                "Unité", "Remise (Ar)", "Prix Unitaire", "Prix Remise",
                 "Quantité Vente", "Montant")
 
         self.tree_details = ttk.Treeview(
@@ -785,7 +863,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             elif col == "Remise (Ar)":
                 # remise masquée par défaut et dévoilée dynamiquement
                 self.tree_details.column(col, width=0, anchor="e", minwidth=0, stretch=False)
-            elif col in ("Quantité Vente", "Prix Unitaire", "Montant"):
+            elif col in ("Quantité Vente", "Prix Unitaire", "Prix Remise", "Montant"):
                 self.tree_details.column(col, width=110, anchor="e", minwidth=80)
             elif col == "Désignation":
                 self.tree_details.column(col, width=200, anchor="w", minwidth=120)
@@ -928,6 +1006,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                     self.tree_details.column("Magasin",         width=max(110, int(w * 0.13)))
                     self.tree_details.column("Unité",           width=max(80,  int(w * 0.08)))
                     self.tree_details.column("Prix Unitaire",   width=max(100, int(w * 0.10)))
+                    self.tree_details.column("Prix Remise",     width=max(100, int(w * 0.10)))
                     self.tree_details.column("Quantité Vente",  width=max(100, int(w * 0.10)))
                     self.tree_details.column("Montant",         width=max(110, int(w * 0.11)))
         except Exception:
@@ -940,11 +1019,10 @@ class PageVenteParMsin(ctk.CTkFrame):
 
     def get_article_price(self, idarticle: int, idunite: int) -> float:
         """Récupère le dernier prix de vente pour (idarticle, idunite) depuis tb_prix."""
-        conn = self._get_conn()
-        if not conn:
+        cur = self._pool_cursor()
+        if cur is None:
             return 0.0
         try:
-            cur = conn.cursor()
             cur.execute("""
                 SELECT COALESCE(prix) FROM tb_prix
                 WHERE idarticle=%s AND idunite=%s ORDER BY id DESC LIMIT 1
@@ -955,17 +1033,20 @@ class PageVenteParMsin(ctk.CTkFrame):
             return 0.0
         except Exception as e:
             print("Erreur get_article_price:", e)
+            _db_pool.invalidate()
             return 0.0
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def get_unite_niveau_max(self, idarticle: int):
         """Retourne (idunite, niveau, designationunite) de niveau max pour l'article."""
-        conn = self._get_conn()
-        if not conn: return None
+        cur = self._pool_cursor()
+        if cur is None:
+            return None
         try:
-            cur = conn.cursor()
             cur.execute("""
                 SELECT idunite, niveau, designationunite
                 FROM tb_unite WHERE idarticle=%s ORDER BY niveau DESC LIMIT 1
@@ -973,9 +1054,12 @@ class PageVenteParMsin(ctk.CTkFrame):
             return cur.fetchone()
         except Exception as e:
             print(f"Erreur get_unite_niveau_max: {e}")
+            _db_pool.invalidate()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def verifier_unite_depot_b(self, idarticle: int, idunite: int):
         """
@@ -985,10 +1069,10 @@ class PageVenteParMsin(ctk.CTkFrame):
         mag_nom = self.combo_magasin.get()
         if "B" not in mag_nom.upper():
             return (True, "")
-        conn = self._get_conn()
-        if not conn: return (False, "Erreur de connexion")
+        cur = self._pool_cursor()
+        if cur is None:
+            return (False, "Erreur de connexion")
         try:
-            cur = conn.cursor()
             cur.execute("""
                 SELECT niveau, designationunite FROM tb_unite
                 WHERE idarticle=%s AND idunite=%s
@@ -1011,36 +1095,59 @@ class PageVenteParMsin(ctk.CTkFrame):
                     f"Veuillez choisir {des_max}.")
             return (True, "")
         except Exception as e:
+            _db_pool.invalidate()
             return (False, str(e))
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def calculer_stock_article(self, idarticle: int, idunite_cible: int,
                                 idmag: Optional[int] = None) -> float:
         """
-        Stock via StockManager (StockSnapshot), converti dans l'unité cible.
-        Conserve les valeurs négatives (pas de clamp à 0).
+        Calcul consolidé du stock (identique à page_stock.py).
+        Réservoir commun converti via qtunite, filtrable par magasin.
         """
+        conn = self._connect_db()
+        if not conn: return 0
         try:
-            if not idmag:
-                return 0.0
+            cur = conn.cursor()
+            # Récupération de toutes les unités liées
+            cur.execute("""
+                SELECT idunite, codearticle, COALESCE(qtunite,1)
+                FROM tb_unite WHERE idarticle=%s
+            """, (idarticle,))
+            unites = cur.fetchall()
+            qt_affichage = next((qt for uid, _, qt in unites
+                                  if uid == idunite_cible and qt > 0), 1)
+            reservoir = 0
+            for uid, code, qt_u in unites:
+                def _sum(sql, params):
+                    cur.execute(sql, params)
+                    return cur.fetchone()[0] or 0
 
-            cache = getattr(self, "_stock_snapshot_cache", None)
-            if cache is None:
-                cache = {}
-                setattr(self, "_stock_snapshot_cache", cache)
+                p = [idarticle, uid]
+                pm = p + ([idmag] if idmag else [])
+                mag_clause = " AND idmag=%s" if idmag else ""
 
-            idmag_int = int(idmag)
-            snap = cache.get(idmag_int)
-            if snap is None:
-                snap = StockSnapshot.build(idmag_int)
-                cache[idmag_int] = snap
+                rec  = _sum(f"SELECT COALESCE(SUM(qtlivrefrs),0) FROM tb_livraisonfrs WHERE idarticle=%s AND idunite=%s{mag_clause}", pm)
+                ven  = _sum(f"SELECT COALESCE(SUM(qtvente),0) FROM tb_ventedetail vd INNER JOIN tb_vente v ON vd.idvente=v.id WHERE vd.idarticle=%s AND vd.idunite=%s AND v.deleted=0 {' AND v.idmag=%s' if idmag else ''}", pm)
+                tin  = _sum(f"SELECT COALESCE(SUM(qttransfertentree),0) FROM tb_transfertdetail WHERE idarticle=%s AND idunite=%s AND deleted=0{' AND idmagentree=%s' if idmag else ''}", pm)
+                tout = _sum(f"SELECT COALESCE(SUM(qttranfertsortie),0) FROM tb_transfertdetail WHERE idarticle=%s AND idunite=%s AND deleted=0{' AND idmagsortie=%s' if idmag else ''}", pm)
 
-            return float(snap.stock_unite(int(idarticle), int(idunite_cible)))
+                # Inventaire (via codearticle)
+                pi = [code] + ([idmag] if idmag else [])
+                inv = _sum(f"SELECT COALESCE(SUM(qtinventaire),0) FROM tb_inventaire WHERE codearticle=%s{' AND idmag=%s' if idmag else ''}", pi)
+
+                reservoir += (rec + tin + inv - ven - tout) * qt_u
+
+            return max(0, reservoir / qt_affichage)
         except Exception as e:
-            print(f"Erreur calcul stock (StockManager): {e}")
-            return 0.0
+            print(f"Erreur calcul stock: {e}")
+            return 0
+        finally:
+            cur.close(); conn.close()
 
     def calculer_stock_magasin_precis(self, idarticle: int, idunite: int, idmag: int) -> float:
         """
@@ -1050,7 +1157,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         """
         if not idmag or not idarticle or not idunite:
             return 0.0
-        conn = self._get_conn()
+        conn = self._connect_db()
         if not conn:
             return 0.0
         try:
@@ -1079,33 +1186,26 @@ class PageVenteParMsin(ctk.CTkFrame):
                     WHERE deleted = 0
                     ORDER BY idarticle, qtunite ASC, idunite ASC
                 ),
-                ent AS (
-                    SELECT ed.idarticle, ed.idunite, ed.idmag, SUM(ed.qtentree) AS quantite
-                    FROM tb_entreedetail ed
-                    WHERE ed.deleted = 0
-                    GROUP BY ed.idarticle, ed.idunite, ed.idmag
-                ),
                 rec AS (
                     SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite
                     FROM tb_livraisonfrs lf
-                    WHERE lf.deleted = 0
                     GROUP BY lf.idarticle, lf.idunite, lf.idmag
                 ),
                 ven AS (
                     SELECT vd.idarticle, vd.idunite, v.idmag, SUM(vd.qtvente) AS quantite
                     FROM tb_ventedetail vd
-                    INNER JOIN tb_vente v ON vd.idvente = v.id AND v.deleted = 0 AND v.statut = 'VALIDEE'
+                    INNER JOIN tb_vente v ON vd.idvente = v.id AND v.deleted = 0
                     WHERE vd.deleted = 0
                     GROUP BY vd.idarticle, vd.idunite, v.idmag
                 ),
                 tin AS (
-                    SELECT t.idarticle, t.idunite, t.idmagentree AS idmag, SUM(t.qttransfert) AS quantite
+                    SELECT t.idarticle, t.idunite, t.idmagentree AS idmag, SUM(t.qttransfertentree) AS quantite
                     FROM tb_transfertdetail t
                     WHERE t.deleted = 0
                     GROUP BY t.idarticle, t.idunite, t.idmagentree
                 ),
                 tout AS (
-                    SELECT t.idarticle, t.idunite, t.idmagsortie AS idmag, SUM(t.qttransfert) AS quantite
+                    SELECT t.idarticle, t.idunite, t.idmagsortie AS idmag, SUM(t.qttranfertsortie) AS quantite
                     FROM tb_transfertdetail t
                     WHERE t.deleted = 0
                     GROUP BY t.idarticle, t.idunite, t.idmagsortie
@@ -1146,8 +1246,6 @@ class PageVenteParMsin(ctk.CTkFrame):
                     GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin
                 ),
                 mouvements_agreges AS (
-                    SELECT idarticle, idunite, idmag, quantite, 'entree' AS type_mouvement FROM ent
-                    UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'reception' AS type_mouvement FROM rec
                     UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'vente' AS type_mouvement FROM ven
@@ -1173,7 +1271,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                         ma.idarticle,
                         SUM(
                             CASE
-                                WHEN ma.type_mouvement IN ('entree','reception','transfert_in','inventaire','avoir','echange_entree')
+                                WHEN ma.type_mouvement IN ('reception','transfert_in','inventaire','avoir','echange_entree')
                                     THEN ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
                                 WHEN ma.type_mouvement IN ('vente','sortie','transfert_out','consommation_interne','echange_sortie')
                                     THEN - ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
@@ -1200,13 +1298,16 @@ class PageVenteParMsin(ctk.CTkFrame):
             row = cur.fetchone()
             if not row:
                 return 0.0
-            return max(0.0, row[0] or 0.0)
+            # Arrondi à 6 décimales pour éviter les erreurs de précision
+            # en virgule flottante dues aux multiplications/divisions de coefficients
+            # (ex: 0.9999999 affiché comme 1,00 mais bloque la comparaison)
+            return max(0.0, round(row[0] or 0.0, 6))
         except Exception as e:
             print(f"Erreur calcul stock magasin précis : {e}")
             return 0.0
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            cur.close()
+            conn.close()
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 7 — LOGIQUE MÉTIER : CHARGEMENTS INITIAUX
@@ -1216,10 +1317,9 @@ class PageVenteParMsin(ctk.CTkFrame):
         """Génère et affiche une nouvelle référence FA-AAAA-NNNNN."""
         if self.mode_modification and self.idvente_charge:
             return  # Ne pas écraser la référence existante en mode modif
-        conn = self._get_conn()
-        if not conn: return
+        cur = self._pool_cursor()
+        if cur is None: return
         try:
-            cur = conn.cursor()
             annee = datetime.now().year
             cur.execute("""
                 SELECT refvente FROM tb_vente
@@ -1239,16 +1339,18 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.entry_ref_vente.configure(state="readonly")
         except Exception as e:
             MessageDialog("Erreur", f"Génération référence : {e}", 'error')
+            _db_pool.invalidate()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def charger_magasins(self):
         """Charge les magasins dans combo_magasin et sélectionne celui de l'utilisateur."""
-        conn = self._get_conn()
-        if not conn: return
+        cur = self._pool_cursor()
+        if cur is None: return
         try:
-            cur = conn.cursor()
             cur.execute("SELECT idmag, designationmag FROM tb_magasin WHERE deleted=0 ORDER BY designationmag")
             mags = cur.fetchall()
             self.magasin_map = {nom: id_ for id_, nom in mags}
@@ -1272,25 +1374,37 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.combo_magasin.set(defaut)
         except Exception as e:
             MessageDialog("Erreur", f"Chargement magasins : {e}", 'error')
+            _db_pool.invalidate()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def charger_client(self):
-        """Pré-charge la map {nomcli: idclient} pour la validation rapide."""
-        conn = self._get_conn()
-        if not conn: return
+        """
+        Pré-charge uniquement les 500 premiers clients actifs dans la map locale.
+        La recherche complète passe par la BD avec filtre ILIKE (voir open_recherche_client).
+        """
+        cur = self._pool_cursor()
+        if cur is None:
+            return
         try:
-            cur = conn.cursor()
-            cur.execute("SELECT idclient, nomcli FROM tb_client WHERE deleted=0 ORDER BY nomcli")
+            cur.execute(
+                "SELECT idclient, nomcli FROM tb_client "
+                "WHERE deleted=0 ORDER BY nomcli LIMIT 500"
+            )
             clients = cur.fetchall()
             self.client_map = {nom: id_ for id_, nom in clients}
             self.client_ids = [id_ for id_, _ in clients]
         except Exception as e:
             MessageDialog("Erreur", f"Chargement clients : {e}", 'error')
+            _db_pool.invalidate()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def charger_infos_societe(self):
         """Charge les informations de la société depuis tb_infosociete (pour les PDF)."""
@@ -1300,12 +1414,11 @@ class PageVenteParMsin(ctk.CTkFrame):
             'nifsociete': 'N/A', 'statsociete': 'N/A',
             'cifsociete': 'N/A', 'ambleme': '', 'autre': '',
         }
-        conn = self._get_conn()
-        if not conn:
+        cur = self._pool_cursor()
+        if cur is None:
             self.infos_societe = _defaults
             return
         try:
-            cur = conn.cursor()
             cur.execute("""
                 SELECT nomsociete, adressesociete, villesociete, contactsociete,
                        nifsociete, statsociete, cifsociete, ambleme, autre
@@ -1321,9 +1434,12 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Avertissement", f"Infos société : {e}", 'warning')
             self.infos_societe = _defaults
+            _db_pool.invalidate()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 8 — LOGIQUE MÉTIER : GESTION DU DÉTAIL DE VENTE
@@ -1335,6 +1451,13 @@ class PageVenteParMsin(ctk.CTkFrame):
         qtvente  = float(detail.get('qtvente', detail.get('qte', 0)))
         prixunit = float(detail.get('prixunit', 0))
         montant_net = max(0, qtvente * prixunit - remise * qtvente)
+        # P.REMISE vide si aucune remise
+        if remise > 0:
+            prix_remise_str = self.formater_nombre(max(0, prixunit - remise))
+            remise_str      = self.formater_nombre(remise)
+        else:
+            prix_remise_str = ""
+            remise_str      = ""
         return (
             detail.get('idarticle', ''),
             detail.get('idunite', ''),
@@ -1343,8 +1466,9 @@ class PageVenteParMsin(ctk.CTkFrame):
             detail.get('nom_article', ''),
             detail.get('designationmag', ''),
             detail.get('nom_unite', ''),
-            self.formater_nombre(remise),
+            remise_str,
             self.formater_nombre(prixunit),
+            prix_remise_str,
             self.formater_nombre(qtvente),
             self.formater_nombre(montant_net),
         )
@@ -1427,7 +1551,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             )
             return
 
-        if qtvente > stock_precis:
+        if qtvente > stock_precis + 1e-9:  # tolérance pour erreurs de précision flottante
             MessageDialog(
                 "Stock Insuffisant",
                 f"Quantité saisie ({self.formater_nombre(qtvente)}) dépasse "
@@ -1581,7 +1705,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         """Ouvre une fenêtre modale de sélection de client avec filtre et type."""
         fen = ctk.CTkToplevel(self)
         fen.title("Rechercher un client")
-        fen.geometry("550*550")
+        fen.geometry("550x550")          # ← correction du typo "550*550"
         fen.configure(fg_color=Colors.BG_PAGE)
         fen.grab_set()
         fen.lift()
@@ -1627,47 +1751,46 @@ class PageVenteParMsin(ctk.CTkFrame):
         tree.column("Adresse", width=260, anchor="w")
         tree.pack(fill="both", expand=True, padx=12, pady=8)
 
-        def charger(_e=None):
+        def _charger_clients(_e=None):
             filtre = entry_search.get().strip()
-            for i in tree.get_children(): tree.delete(i)
-            conn = self._get_conn()
-            if not conn: return
+            for i in tree.get_children():
+                tree.delete(i)
+            # Utiliser le pool pour la lecture
+            cur = self._pool_cursor()
+            if cur is None:
+                return
             try:
-                cur = conn.cursor()
                 tp  = type_filter.get()
                 tc  = (" AND COALESCE(idtypeclient,1)=2" if tp == "Client à crédit"
                        else " AND COALESCE(idtypeclient,1)=1" if tp == "Client au comptant"
                        else "")
+                # LIMIT 200 : évite de saturer le Treeview et le thread UI
                 cur.execute(f"""
                     SELECT idclient, nomcli,
                            COALESCE(NULLIF(TRIM(contactcli),''),'Aucun contact') AS ct,
                            COALESCE(NULLIF(TRIM(adressecli),''),'Aucune adresse') AS adr
                     FROM tb_client WHERE deleted=0 AND nomcli ILIKE %s {tc}
-                    ORDER BY nomcli
+                    ORDER BY nomcli LIMIT 200
                 """, (f"%{filtre}%",))
-                for idx, row in enumerate(cur.fetchall()):
-                    tree.insert("", "end", values=row,
-                                tags=("even" if idx % 2 == 0 else "odd",))
+                rows = cur.fetchall()
             except Exception as e:
                 MessageDialog("Erreur", str(e), 'error')
+                _db_pool.invalidate()
+                return
             finally:
-                if 'cur' in locals(): cur.close()
-                self._put_conn(conn)
+                try:
+                    cur.close()
+                except Exception:
+                    pass
 
-        # ─── DÉBOUNCE sur recherche client (300ms) ───────────────────────────────────
-        # Correction Problème n°2 : Limiter les appels DB lors de la frappe rapide
-        # Sans debounce : taper "DURAND" = 6 requêtes SQL simultanées
-        # Avec debounce : taper "DURAND" = 1 seule requête après 300ms d'inactivité
-        debounce_id = None
-        
-        def debounced_charger(_e=None):
-            nonlocal debounce_id
-            if debounce_id:
-                fen.after_cancel(debounce_id)  # Annuler l'appel précédent
-            debounce_id = fen.after(300, lambda: charger())  # Relancer après 300ms
-        
-        entry_search.bind("<KeyRelease>", debounced_charger)
-        type_filter.configure(command=lambda _: debounced_charger())  # Filtre aussi debounced
+            for idx, row in enumerate(rows):
+                tree.insert("", "end", values=row,
+                            tags=("even" if idx % 2 == 0 else "odd",))
+
+        # Debounce 300 ms : n'interroge la BD qu'après 300 ms d'inactivité clavier
+        _charger_debounce = _debounce(fen, 300, _charger_clients)
+        entry_search.bind("<KeyRelease>", _charger_debounce)
+        type_filter.configure(command=lambda _: _charger_clients())
 
         def valider():
             sel = tree.selection()
@@ -1687,7 +1810,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         styled.button_danger(bf, text="❌ Annuler", command=fen.destroy, width=120).pack(side="left")
         styled.button_success(bf, text="✅ Valider", command=valider, width=120).pack(side="right")
 
-        charger()
+        _charger_clients()
 
     def open_recherche_article(self):
         """
@@ -1763,10 +1886,10 @@ class PageVenteParMsin(ctk.CTkFrame):
             idmag   = self.magasin_map.get(mag_nom)
             tree.heading("Stock", text=f"Stock '{mag_nom}'" if mag_nom else "Stock Magasin")
             if not idmag: return
-            conn = self._get_conn()
-            if not conn: return
+            # Utiliser le pool pour la lecture (pas de transaction nécessaire)
+            cur = self._pool_cursor()
+            if cur is None: return
             try:
-                cur = conn.cursor()
                 # Requête consolidée alignée sur tmpVente.py
                 cur.execute("""
                 WITH uc AS (
@@ -1792,33 +1915,26 @@ class PageVenteParMsin(ctk.CTkFrame):
                     WHERE deleted = 0
                     ORDER BY idarticle, qtunite ASC, idunite ASC
                 ),
-                ent AS (
-                    SELECT ed.idarticle, ed.idunite, ed.idmag, SUM(ed.qtentree) AS quantite
-                    FROM tb_entreedetail ed
-                    WHERE ed.deleted = 0
-                    GROUP BY ed.idarticle, ed.idunite, ed.idmag
-                ),
                 rec AS (
                     SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite
                     FROM tb_livraisonfrs lf
-                    WHERE lf.deleted = 0
                     GROUP BY lf.idarticle, lf.idunite, lf.idmag
                 ),
                 ven AS (
                     SELECT vd.idarticle, vd.idunite, v.idmag, SUM(vd.qtvente) AS quantite
                     FROM tb_ventedetail vd
-                    INNER JOIN tb_vente v ON vd.idvente = v.id AND v.deleted = 0 AND v.statut = 'VALIDEE'
+                    INNER JOIN tb_vente v ON vd.idvente = v.id AND v.deleted = 0
                     WHERE vd.deleted = 0
                     GROUP BY vd.idarticle, vd.idunite, v.idmag
                 ),
                 tin AS (
-                    SELECT t.idarticle, t.idunite, t.idmagentree AS idmag, SUM(t.qttransfert) AS quantite
+                    SELECT t.idarticle, t.idunite, t.idmagentree AS idmag, SUM(t.qttransfertentree) AS quantite
                     FROM tb_transfertdetail t
                     WHERE t.deleted = 0
                     GROUP BY t.idarticle, t.idunite, t.idmagentree
                 ),
                 tout AS (
-                    SELECT t.idarticle, t.idunite, t.idmagsortie AS idmag, SUM(t.qttransfert) AS quantite
+                    SELECT t.idarticle, t.idunite, t.idmagsortie AS idmag, SUM(t.qttranfertsortie) AS quantite
                     FROM tb_transfertdetail t
                     WHERE t.deleted = 0
                     GROUP BY t.idarticle, t.idunite, t.idmagsortie
@@ -1859,8 +1975,6 @@ class PageVenteParMsin(ctk.CTkFrame):
                     GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin
                 ),
                 mouvements_agreges AS (
-                    SELECT idarticle, idunite, idmag, quantite, 'entree' AS type_mouvement FROM ent
-                    UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'reception' AS type_mouvement FROM rec
                     UNION ALL
                     SELECT idarticle, idunite, idmag, quantite, 'vente' AS type_mouvement FROM ven
@@ -1886,7 +2000,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                         ma.idarticle,
                         SUM(
                             CASE
-                                WHEN ma.type_mouvement IN ('entree','reception','transfert_in','inventaire','avoir','echange_entree')
+                                WHEN ma.type_mouvement IN ('reception','transfert_in','inventaire','avoir','echange_entree')
                                     THEN ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
                                 WHEN ma.type_mouvement IN ('vente','sortie','transfert_out','consommation_interne','echange_sortie')
                                     THEN - ma.quantite * COALESCE(uc_coeff.coeff_hierarchique, 1)
@@ -1915,11 +2029,11 @@ class PageVenteParMsin(ctk.CTkFrame):
                 LEFT JOIN dp p ON p.idarticle=u.idarticle AND p.idunite=u.idunite AND p.rn=1
                 WHERE a.deleted=0 AND u.deleted=0 AND (u.codearticle ILIKE %s OR a.designation ILIKE %s)
                 ORDER BY a.designation, u.codearticle
+                LIMIT 300
                 """, (idmag, f"%{filtre}%", f"%{filtre}%"))
 
                 for idx, row in enumerate(cur.fetchall()):
-                    # Stock réel (peut être négatif) — ne pas forcer à 0
-                    stk = float(row[7] or 0)
+                    stk = max(0, row[7])
                     tags = ("even" if idx % 2 == 0 else "odd",)
                     if stk <= 0: tags = tags + ("stock_nul",)
                     tree.insert("", "end", values=(
@@ -1931,23 +2045,16 @@ class PageVenteParMsin(ctk.CTkFrame):
                     ), tags=tags)
             except Exception as e:
                 MessageDialog("Erreur chargement", str(e), 'error')
+                _db_pool.invalidate()
             finally:
-                if 'cur' in locals(): cur.close()
-                self._put_conn(conn)
+                try:
+                    cur.close()
+                except Exception:
+                    pass
 
-        # ─── DÉBOUNCE sur recherche article (300ms) ───────────────────────────────────
-        # Correction Problème n°2 : Éviter la CTE massive à chaque frappe
-        # CTE complexe (100+ lignes) avec SUM/exp() agrègeant tous les mouvements historiques
-        # Sans debounce : 6 CTE = 3-12s au serveur | Avec debounce : 1 CTE = 500ms-2s
-        debounce_id = None
-        
-        def debounced_charger_article(_e=None):
-            nonlocal debounce_id
-            if debounce_id:
-                fen.after_cancel(debounce_id)
-            debounce_id = fen.after(300, lambda: charger(entry_search.get()))
-        
-        entry_search.bind("<KeyRelease>", debounced_charger_article)
+        # Debounce 350 ms : évite de relancer la lourde requête stock à chaque frappe
+        _charger_debounce = _debounce(fen, 350, charger)
+        entry_search.bind("<KeyRelease>", lambda _e: _charger_debounce(entry_search.get()))
 
         def valider():
             sel = tree.selection()
@@ -2067,7 +2174,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 MessageDialog("Erreur", "Veuillez entrer ou choisir un client.", 'error')
                 return
 
-            conn = self._get_conn()
+            conn = self._connect_db()
             if not conn: return
             cur = conn.cursor()
 
@@ -2190,64 +2297,10 @@ class PageVenteParMsin(ctk.CTkFrame):
                 traceback.print_exc()
                 return
             finally:
-                if 'cur' in locals(): cur.close()
-                self._put_conn(conn)
+                cur.close(); conn.close()
 
             # ── Affichage de la confirmation ───────────────────────────────────
             total_general = sum(f['total'] for f in factures_creees)
-
-            # ── LOGS (menu "Ventes par Dépôt") — un log par facture créée ─────
-            try:
-                onglet_no = self.vente_tab_no if self.vente_tab_no is not None else "N/A"
-                # mapping idvente -> (idmag, details_mag)
-                details_mag_by_idmag = details_par_mag
-
-                for fac in factures_creees:
-                    ref_mag = fac.get("ref")
-                    idvente = fac.get("idvente")
-                    total_mag = float(fac.get("total") or 0)
-                    nom_mag = fac.get("magasin") or "N/A"
-
-                    # retrouver les détails de ce magasin pour calcul remise
-                    details_mag = None
-                    try:
-                        # on retrouve idmag via idventes_par_magasin
-                        idmag = next((k for k, v in self.idventes_par_magasin.items() if v == idvente), None)
-                        details_mag = details_mag_by_idmag.get(idmag) if idmag is not None else None
-                    except Exception:
-                        details_mag = None
-
-                    remise_total = 0.0
-                    if details_mag:
-                        try:
-                            remise_total = sum(
-                                max(0.0, float(d.get("remise", 0) or 0) * float(d.get("qtvente", 0) or 0))
-                                for d in details_mag
-                            )
-                        except Exception:
-                            remise_total = 0.0
-
-                    remise_txt = (
-                        f"avec remise {self.formater_nombre(remise_total)} Ar"
-                        if remise_total > 0
-                        else "sans remise"
-                    )
-
-                    # Description métier lisible
-                    desc = (
-                        f"Vente {onglet_no} (onglet {onglet_no}) ref: {ref_mag} "
-                        f"enregistrée d'une somme de {self.formater_nombre(total_mag)} Ar ({remise_txt}), "
-                        f"Client : {client_nom}, Magasin : {nom_mag}"
-                    )
-
-                    self._logger.log(
-                        action="Vente enregistrée",
-                        element=str(ref_mag),
-                        details=desc,
-                        value=f"{self.formater_nombre(total_mag)} Ar",
-                    )
-            except Exception:
-                pass
             if self.settings.get('Vente_ImpressionConfirmation', 1):
                 lines = "\n".join(f"• {f['ref']} ({f['magasin']}): {self.formater_nombre(f['total'])} Ar"
                                   for f in factures_creees)
@@ -2358,14 +2411,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                     top.lower()
                 except Exception:
                     pass
-                abs_path = os.path.abspath(filename)
-                setting_key = None
-                base = os.path.basename(abs_path).lower()
-                if base.startswith("facture_"):
-                    setting_key = "Vente_ImpressionA5"
-                elif base.startswith("ticket_"):
-                    setting_key = "Vente_ImpressionTicket"
-                open_file_if_enabled(abs_path, operation="open", setting_key=setting_key, setting_default=1)
+                os.startfile(os.path.abspath(filename))
             elif sys.platform == 'darwin':
                 os.system(f'open "{filename}"')
             else:
@@ -2378,7 +2424,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         Récupère toutes les données d'une facture (en-tête + lignes + société)
         pour la génération des PDF.
         """
-        conn = self._get_conn()
+        conn = self._connect_db()
         if not conn: return None
         data = {'societe': self.infos_societe, 'vente': None, 'utilisateur': None, 'details': []}
         try:
@@ -2436,8 +2482,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             traceback.print_exc()
             return None
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            cur.close(); conn.close()
 
     # ── generate_pdf_a5 : inchangé (logique ReportLab complexe) ───────────────
     def generate_pdf_a5(self, data: dict, filename: str):
@@ -2502,64 +2547,116 @@ class PageVenteParMsin(ctk.CTkFrame):
         def draw_footer(total_m, table_bottom):
             usable = width - 2*MARGIN
             lettres = nombre_en_lettres_fr(int(total_m)).upper()
+
+            # ── Bande TOTAL séparée (sous le tableau) ─────────────────────────
+            band_h = 14*mm
+            band_y = table_bottom - band_h
+            c.setLineWidth(1.2)
+            c.rect(MARGIN, band_y, usable, band_h)
+
+            # Ligne de séparation horizontale entre les deux lignes de total
+            mid_y = band_y + band_h / 2
+            c.setLineWidth(0.5)
+            c.line(MARGIN, mid_y, MARGIN + usable, mid_y)
+
+            # Ligne verticale séparant libellé et montant
+            sep_x = MARGIN + usable * 0.60
+            c.line(sep_x, band_y, sep_x, band_y + band_h)
+
+            # Ligne 1 : TOTAL ARIARY
+            c.setFont("Helvetica-Bold", 10)
+            c.drawRightString(sep_x - 3, band_y + band_h/2 + 1.5*mm, "TOTAL ARIARY:")
+            c.setFont("Helvetica-Bold", 11)
+            c.drawRightString(MARGIN + usable - 3, band_y + band_h/2 + 1.5*mm,
+                              self.formater_nombre_pdf(total_m))
+
+            # Ligne 2 : TOTAL en FMG
+            c.setFont("Helvetica-BoldOblique", 9)
+            c.drawRightString(sep_x - 3, band_y + band_h/2 - 5.5*mm, "TOTAL en FMG:")
+            c.setFont("Helvetica-Bold", 9)
+            c.drawRightString(MARGIN + usable - 3, band_y + band_h/2 - 5.5*mm,
+                              self.formater_nombre_pdf(total_m * 5))
+
+            # ── Texte en lettres + mention ─────────────────────────────────────
             pb = ParagraphStyle('pb', parent=styles['Normal'],
                                 fontName='Helvetica-Bold', fontSize=9, leading=12, alignment=1)
             pi = ParagraphStyle('pi', parent=styles['Normal'],
                                 fontName='Helvetica-Oblique', fontSize=8, leading=10, alignment=1)
             pl = Paragraph(f"ARRETE A LA SOMME DE {lettres} ARIARY TTC", pb)
             pm = Paragraph("Nous déclinons la responsabilité des marchandises non livrées au-delà de 5 jours", pi)
-            _, hl = pl.wrap(usable, 40*mm); _, hm = pm.wrap(usable, 20*mm)
-            yl = table_bottom - 3*mm - hl; ym = yl - 2*mm - hm
+            _, hl = pl.wrap(usable, 20*mm); _, hm = pm.wrap(usable, 15*mm)
+            yl = band_y - 2*mm - hl
+            ym = yl - 1.5*mm - hm
             pl.drawOn(c, MARGIN, yl); pm.drawOn(c, MARGIN, ym)
+
+            # ── Signatures ────────────────────────────────────────────────────
             c.setFont("Helvetica-Bold", 10)
             c.drawString(MARGIN, 15*mm, "Le Client")
             c.drawCentredString(width/2, 15*mm, "Le Caissier")
             c.drawString(width-35*mm, 15*mm, "Le Magasinier")
 
         def draw_table(t_top, t_bot, rows, show_tot, total_m=0):
+            from reportlab.lib.styles import ParagraphStyle as _PS
+            from reportlab.platypus import Paragraph as _Para
             fh = t_top - t_bot
-            cws = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+            cws = [12*mm, 15*mm, 50*mm, 17*mm, 17*mm, 17*mm]
             rhe = 5.5*mm; max_r = int(fh/rhe)
-            res = 2 if show_tot else 0
-            slots = max_r - 1 - res
-            body = list(rows)
-            for _ in range(max(0, slots-len(body))): body.append(['']*5)
-            if show_tot:
-                body += [['', '', 'TOTAL Ar :', self.formater_nombre_pdf(total_m), ''],
-                         ['', '', 'Fmg :',      self.formater_nombre_pdf(total_m*5), '']]
-            td = [['QTE','UNITE','DESIGNATION','PU TTC','MONTANT']] + body
-            c.setLineWidth(1); c.rect(MARGIN, t_bot, width-2*MARGIN, fh)
-            xp = MARGIN
-            for w_ in cws[:-1]:
-                xp += w_; c.line(xp, t_top, xp, t_bot)
-            arh = fh/len(td)
+            slots = max_r - 1
+
+            # Style pour la désignation avec wrapping
+            ps_desig = _PS('desig', fontName='Helvetica', fontSize=8,
+                           leading=9, wordWrap='LTR')
+
+            def make_row(r):
+                """Convertit la cellule désignation (col 2) en Paragraph pour le wrap."""
+                row = list(r)
+                if row[2] and isinstance(row[2], str):
+                    row[2] = _Para(row[2], ps_desig)
+                return row
+
+            body = [make_row(r) for r in rows]
+            for _ in range(max(0, slots-len(body))): body.append(['']*6)
+
+            hdr = [['QTE','UNITE','DESIGNATION','PU TTC','P.REMISE','MONTANT']]
+            td = hdr + body
+
+            # Hauteur fixe pour l'entête, None (auto) pour les lignes de données
+            row_heights = [rhe] + [None] * len(body)
+
             cmds = [
-                ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,0),10),
+                ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,0),9),
                 ('LINEBELOW',(0,0),(-1,0),1,rl_colors.black),('FONTSIZE',(0,1),(-1,-1),8),
                 ('ALIGN',(3,0),(-1,-1),'RIGHT'),('ALIGN',(0,0),(2,0),'LEFT'),
                 ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
                 ('LEFTPADDING',(0,0),(-1,-1),2),('RIGHTPADDING',(3,0),(-1,-1),2),
-                ('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),
+                ('TOPPADDING',(0,0),(-1,-1),1),('BOTTOMPADDING',(0,0),(-1,-1),1),
+                ('GRID',(0,0),(-1,-1),0.3,rl_colors.Color(0.75,0.75,0.75)),
+                ('LINEBELOW',(0,0),(-1,0),1,rl_colors.black),
             ]
-            if show_tot:
-                cmds += [
-                    ('FONTNAME',(0,-2),(-1,-1),'Helvetica-Bold'),('FONTSIZE',(0,-2),(-1,-1),9),
-                    ('LINEABOVE',(0,-2),(-1,-2),1,rl_colors.black),
-                    ('ALIGN',(2,-2),(2,-1),'RIGHT'),
-                    ('BACKGROUND',(0,-2),(-1,-1),rl_colors.Color(0.93,0.93,0.93)),
-                ]
-            t = RLTable(td, colWidths=cws, rowHeights=[arh]*len(td))
+            t = RLTable(td, colWidths=cws, rowHeights=row_heights)
             t.setStyle(RLTableStyle(cmds))
-            t.wrapOn(c, width, height)
-            t.drawOn(c, MARGIN, t_top - len(td)*arh)
-            return t_bot
+            tw, th = t.wrapOn(c, width - 2*MARGIN, fh)
+            t.drawOn(c, MARGIN, t_top - th)
+            c.setLineWidth(1); c.rect(MARGIN, t_top - th, width-2*MARGIN, th)
+            xp = MARGIN
+            for w_ in cws[:-1]:
+                xp += w_; c.line(xp, t_top, xp, t_top - th)
+            return t_top - th
 
         total_m = 0; all_rows = []
         for d in data['details']:
             mt = d.get('montant_ttc', d.get('montant', 0)); total_m += mt
+            pu = d.get('prixunit', 0)
+            remise = d.get('remise', 0)
+            # P.REMISE vide si aucune remise, sinon prix unitaire - remise
+            if float(remise) > 0:
+                prix_remise_str = self.formater_nombre_pdf(max(0, float(pu) - float(remise)))
+            else:
+                prix_remise_str = ""
             all_rows.append([str(int(d.get('qte',0))), str(d.get('unite','')),
                               str(d.get('designation','')),
-                              self.formater_nombre_pdf(d.get('prixunit',0)),
+                              self.formater_nombre_pdf(pu),
+                              prix_remise_str,
                               self.formater_nombre_pdf(mt)])
 
         pages = []
@@ -2573,7 +2670,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         for idx, (ptype, rows) in enumerate(pages):
             last = (idx == len(pages)-1)
             draw_verset(); draw_header(ptype == 'cont')
-            t_top = height-45*mm; t_bot = 55*mm if last else 15*mm
+            t_top = height-45*mm; t_bot = 69*mm if last else 15*mm
             tb = draw_table(t_top, t_bot, rows, last, total_m)
             if last: draw_footer(total_m, tb)
             if len(pages) > 1:
@@ -2719,10 +2816,9 @@ class PageVenteParMsin(ctk.CTkFrame):
 
         def charger(filtre=""):
             for i in tree.get_children(): tree.delete(i)
-            conn = self._get_conn()
-            if not conn: return
+            cur = self._pool_cursor()
+            if cur is None: return
             try:
-                cur = conn.cursor()
                 cur.execute("""
                     SELECT p.idprof, p.refprof, p.dateprof, c.nomcli,
                            SUM(pd.qtlivprof*pd.prixunit) AS total, COUNT(pd.idprof)
@@ -2733,6 +2829,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                     AND (p.refprof ILIKE %s OR c.nomcli ILIKE %s)
                     GROUP BY p.idprof, p.refprof, p.dateprof, c.nomcli
                     ORDER BY p.dateprof DESC
+                    LIMIT 200
                 """, (f"%{filtre}%", f"%{filtre}%"))
                 for idx, row in enumerate(cur.fetchall()):
                     idp, ref, dt, nom, tot, nb = row
@@ -2742,22 +2839,15 @@ class PageVenteParMsin(ctk.CTkFrame):
                     ), tags=("even" if idx % 2 == 0 else "odd",))
             except Exception as e:
                 MessageDialog("Erreur", str(e), 'error')
+                _db_pool.invalidate()
             finally:
-                if 'cur' in locals(): cur.close()
-                self._put_conn(conn)
+                try:
+                    cur.close()
+                except Exception:
+                    pass
 
-        # ─── DÉBOUNCE sur recherche proforma (300ms) ──────────────────────────────────
-        # Correction Problème n°2 : Réduire les appels à la requête GROUP BY/JOIN complexe
-        # Impact : de 6-20 requêtes rapides → 1 seule requête après 300ms d'inactivité
-        debounce_id = None
-        
-        def debounced_charger_proforma(_e=None):
-            nonlocal debounce_id
-            if debounce_id:
-                fen.after_cancel(debounce_id)
-            debounce_id = fen.after(300, lambda: charger(entry_search.get()))
-        
-        entry_search.bind("<KeyRelease>", debounced_charger_proforma)
+        _charger_proforma_debounce = _debounce(fen, 300, charger)
+        entry_search.bind("<KeyRelease>", lambda _e: _charger_proforma_debounce(entry_search.get()))
 
         def valider():
             sel = tree.selection()
@@ -2779,7 +2869,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         Les données sont stockées temporairement dans self.details_proforma_a_ajouter.
         """
         self.nouveau_facture(); self.reset_proforma_state()
-        conn = self._get_conn()
+        conn = self._connect_db()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -2818,8 +2908,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", str(e), 'error'); self.reset_proforma_state()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            cur.close(); conn.close()
 
     def ajouter_details_proforma_en_masse(self):
         """
@@ -2876,7 +2965,7 @@ class PageVenteParMsin(ctk.CTkFrame):
 
     def marquer_proforma_comme_facture(self, idprof: int):
         """Met le statut du proforma à 'Facturé' après conversion en vente."""
-        conn = self._get_conn()
+        conn = self._connect_db()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -2887,8 +2976,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             conn.rollback(); print(f"Erreur statut proforma: {e}")
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            cur.close(); conn.close()
 
     def desactiver_entree_manuelle(self):
         """Désactive tous les champs de saisie manuelle (mode proforma en cours)."""
@@ -2964,10 +3052,9 @@ class PageVenteParMsin(ctk.CTkFrame):
         dlg = PasswordDialog("Autorisation requise", "Code d'autorisation :")
         if not dlg.result:
             return
-        conn = self._get_conn()
-        if not conn: return
+        cur = self._pool_cursor()
+        if cur is None: return
         try:
-            cur = conn.cursor()
             cur.execute("SELECT id FROM tb_codeautorisation WHERE code=%s", (dlg.result,))
             if cur.fetchone():
                 self.btn_creer_avoir.configure(state="normal")
@@ -2977,24 +3064,30 @@ class PageVenteParMsin(ctk.CTkFrame):
                 MessageDialog("Erreur", "Code d'autorisation incorrect.", 'error')
         except Exception as e:
             MessageDialog("Erreur", str(e), 'error')
+            _db_pool.invalidate()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     def verifier_code_autorisation(self, code_saisi: str) -> bool:
         """Vérifie un code d'autorisation en base (utilisé pour l'ouverture Avoir)."""
-        conn = self._get_conn()
-        if not conn: return False
+        cur = self._pool_cursor()
+        if cur is None: return False
         try:
-            cur = conn.cursor()
             cur.execute("SELECT 1 FROM tb_codeautorisation WHERE TRIM(code)=%s",
                         (str(code_saisi).strip(),))
             return cur.fetchone() is not None
         except Exception as e:
-            print(f"Erreur vérification code: {e}"); return False
+            print(f"Erreur vérification code: {e}")
+            _db_pool.invalidate()
+            return False
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            try:
+                cur.close()
+            except Exception:
+                pass
 
     # ──────────────────────────────────────────────────────────────────────────
     # SECTION 14 — LOGIQUE MÉTIER : ALERTES STOCK
@@ -3109,7 +3202,7 @@ class PageVenteParMsin(ctk.CTkFrame):
     def charger_vente_modification(self, idvente: int):
         """Charge une facture existante dans le formulaire pour modification."""
         self.nouveau_facture()
-        conn = self._get_conn()
+        conn = self._connect_db()
         if not conn: return
         try:
             cur = conn.cursor()
@@ -3168,8 +3261,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         except Exception as e:
             MessageDialog("Erreur", str(e), 'error'); traceback.print_exc(); self.nouveau_facture()
         finally:
-            if 'cur' in locals(): cur.close()
-            self._put_conn(conn)
+            cur.close(); conn.close()
 
 
 # ==============================================================================

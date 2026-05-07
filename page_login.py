@@ -7,8 +7,8 @@
 ║  • Fenêtre sans bordure Windows (overrideredirect)                          ║
 ║  • Bouton ✕ custom dans le coin supérieur droit                             ║
 ║  • Fond blanc pur, champs "underline" (ligne du bas uniquement)             ║
-║  • Icônes SVG canvas gauche des champs (👤 / 🔒)                           ║
-║  • Toggle œil pour montrer/masquer le mot de passe                         ║
+║  • Icônes SVG canvas gauche des champs (👤 / 🔒)                            ║
+║  • Toggle œil pour montrer/masquer le mot de passe                          ║
 ║  • Bouton "Se connecter" bleu plein, coins arrondis                         ║
 ║  • Séparateur  ─────  &  ─────  entre sections                              ║
 ║  • Toast succès bas d'écran + effet secousse sur erreur                     ║
@@ -35,10 +35,8 @@ import subprocess
 import base64
 
 from configDataBase import ConfigDataBase
-from user_settings_window import UserSettingsWindow
 from resource_utils import (get_resource_path, get_config_path,
                              get_session_path, safe_file_read)
-from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -97,8 +95,9 @@ else:
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ── Remember Me ─────────────────────────────────────────────────────────────────
-_REMEMBER_PATH = get_resource_path("remember.json")
+# ── Remember Me ───────────────────────────────────────────────────────────────
+_REMEMBER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "remember.json")
 
 
 def _encode_password(plain: str) -> str:
@@ -382,9 +381,6 @@ class LoginWindow(ctk.CTk):
         # ── Bouton Configuration DB ───────────────────────────────────────
         self._build_config_btn(card)
 
-        # ── Bouton Paramètres utilisateurs ───────────────────────────────
-        self._build_user_settings_btn(card)
-
         # Padding bas
         tk.Frame(card, height=20, bg=_WIN_BG).pack()
 
@@ -484,26 +480,6 @@ class LoginWindow(ctk.CTk):
             corner_radius=6,
         )
         self._db_btn.pack(fill="x")
-
-    def _build_user_settings_btn(self, parent):
-        """Bouton Paramètres utilisateurs (infos + mot de passe + impression)."""
-        btn_wrap = tk.Frame(parent, bg=_WIN_BG)
-        btn_wrap.pack(fill="x", padx=44, pady=(10, 0))
-
-        self._user_settings_btn = ctk.CTkButton(
-            btn_wrap,
-            text="👤  Paramètres utilisateurs",
-            command=self.open_user_settings,
-            height=36,
-            fg_color="transparent",
-            hover_color=C.BG_INPUT if hasattr(C, "BG_INPUT") else "#F0F0F0",
-            text_color=C.TEXT_SECONDARY if hasattr(C, "TEXT_SECONDARY") else C.TEXT_PRIMARY,
-            border_width=1,
-            border_color=C.BORDER,
-            font=ctk.CTkFont(family=_FONT_FAM, size=11),
-            corner_radius=6,
-        )
-        self._user_settings_btn.pack(fill="x")
 
     # ══════════════════════════════════════════════════════════════════════
     # DRAG (déplacement fenêtre sans barre titre)
@@ -725,15 +701,6 @@ class LoginWindow(ctk.CTk):
                     "menus":         [(m[0], m[1]) for m in menus],
                 }
                 self.save_user_session(user, menus)
-                try:
-                    AppLogger(session_data=session_data).log(
-                        action="Connexion",
-                        element=user[1],
-                        details=f"Connexion réussie (fonction='{user[3]}')",
-                        value="login_ok",
-                    )
-                except Exception:
-                    pass
 
                 # Remember Me
                 if self._rem_var.get():
@@ -748,15 +715,6 @@ class LoginWindow(ctk.CTk):
                     session_data))
             else:
                 self._show_error("Identifiants incorrects.")
-                try:
-                    AppLogger(session_data={"username": username}).log(
-                        action="Connexion",
-                        element=username or "Inconnu",
-                        details="Connexion échouée (identifiants incorrects ou compte inactif)",
-                        value="login_failed",
-                    )
-                except Exception:
-                    pass
                 self._shake()
 
         except psycopg2.Error as err:
@@ -836,18 +794,6 @@ class LoginWindow(ctk.CTk):
         w = ConfigDataBase()
         w.focus_force()
         w.mainloop()
-
-    def open_user_settings(self):
-        username_hint = ""
-        try:
-            username_hint = (self._field_user.get() or "").strip()
-        except Exception:
-            username_hint = ""
-        w = UserSettingsWindow(self, self.connect_db, username_hint=username_hint)
-        try:
-            w.focus_force()
-        except Exception:
-            pass
 
     def start(self):
         self.mainloop()

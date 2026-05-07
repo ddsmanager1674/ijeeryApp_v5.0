@@ -13,6 +13,7 @@ from html import escape
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled, Theme
+from pages.page_stockParFrs import PageStockParFrs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,6 +278,11 @@ class PageCommandeFrs(ctk.CTkFrame):
             header, text="Nouveau", icon="🔄",
             command=self.nouvelle_commande, width=100, height=28
         ).pack(side="right", padx=0, pady=7)
+
+        styled.button_warning(
+            header, text="Stock par frs", icon="📦",
+            command=self.ouvrir_stock_par_frs, width=130, height=28
+        ).pack(side="right", padx=8, pady=7)
 
         # ── Corps principal (pas de scrollbar) ───────────────────────────────
         body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE)
@@ -1594,6 +1600,15 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.var_transporteur.set(False)
         self.toggle_transporteur()
         self.calculer_total()
+
+    def ouvrir_stock_par_frs(self):
+        """Ouvre la fenêtre Stock par Fournisseur dans un Toplevel."""
+        win = ctk.CTkToplevel(self)
+        win.title("Stock par Fournisseur")
+        win.geometry("1100x750")
+        win.attributes("-topmost", True)
+        win.focus_set()
+        PageStockParFrs(win, iduser=self.iduser).pack(fill="both", expand=True)
 
     def nouvelle_commande(self):
         self.reinitialiser_formulaire()

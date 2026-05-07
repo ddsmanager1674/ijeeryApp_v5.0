@@ -12,7 +12,6 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -38,8 +37,6 @@ class PageDecaissementBq(ctk.CTkToplevel):
         self.current_user = username  # Stockage du nom d'utilisateur réel
         self.bank_id = bank_id  # Store the passed bank_id
         self.categories = {}  # Dictionnaire NOM -> ID
-        self.session_data = getattr(master, "session_data", None) or {"username": self.current_user}
-        self._logger = AppLogger(session_data=self.session_data)
 
         # Connexion à la base de données
         self.conn = self.connect_db()
@@ -491,15 +488,6 @@ class PageDecaissementBq(ctk.CTkToplevel):
                         pass
 
             self.conn.commit()
-            try:
-                self._logger.log(
-                    action="Décaissement bancaire",
-                    element=str(reference),
-                    details=f"Décaissement bancaire enregistré ref: {reference}, banque_id={self.bank_id}, catégorie: {categorie_nom}, montant: {mtpaye:.0f} Ar",
-                    value=f"{mtpaye:.0f} Ar",
-                )
-            except Exception:
-                pass
             messagebox.showinfo("Succès", f"Décaissement bancaire enregistré par {self.current_user} (ID: {iduser})")
             self.destroy()
             

@@ -12,8 +12,6 @@ import json
 import sys
 from resource_utils import get_config_path, safe_file_read
 
-from app_theme import Colors, Fonts, styled, Layout
-
 
 # Ensure the parent directory is in the Python path for absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -65,8 +63,7 @@ db_manager = DatabaseManager()
 
 class PageSalaireEtatSB(ctk.CTkFrame):
     def __init__(self, parent):
-        # [UI] État de Salaire (base) — thème iJeery
-        super().__init__(parent, fg_color=Colors.BG_PAGE)
+        super().__init__(parent)
 
         self.conn = db_manager.get_connection()
         if not self.conn:
@@ -75,96 +72,44 @@ class PageSalaireEtatSB(ctk.CTkFrame):
 
         self.cursor = self.conn.cursor()
 
-        self._setup_treeview_style()
-        self.grid_rowconfigure(3, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        # Configuration UI
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
 
-        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=46)
-        header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        left = styled.frame(header)
-        left.pack(side="left", padx=14)
-        ctk.CTkLabel(left, text="📊", font=Fonts.heading(16), text_color=Colors.TEXT_ON_DARK).pack(side="left", padx=(0, 8))
-        inner = styled.frame(left)
-        inner.pack(side="left")
-        ctk.CTkLabel(inner, text="État de Salaire", font=Fonts.bold(13), text_color=Colors.TEXT_ON_DARK).pack(anchor="w")
-        ctk.CTkLabel(inner, text="Salaire base, avances et net", font=Fonts.small(9), text_color=Colors.TEXT_ON_DARK_DIM).pack(anchor="w")
+        self.label_mois = ctk.CTkLabel(self, text="Choisir le mois :")
+        self.label_mois.grid(row=0, column=0, padx=10, pady=10, sticky="w")
 
-        toolbar = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        toolbar.grid(row=1, column=0, sticky="ew", padx=10, pady=(10, 6))
-        for c in range(0, 5):
-            toolbar.grid_columnconfigure(c, weight=1)
-
-        self.label_mois = ctk.CTkLabel(toolbar, text="Mois :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY)
-        self.label_mois.grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
-
-        mois_vals = [
+        self.mois_combobox = ctk.CTkComboBox(self, values=[
             "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
-            "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
-        ]
-        self.mois_combobox = styled.combobox(toolbar, values=mois_vals, height=32)
-        self.mois_combobox.grid(row=0, column=1, padx=(0, 8), pady=10, sticky="ew")
-        # [UI] Mois courant par défaut au chargement
-        try:
-            self.mois_combobox.set(mois_vals[datetime.now().month - 1])
-        except Exception:
-            pass
+            "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"])
+        self.mois_combobox.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
 
-        styled.button_success(toolbar, text="Afficher", icon="🔍", width=120, height=32, command=self.afficher_donnees).grid(row=0, column=2, padx=4, pady=10, sticky="ew")
-        styled.button_premium(toolbar, text="Excel", icon="📊", width=120, height=32, command=self.exporter_excel).grid(row=0, column=3, padx=4, pady=10, sticky="ew")
-        styled.button_premium(toolbar, text="PDF", icon="📄", width=120, height=32, command=self.exporter_pdf).grid(row=0, column=4, padx=(4, 12), pady=10, sticky="ew")
+        self.btn_afficher = ctk.CTkButton(self, text="Afficher", fg_color="#2ecc71", command=self.afficher_donnees)
+        self.btn_afficher.grid(row=0, column=2, padx=10, sticky="ew")
+
+        self.btn_excel = ctk.CTkButton(self, text="Exporter Excel", command=self.exporter_excel)
+        self.btn_excel.grid(row=0, column=3, padx=10, sticky="ew")
+
+        self.btn_pdf = ctk.CTkButton(self, text="Exporter PDF", command=self.exporter_pdf)
+        self.btn_pdf.grid(row=0, column=4, padx=10, sticky="ew")
 
         self.headers = ["Nom", "Prénom", "Salaire Base", "Avance 15e", "Déduction Avance Spéciale", "Net à Payer"]
         self.current_display_data = []
 
-        table_card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
-        table_card.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 6))
-        table_card.grid_rowconfigure(0, weight=1)
-        table_card.grid_columnconfigure(0, weight=1)
-
-        self.treeview = ttk.Treeview(table_card, columns=self.headers, show="headings", style="P.Treeview", selectmode="browse")
+        # Treeview
+        self.treeview = ttk.Treeview(self, columns=self.headers, show="headings")
         self._configure_table_alternating_colors(self.treeview)
-        self.treeview.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
-        vsb = ttk.Scrollbar(table_card, orient="vertical", command=self.treeview.yview)
-        self.treeview.configure(yscrollcommand=vsb.set)
-        vsb.grid(row=0, column=1, sticky="ns", pady=6)
+        self.treeview.grid(row=1, column=0, columnspan=5, padx=10, pady=10, sticky="nsew")
         for col in self.headers:
             self.treeview.heading(col, text=col)
             self.treeview.column(col, anchor="center", width=120)
 
-        self.label_count = ctk.CTkLabel(self, text="Nombre affichés: 0", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY)
-        self.label_count.grid(row=4, column=0, sticky="w", padx=14, pady=(0, 10))
-
-    def _setup_treeview_style(self):
-        # [UI] Style tableau aligné sur le module Personnel
-        s = ttk.Style()
-        try:
-            s.theme_use("clam")
-        except Exception:
-            pass
-        s.configure(
-            "P.Treeview",
-            background=Colors.BG_CARD,
-            foreground=Colors.TEXT_PRIMARY,
-            fieldbackground=Colors.BG_CARD,
-            rowheight=26,
-            borderwidth=0,
-            font=("Segoe UI", 10),
-        )
-        s.configure(
-            "P.Treeview.Heading",
-            background=Colors.MIDNIGHT,
-            foreground=Colors.TEXT_ON_DARK,
-            font=("Segoe UI", 10, "bold"),
-            relief="flat",
-            padding=(6, 5),
-        )
-        s.map("P.Treeview", background=[("selected", Colors.PRIMARY_LIGHT)])
-        s.map("P.Treeview.Heading", background=[("active", Colors.MIDNIGHT_LIGHT)])
+        self.label_count = ctk.CTkLabel(self, text="Nombre affichés: 0")
+        self.label_count.grid(row=2, column=0, sticky="w", padx=10)
 
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background=Colors.BG_CARD)
-        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
+        tree.tag_configure("row_even", background="#FFFFFF")
+        tree.tag_configure("row_odd", background="#D9EEED")
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):

@@ -371,8 +371,7 @@ class PageArticleMouvement(ctk.CTkFrame):
                      text_color=C.TEXT_MUTED).pack(side="left", padx=(0, 3))
         self._combo_type = ttk.Combobox(
             inner,
-            values=["Tous", "Livraison Fournisseur", "Entrée en Stock",
-                    "Sortie", "Vente", "Transfert",
+            values=["Tous", "Entree", "Sortie", "Vente", "Transfert",
                     "Inventaire", "Avoir", "Consommation interne",
                     "Changement"],
             state="readonly", width=20,
@@ -438,13 +437,8 @@ class PageArticleMouvement(ctk.CTkFrame):
 
         stock_visible = "Stock Article" in {m[0] for m in self._session_data.get("menus", [])}
 
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        entree_visible = not os.path.exists(
-            os.path.join(project_root, "config-entree-mouvements-article")
-        )
-
         widths = {"Date": 140, "Reference": 110, "Designation": 220,
-          "Type": 130, "Entree": (90 if entree_visible else 0), "Sortie": 90,
+          "Type": 130, "Entree": 90, "Sortie": 90,
           "Stock": 110 if stock_visible else 0,
           "Magasin": 110, "Description": 240, "Utilisateur": 100,
           "idArticle": 0, "idUnite": 0, "idMagasin": 0}
@@ -584,22 +578,6 @@ class PageArticleMouvement(ctk.CTkFrame):
              AND lf.idmag   = d.idmag
              AND lf.deleted = 0
              AND date_trunc('second', lf.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    ed.qtentree * uc.coeff_vers_base AS qt
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_entreedetail ed
-              ON ed.idunite = uc.idunite
-             AND ed.idmag   = d.idmag
-             AND ed.deleted = 0
-            JOIN tb_entree e
-              ON e.id       = ed.identree
-             AND e.deleted  = 0
-             AND date_trunc('second', e.dateregistre)
               <= date_trunc('second', d.datetime_cible)
 
             UNION ALL
@@ -789,9 +767,9 @@ class PageArticleMouvement(ctk.CTkFrame):
     def build_mouvements_query(self, date_debut, date_fin, type_doc, idmag):
         queries, params = [], []
 
-        if type_doc in ["Tous", "Livraison Fournisseur"]:
+        if type_doc in ["Tous", "Entree"]:
             q = """
-                SELECT lf.dateregistre, lf.reflivfrs, a.designation, 'Livraison Fournisseur',
+                SELECT lf.dateregistre, lf.reflivfrs, a.designation, 'Entree',
                     COALESCE(lf.qtlivrefrs,0), 0,
                     COALESCE(m.designationmag,'N/A'), COALESCE(usr.username,'N/A'),
                     u.idunite, u.codearticle, a.idarticle,
@@ -817,30 +795,6 @@ class PageArticleMouvement(ctk.CTkFrame):
                 p.append(int(self.selected_idarticle))
             if idmag:
                 q += " AND lf.idmag = %s"; p.append(idmag)
-            queries.append(q); params.append(p)
-
-        if type_doc in ["Tous", "Entrée en Stock"]:
-            q = """
-                SELECT e.dateregistre, e.refentree, a.designation, 'Entrée en Stock',
-                    COALESCE(ed.qtentree,0), 0,
-                    COALESCE(m.designationmag,'N/A'), COALESCE(usr.username,'N/A'),
-                    u.idunite, u.codearticle, a.idarticle,
-                    u.idunite, COALESCE(ed.idmag,-1), COALESCE(ed.motif,'')
-                FROM tb_entree e
-                INNER JOIN tb_entreedetail ed ON e.id = ed.identree
-                INNER JOIN tb_unite u ON ed.idunite = u.idunite
-                INNER JOIN tb_article a ON u.idarticle = a.idarticle
-                LEFT JOIN tb_magasin m ON ed.idmag = m.idmag
-                LEFT JOIN tb_users usr ON e.iduser = usr.iduser
-                WHERE DATE(e.dateregistre) BETWEEN %s AND %s
-                  AND e.deleted = 0 AND ed.deleted = 0
-            """
-            p = [date_debut, date_fin]
-            if self.selected_idarticle:
-                q += " AND a.idarticle = %s"
-                p.append(int(self.selected_idarticle))
-            if idmag:
-                q += " AND ed.idmag = %s"; p.append(idmag)
             queries.append(q); params.append(p)
 
         if type_doc in ["Tous", "Sortie"]:

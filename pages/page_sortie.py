@@ -30,12 +30,8 @@ import os
 import sys
 import subprocess
 
-from settings_utils import open_file_if_enabled
-
 from resource_utils import get_config_path, get_session_path, safe_file_read
 from app_theme import Colors, Fonts
-from log_utils import AppLogger
-from stock_snapshot import StockSnapshot, format_nombre_auto
 
 # ReportLab
 from reportlab.lib.pagesizes import A5, landscape
@@ -68,8 +64,6 @@ class PageSortie(ctk.CTkFrame):
         super().__init__(master, fg_color=Colors.BG_PAGE, **kwargs)
 
         self.id_user_connecte = id_user_connecte
-        self.session_data = getattr(master, "session_data", None) or {"user_id": self.id_user_connecte}
-        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.id_user_connecte)
         self.conn: Optional[psycopg2.extensions.connection] = None
         self.article_selectionne      = None
         self.detail_sortie: list      = []
@@ -259,12 +253,14 @@ class PageSortie(ctk.CTkFrame):
 
     def _build_article_band(self):
         """
-        Card blanche (Row 3) : Article | 🔍 | Qté | Unité | PU (CI only) | ➕ | ✖ Annuler.
+        Card blanche (Row 3) : Article | 🔍 | Qté | Unité | Motif ligne | PU (CI only) | ➕ | ✖ Annuler.
         """
         card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
         card.grid(row=3, column=0, sticky="ew", padx=0, pady=(0, 2))
-        for col in range(7):
+        for col in range(8):
             card.grid_columnconfigure(col, weight=1)
+        # Colonne Motif ligne prend plus de place (weight=2)
+        card.grid_columnconfigure(4, weight=2)
 
         lbl_kw   = dict(font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY, anchor="w")
         entry_kw = dict(
@@ -304,25 +300,34 @@ class PageSortie(ctk.CTkFrame):
         self.entry_unite = ctk.CTkEntry(card, **entry_kw, width=100, state="readonly")
         self.entry_unite.grid(row=1, column=3, padx=4, pady=(0, 8), sticky="ew")
 
+        # — Motif ligne (spécifique à chaque ligne) —
+        ctk.CTkLabel(card, text="Motif ligne", **lbl_kw).grid(
+            row=0, column=4, padx=4, pady=(8, 0), sticky="w")
+        self.entry_motif_ligne = ctk.CTkEntry(
+            card, **entry_kw,
+            placeholder_text="Motif pour cette ligne…",
+        )
+        self.entry_motif_ligne.grid(row=1, column=4, padx=4, pady=(0, 8), sticky="ew")
+
         # — Prix Unitaire (CI seulement, masqué par défaut) —
         self.label_prix_unit = ctk.CTkLabel(card, text="Prix U.", **lbl_kw)
-        self.label_prix_unit.grid(row=0, column=4, padx=4, pady=(8, 0), sticky="w")
+        self.label_prix_unit.grid(row=0, column=5, padx=4, pady=(8, 0), sticky="w")
         self.entry_prix_unit = ctk.CTkEntry(card, **entry_kw, width=100, state="readonly")
-        self.entry_prix_unit.grid(row=1, column=4, padx=4, pady=(0, 8), sticky="ew")
+        self.entry_prix_unit.grid(row=1, column=5, padx=4, pady=(0, 8), sticky="ew")
         # Masqué par défaut (BS)
         self.label_prix_unit.grid_remove()
         self.entry_prix_unit.grid_remove()
 
         # — Bouton Ajouter (vert) —
         ctk.CTkLabel(card, text=" ", **lbl_kw).grid(
-            row=0, column=5, padx=4, pady=(8, 0))
+            row=0, column=6, padx=4, pady=(8, 0))
         self.btn_ajouter = ctk.CTkButton(
             card, text="+ Ajouter", height=32,
             font=Fonts.bold(12),
             fg_color=Colors.SUCCESS_DARK, hover_color=Colors.INFO_DARK,
             corner_radius=6, command=self.valider_detail,
         )
-        self.btn_ajouter.grid(row=1, column=5, padx=4, pady=(0, 8), sticky="ew")
+        self.btn_ajouter.grid(row=1, column=6, padx=4, pady=(0, 8), sticky="ew")
 
         # — Bouton Annuler Modif (rouge, masqué par défaut) —
         self.btn_annuler_mod = ctk.CTkButton(
@@ -331,7 +336,7 @@ class PageSortie(ctk.CTkFrame):
             fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK,
             corner_radius=6, command=self.reset_detail_form, state="disabled",
         )
-        self.btn_annuler_mod.grid(row=1, column=6, padx=(4, 10), pady=(0, 8), sticky="ew")
+        self.btn_annuler_mod.grid(row=1, column=7, padx=(4, 10), pady=(0, 8), sticky="ew")
 
     # ── Row 4 — Tableau Treeview ──────────────────────────────────────────────
 
@@ -883,33 +888,82 @@ class PageSortie(ctk.CTkFrame):
         tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        QUERY_ARTICLES = """
-            SELECT
-                u.idarticle,
-                u.idunite,
-                u.codearticle,
-                a.designation,
-                u.designationunite,
-                COALESCE(p.prix, 0) AS prix_unitaire
-            FROM tb_unite u
-            INNER JOIN tb_article a ON a.idarticle = u.idarticle
-            LEFT JOIN (
-                SELECT idarticle, idunite, prix
-                FROM (
-                    SELECT idarticle, idunite, prix,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY idarticle, idunite
-                               ORDER BY id DESC
-                           ) AS rn
-                    FROM tb_prix
-                    WHERE deleted = 0
-                ) x
-                WHERE x.rn = 1
-            ) p ON p.idarticle = u.idarticle AND p.idunite = u.idunite
-            WHERE a.deleted = 0
-              AND COALESCE(u.deleted, 0) = 0
-              AND (u.codearticle ILIKE %s OR a.designation ILIKE %s)
-            ORDER BY a.designation ASC, u.codearticle ASC, u.idunite ASC
+        # ── Requête consolidée ────────────────────────────────────────────────
+        QUERY_STOCK = """
+        WITH unite_hierarchie AS (
+            SELECT idarticle, idunite, niveau, qtunite, designationunite
+            FROM tb_unite WHERE deleted=0
+        ),
+        unite_coeff AS (
+            SELECT idarticle, idunite, niveau, qtunite, designationunite,
+                exp(sum(ln(NULLIF(CASE WHEN qtunite>0 THEN qtunite ELSE 1 END,0)))
+                    OVER (PARTITION BY idarticle ORDER BY niveau
+                          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+                ) AS coeff_hierarchique
+            FROM unite_hierarchie
+        ),
+        base_unite_par_article AS (
+            SELECT DISTINCT ON (idarticle) idarticle, idunite
+            FROM tb_unite WHERE deleted=0
+            ORDER BY idarticle, qtunite ASC, idunite ASC
+        ),
+        rec  AS (SELECT lf.idarticle,lf.idunite,lf.idmag,SUM(lf.qtlivrefrs) AS q FROM tb_livraisonfrs lf WHERE lf.deleted=0 GROUP BY lf.idarticle,lf.idunite,lf.idmag),
+        ven  AS (SELECT vd.idarticle,vd.idunite,v.idmag,SUM(vd.qtvente)     AS q FROM tb_ventedetail vd INNER JOIN tb_vente v ON vd.idvente=v.id AND v.deleted=0 AND v.statut='VALIDEE' WHERE vd.deleted=0 GROUP BY vd.idarticle,vd.idunite,v.idmag),
+        tin  AS (SELECT t.idarticle,t.idunite,t.idmagentree AS idmag,SUM(t.qttransfert) AS q FROM tb_transfertdetail t WHERE t.deleted=0 GROUP BY t.idarticle,t.idunite,t.idmagentree),
+        tout AS (SELECT t.idarticle,t.idunite,t.idmagsortie AS idmag,SUM(t.qttransfert) AS q FROM tb_transfertdetail t WHERE t.deleted=0 GROUP BY t.idarticle,t.idunite,t.idmagsortie),
+        sor  AS (SELECT sd.idarticle,sd.idunite,sd.idmag,SUM(sd.qtsortie) AS q FROM tb_sortiedetail sd GROUP BY sd.idarticle,sd.idunite,sd.idmag),
+        inv  AS (SELECT bu.idarticle,bu.idunite,i.idmag,SUM(i.qtinventaire) AS q FROM tb_inventaire i INNER JOIN tb_unite u ON i.codearticle=u.codearticle INNER JOIN base_unite_par_article bu ON bu.idarticle=u.idarticle AND bu.idunite=u.idunite GROUP BY bu.idarticle,bu.idunite,i.idmag),
+        avo  AS (SELECT ad.idarticle,ad.idunite,ad.idmag,SUM(ad.qtavoir) AS q FROM tb_avoir a INNER JOIN tb_avoirdetail ad ON a.id=ad.idavoir WHERE a.deleted=0 AND ad.deleted=0 GROUP BY ad.idarticle,ad.idunite,ad.idmag),
+        conso AS (SELECT cd.idarticle,cd.idunite,cd.idmag,SUM(cd.qtconsomme) AS q FROM tb_consommationinterne_details cd GROUP BY cd.idarticle,cd.idunite,cd.idmag),
+        ech_in  AS (SELECT dce.idarticle,dce.idunite,dce.idmagasin AS idmag,SUM(dce.quantite_entree) AS q FROM tb_detailchange_entree dce GROUP BY dce.idarticle,dce.idunite,dce.idmagasin),
+        ech_out AS (SELECT dcs.idarticle,dcs.idunite,dcs.idmagasin AS idmag,SUM(dcs.quantite_sortie) AS q FROM tb_detailchange_sortie dcs GROUP BY dcs.idarticle,dcs.idunite,dcs.idmagasin),
+        mv AS (
+            SELECT idarticle,idunite,idmag,q,'rec'   AS t FROM rec
+            UNION ALL SELECT idarticle,idunite,idmag,q,'ven'   FROM ven
+            UNION ALL SELECT idarticle,idunite,idmag,q,'tin'   FROM tin
+            UNION ALL SELECT idarticle,idunite,idmag,q,'tout'  FROM tout
+            UNION ALL SELECT idarticle,idunite,idmag,q,'sor'   FROM sor
+            UNION ALL SELECT idarticle,idunite,idmag,q,'inv'   FROM inv
+            UNION ALL SELECT idarticle,idunite,idmag,q,'avo'   FROM avo
+            UNION ALL SELECT idarticle,idunite,idmag,q,'conso' FROM conso
+            UNION ALL SELECT idarticle,idunite,idmag,q,'ei'    FROM ech_in
+            UNION ALL SELECT idarticle,idunite,idmag,q,'eo'    FROM ech_out
+        ),
+        solde AS (
+            SELECT mv.idarticle, mv.idmag,
+                SUM(CASE mv.t
+                    WHEN 'rec'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'tin'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'inv'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'avo'   THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'ei'    THEN  mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'ven'   THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'sor'   THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'tout'  THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'conso' THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    WHEN 'eo'    THEN -mv.q * COALESCE(uc.coeff_hierarchique,1)
+                    ELSE 0
+                END) AS solde_base
+            FROM mv LEFT JOIN unite_coeff uc ON uc.idarticle=mv.idarticle AND uc.idunite=mv.idunite
+            GROUP BY mv.idarticle, mv.idmag
+        ),
+        dernier_prix AS (
+            SELECT idarticle, idunite, prix,
+                   ROW_NUMBER() OVER (PARTITION BY idarticle, idunite ORDER BY id DESC) AS rn
+            FROM tb_prix
+        )
+        SELECT u.idarticle, u.idunite, u.codearticle, a.designation,
+               uc.designationunite,
+               GREATEST(COALESCE(s.solde_base,0) / NULLIF(COALESCE(uc.coeff_hierarchique,1),0), 0) AS stock_total,
+               COALESCE(p.prix,0) AS prix_unitaire
+        FROM tb_article a
+        INNER JOIN tb_unite u          ON a.idarticle=u.idarticle
+        LEFT JOIN  unite_coeff uc      ON uc.idarticle=u.idarticle AND uc.idunite=u.idunite
+        LEFT JOIN  solde s             ON s.idarticle=u.idarticle AND s.idmag=%s
+        LEFT JOIN  dernier_prix p      ON a.idarticle=p.idarticle AND u.idunite=p.idunite AND p.rn=1
+        WHERE a.deleted=0
+          AND (u.codearticle ILIKE %s OR a.designation ILIKE %s)
+        ORDER BY a.designation ASC, u.codearticle ASC, u.idunite ASC
         """
 
         def charger_articles(filtre=""):
@@ -929,21 +983,14 @@ class PageSortie(ctk.CTkFrame):
                 if idmag_actif is None:
                     return
 
-                snapshot = StockSnapshot.build(int(idmag_actif))
-                cur.execute(QUERY_ARTICLES, (filtre_like, filtre_like))
+                cur.execute(QUERY_STOCK, (idmag_actif, filtre_like, filtre_like))
                 for idx, row in enumerate(cur.fetchall()):
-                    stock_total = snapshot.stock_unite(row[0], row[1])
-                    tree.insert(
-                        '',
-                        'end',
-                        values=(
-                            row[0], row[1],
-                            row[2] or "", row[3] or "", row[4] or "",
-                            format_nombre_auto(stock_total),
-                            format_nombre_auto(row[5]),
-                        ),
-                        tags=("even" if idx % 2 == 0 else "odd",),
-                    )
+                    tree.insert('', 'end', values=(
+                        row[0], row[1],
+                        row[2] or "", row[3] or "", row[4] or "",
+                        self.formater_nombre(row[5]),
+                        self.formater_nombre(row[6]),
+                    ), tags=("even" if idx % 2 == 0 else "odd",))
 
             except Exception as e:
                 messagebox.showerror("Erreur", f"Chargement articles : {e}")
@@ -1062,7 +1109,7 @@ class PageSortie(ctk.CTkFrame):
             self.article_selectionne.get('prix_unitaire', 0)
             if self.type_sortie == "CI" else 0
         )
-        motif_ligne = self.entry_motif.get().strip() or "Aucune description"
+        motif_ligne = self.entry_motif_ligne.get().strip() or self.entry_motif.get().strip() or "Aucune description"
 
         nouveau_detail = {
             'idmag':           idmag,
@@ -1082,11 +1129,13 @@ class PageSortie(ctk.CTkFrame):
             self.detail_sortie[self.index_ligne_selectionnee] = nouveau_detail
             messagebox.showinfo("Succès", "Ligne modifiée.")
         else:
-            # Vérifier doublon → proposition de fusion
+            # Vérifier doublon : même article + même unité + même magasin + même motif → fusion proposée
+            # Si le motif est différent → nouvelle ligne distincte (pas de fusion)
             for i, detail in enumerate(self.detail_sortie):
                 if (detail['idarticle'] == nouveau_detail['idarticle']
                         and detail['idunite'] == nouveau_detail['idunite']
-                        and detail['idmag'] == nouveau_detail['idmag']):
+                        and detail['idmag'] == nouveau_detail['idmag']
+                        and detail.get('motif', '') == motif_ligne):
 
                     nouvelle_qte = detail['qtsortie'] + nouveau_detail['qtsortie']
                     if nouvelle_qte > stock_disponible:
@@ -1095,13 +1144,10 @@ class PageSortie(ctk.CTkFrame):
 
                     if messagebox.askyesno(
                         "Doublon détecté",
-                        f"Article « {detail['nom_article']} » déjà présent. Fusionner ?",
+                        f"Article « {detail['nom_article']} » avec le même motif déjà présent. Fusionner les quantités ?",
                     ):
                         self.detail_sortie[i]['qtsortie']      = nouvelle_qte
                         self.detail_sortie[i]['montant_total']  = nouvelle_qte * detail['prix_unitaire']
-                        m_exist = (self.detail_sortie[i].get('motif') or "").strip()
-                        if motif_ligne and motif_ligne != "Aucune description" and motif_ligne not in m_exist:
-                            self.detail_sortie[i]['motif'] = f"{m_exist}, {motif_ligne}".strip(", ")
                         messagebox.showinfo("Succès", "Quantité fusionnée.")
                         self.charger_details_treeview()
                         self.reset_detail_form()
@@ -1178,6 +1224,8 @@ class PageSortie(ctk.CTkFrame):
 
         self.entry_qtsortie.delete(0, "end")
         self.entry_qtsortie.insert(0, self.formater_nombre(detail['qtsortie']))
+        self.entry_motif_ligne.delete(0, "end")
+        self.entry_motif_ligne.insert(0, detail.get('motif', ''))
         self.entry_motif.delete(0, "end")
         self.entry_motif.insert(0, detail.get('motif', ''))
 
@@ -1219,6 +1267,7 @@ class PageSortie(ctk.CTkFrame):
             entry.configure(state=state)
 
         self.entry_qtsortie.delete(0, "end")
+        self.entry_motif_ligne.delete(0, "end")
         #self.entry_motif.delete(0, "end")
 
         self.btn_ajouter.configure(
@@ -1550,15 +1599,6 @@ class PageSortie(ctk.CTkFrame):
             )
 
         conn.commit()
-        try:
-            self._logger.log(
-                action="Création bon de sortie",
-                element=str(ref_sortie),
-                details=f"Bon de sortie enregistré (idsortie={idsortie}, magasin='{designationmag}', lignes={len(self.detail_sortie)})",
-                value=f"idsortie={idsortie}",
-            )
-        except Exception:
-            pass
         messagebox.showinfo("Succès", f"Sortie N°{ref_sortie} enregistrée.")
         self.derniere_idsortie_enregistree = idsortie
         self.generer_pdf_sortie_paysage(ref_sortie, idsortie)
@@ -1600,15 +1640,6 @@ class PageSortie(ctk.CTkFrame):
             )
 
         conn.commit()
-        try:
-            self._logger.log(
-                action="Création consommation interne",
-                element=str(ref_sortie),
-                details=f"Consommation interne enregistrée (id={idconsommation}, magasin='{designationmag}', lignes={len(self.detail_sortie)}, total={montant_total})",
-                value=f"{montant_total} Ar",
-            )
-        except Exception:
-            pass
         messagebox.showinfo("Succès", f"Consommation N°{ref_sortie} enregistrée.")
         self.generer_pdf_consommation_interne_paysage(ref_sortie, idconsommation)
         self.reset_form()
@@ -1681,7 +1712,7 @@ class PageSortie(ctk.CTkFrame):
         """Ouvre un fichier avec l'application par défaut du système."""
         try:
             if os.name == 'nt':
-                open_file_if_enabled(filename, operation="open", setting_key="Sortie_OpenA5", setting_default=1)
+                os.startfile(filename)
             elif sys.platform == 'darwin':
                 subprocess.call(['open', filename])
             else:
@@ -1746,7 +1777,7 @@ class PageSortie(ctk.CTkFrame):
                 except Exception: pass
 
                 if result and sys.platform == 'win32':
-                    try: open_file_if_enabled(filename, operation="open", setting_key="Sortie_OpenA5", setting_default=1)
+                    try: os.startfile(filename)
                     except Exception: pass
 
                 return result
@@ -1822,7 +1853,7 @@ class PageSortie(ctk.CTkFrame):
                 except Exception: pass
 
                 if result and sys.platform == 'win32':
-                    try: open_file_if_enabled(filename, operation="open", setting_key="Consommation_OpenA5", setting_default=1)
+                    try: os.startfile(filename)
                     except Exception: pass
 
                 return result
@@ -2051,7 +2082,7 @@ class PageSortie(ctk.CTkFrame):
                     item[5] or "",
                 ])
 
-            table = Table(table_data, colWidths=[45, 110, 40, 40, 70, 75])
+            table = Table(table_data, colWidths=[20, 120, 25, 15, 15, 150])
             table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                 ('TEXTCOLOR',  (0, 0), (-1, 0), colors.whitesmoke),
@@ -2076,7 +2107,7 @@ class PageSortie(ctk.CTkFrame):
 
             try:
                 if sys.platform == 'win32':
-                    open_file_if_enabled(filename, operation="print", setting_key="Sortie_OpenA5", setting_default=1)
+                    os.startfile(filename, "print")
                 else:
                     subprocess.Popen(['lp', filename])
             except Exception:
