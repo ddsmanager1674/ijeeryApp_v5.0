@@ -20,6 +20,7 @@ import sys
 import os
 
 from resource_utils import get_config_path, get_session_path
+from stock_manager import StockManager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -255,6 +256,7 @@ class PageArticleMouvement(ctk.CTkFrame):
         self._full_rows:    list = []
         self._after_id            = None
         self._db_conn             = None  # connexion maintenue pendant les batchs
+        self._facteur_vers_base_par_unite: dict[int, float] = {}
 
         self._apply_tree_style()
         self._build_ui()
@@ -513,277 +515,140 @@ class PageArticleMouvement(ctk.CTkFrame):
             conn.close()
 
     # ══════════════════════════════════════════════════════════════════════════
-    # CALCUL STOCK BATCH
+    # CALCUL STOCK (StockManager) + gestion mêmes datetime
     # ══════════════════════════════════════════════════════════════════════════
-    def _calcul_stock_batch_sql(self, conn, batch):
+    def _fetch_facteurs_conversion(self, conn) -> dict[int, float]:
+        """Retourne {idunite: facteur_vers_base} via la CTE StockManager."""
+        sql = f"""
+        WITH RECURSIVE {StockManager._cte_facteur_conversion()}
+        SELECT idunite, facteur_vers_base
+        FROM facteur_conversion
         """
-        Calcule en UNE requete SQL le stock a l'instant T pour un batch
-        de lignes.
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            return {int(idu): float(f or 0.0) for (idu, f) in cur.fetchall()}
 
-        batch : liste de dicts {idarticle, idunite, idmag, datetime_cible}
-        Retourne : dict (idarticle, idunite, idmag, datetime_cible str) -> float
-
-        Corrections vs version precedente :
-        - Transferts  : qttransfertentree / qttransfertsortie
-        - Ventes      : filtre magasin sur vd.idmag (detail), pas v.idmag
-        - Inventaires : cumulatifs, via codearticle + niveau 0
-        - Coefficients: exp(sum(ln(qtunite))) identique a page_stock.py
-        - Magasins -1 : exclus
+    def _stock_base_avant_seconde_batch(self, conn, demandes):
         """
-        valid = [r for r in batch
-                 if str(r["idmag"]) not in ("-1", "", "None", "none")]
+        Stock en unité de base STRICTEMENT AVANT la seconde de datetime_cible.
+
+        demandes: liste de dicts {idarticle, idmag, datetime_cible}
+        Retour: dict (idarticle, idmag, datetime_str) -> float stock_base_avant
+        """
+        valid = [
+            r for r in demandes
+            if str(r["idmag"]) not in ("-1", "", "None", "none")
+            and r.get("datetime_cible")
+        ]
         if not valid:
             return {}
 
         value_rows, params = [], []
         for r in valid:
-            value_rows.append("(%s::int, %s::int, %s::int, %s::timestamp)")
-            params.extend([int(r["idarticle"]), int(r["idunite"]),
-                           int(r["idmag"]),     r["datetime_cible"]])
-
+            value_rows.append("(%s::int, %s::int, %s::timestamp)")
+            params.extend([int(r["idarticle"]), int(r["idmag"]), r["datetime_cible"]])
         values_sql = ",\n               ".join(value_rows)
 
         sql = f"""
-        WITH
-
-        unite_coeff AS (
-            SELECT
-                u.idarticle,
-                u.idunite,
-                u.niveau,
-                u.codearticle,
-                exp(
-                    sum(
-                        ln(NULLIF(
-                            CASE WHEN COALESCE(u.qtunite,1) > 0
-                                 THEN COALESCE(u.qtunite,1)
-                                 ELSE 1
-                            END, 0))
-                    ) OVER (
-                        PARTITION BY u.idarticle
-                        ORDER BY u.niveau
-                        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                    )
-                ) AS coeff_vers_base
-            FROM tb_unite u
-            WHERE u.deleted = 0
-        ),
-
-        demandes(idarticle, idunite_cible, idmag, datetime_cible) AS (
-            VALUES {values_sql}
-        ),
-
-        mouvements AS (
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    lf.qtlivrefrs * uc.coeff_vers_base AS qt
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_livraisonfrs lf
-              ON lf.idunite = uc.idunite
-             AND lf.idmag   = d.idmag
-             AND lf.deleted = 0
-             AND date_trunc('second', lf.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    ed.qtentree * uc.coeff_vers_base AS qt
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_entreedetail ed
-              ON ed.idunite = uc.idunite
-             AND ed.idmag   = d.idmag
-             AND ed.deleted = 0
-            JOIN tb_entree e
-              ON e.id       = ed.identree
-             AND e.deleted  = 0
-             AND date_trunc('second', e.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    ad.qtavoir * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_avoirdetail ad
-              ON ad.idunite = uc.idunite
-             AND ad.idmag   = d.idmag
-             AND ad.deleted = 0
-            JOIN tb_avoir av
-              ON av.id      = ad.idavoir
-             AND av.deleted = 0
-             AND date_trunc('second', av.dateavoir)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    inv.qtinventaire * uc_base.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc_base
-              ON uc_base.idarticle = d.idarticle
-             AND uc_base.niveau    = 0
-            JOIN tb_inventaire inv
-              ON inv.codearticle = uc_base.codearticle
-             AND inv.idmag       = d.idmag
-             AND date_trunc('second', inv.date)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    td.qttransfertentree * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_transfertdetail td
-              ON td.idunite     = uc.idunite
-             AND td.idmagentree = d.idmag
-             AND td.deleted     = 0
-            JOIN tb_transfert t
-              ON t.idtransfert = td.idtransfert
-             AND t.deleted     = 0
-             AND date_trunc('second', t.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    dce.quantite_entree * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_detailchange_entree dce
-              ON dce.idarticle = d.idarticle
-             AND dce.idunite   = uc.idunite
-             AND dce.idmagasin = d.idmag
-            JOIN tb_changement chg
-              ON chg.idchg = dce.idchg
-             AND date_trunc('second', chg.datechg)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    -vd.qtvente * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_ventedetail vd
-              ON vd.idarticle = d.idarticle
-             AND vd.idunite   = uc.idunite
-             AND vd.idmag     = d.idmag
-             AND vd.deleted   = 0
-            JOIN tb_vente v
-              ON v.id      = vd.idvente
-             AND v.deleted = 0
-             AND v.statut  = 'VALIDEE'
-             AND date_trunc('second', v.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    -sd.qtsortie * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_sortiedetail sd
-              ON sd.idarticle = d.idarticle
-             AND sd.idunite   = uc.idunite
-             AND sd.idmag     = d.idmag
-             AND sd.deleted   = 0
-            JOIN tb_sortie s
-              ON s.id      = sd.idsortie
-             AND s.deleted = 0
-             AND date_trunc('second', s.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    -cid.qtconsomme * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_consommationinterne_details cid
-              ON cid.idarticle = d.idarticle
-             AND cid.idunite   = uc.idunite
-             AND cid.idmag     = d.idmag
-            JOIN tb_consommationinterne ci
-              ON ci.id = cid.idconsommation
-             AND date_trunc('second', ci.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    -td.qttransfertsortie * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_transfertdetail td
-              ON td.idunite    = uc.idunite
-             AND td.idmagsortie = d.idmag
-             AND td.deleted    = 0
-            JOIN tb_transfert t
-              ON t.idtransfert = td.idtransfert
-             AND t.deleted     = 0
-             AND date_trunc('second', t.dateregistre)
-              <= date_trunc('second', d.datetime_cible)
-
-            UNION ALL
-
-            SELECT d.idarticle, d.idunite_cible, d.idmag, d.datetime_cible,
-                    -dcs.quantite_sortie * uc.coeff_vers_base
-            FROM demandes d
-            JOIN unite_coeff uc ON uc.idarticle = d.idarticle
-            JOIN tb_detailchange_sortie dcs
-              ON dcs.idarticle = d.idarticle
-             AND dcs.idunite   = uc.idunite
-             AND dcs.idmagasin = d.idmag
-            JOIN tb_changement chg
-              ON chg.idchg = dcs.idchg
-             AND date_trunc('second', chg.datechg)
-              <= date_trunc('second', d.datetime_cible)
-        ),
-
-        stock_base AS (
-            SELECT idarticle, idunite_cible, idmag, datetime_cible,
-                   COALESCE(SUM(qt), 0.0) AS total_base
-            FROM mouvements
-            GROUP BY idarticle, idunite_cible, idmag, datetime_cible
-        )
-
+        WITH RECURSIVE
+            {StockManager._cte_facteur_conversion()},
+            {StockManager._cte_tous_mouvements()},
+            demandes(idarticle, idmag, datetime_cible) AS (
+                VALUES {values_sql}
+            )
         SELECT
-            sb.idarticle,
-            sb.idunite_cible,
-            sb.idmag,
-            to_char(sb.datetime_cible, 'YYYY-MM-DD HH24:MI:SS') AS datetime_str,
-            CASE
-                WHEN COALESCE(uc.coeff_vers_base, 1) > 0
-                THEN FLOOR(sb.total_base / uc.coeff_vers_base)
-                ELSE 0
-            END AS stock_dans_unite
-        FROM stock_base sb
-        JOIN unite_coeff uc
-          ON uc.idarticle = sb.idarticle
-         AND uc.idunite   = sb.idunite_cible
+            d.idarticle,
+            d.idmag,
+            to_char(d.datetime_cible, 'YYYY-MM-DD HH24:MI:SS') AS datetime_str,
+            COALESCE(SUM(tm.quantite * fc.facteur_vers_base * tm.signe), 0.0) AS stock_en_base
+        FROM demandes d
+        LEFT JOIN facteur_conversion fc
+               ON fc.idarticle = d.idarticle
+        LEFT JOIN tous_mouvements tm
+               ON tm.idunite = fc.idunite
+              AND tm.idmag   = d.idmag
+              AND date_trunc('second', tm.date_mouvement)
+                  <
+                  date_trunc('second', d.datetime_cible)
+        GROUP BY d.idarticle, d.idmag, d.datetime_cible
         """
 
+        out = {}
         try:
-            cur = conn.cursor()
-            cur.execute(sql, params)
-            rows = cur.fetchall()
-            cur.close()
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                for (idarticle, idmag, dt_str, stock_base) in cur.fetchall():
+                    out[(int(idarticle), int(idmag), str(dt_str))] = float(stock_base or 0.0)
         except Exception as e:
-            print(f"[StockBatch] Erreur SQL: {e}")
+            print(f"[StockAvantSecondeBatch] Erreur SQL: {e}")
             import traceback; traceback.print_exc()
-            return {}
+        return out
 
-        result = {}
-        for row in rows:
-            # row[3] est retourné comme string grâce au to_char() dans le SELECT
-            key = (int(row[0]), int(row[1]), int(row[2]), str(row[3]))
-            result[key] = float(row[4])
-        return result
+    def _precompute_stock_apres_mouvements(self):
+        """
+        Remplit row["display"][7] (colonne Stock) pour TOUTES les lignes de
+        self._full_rows en utilisant la logique StockManager (même CTEs),
+        sans arrondir pendant les calculs.
+
+        Spécificité: si plusieurs mouvements ont le même datetime (à la seconde),
+        on applique les deltas séquentiellement pour éviter d'afficher la même valeur.
+        """
+        if not self._db_conn or not self._full_rows:
+            return
+
+        try:
+            if not self._facteur_vers_base_par_unite:
+                self._facteur_vers_base_par_unite = self._fetch_facteurs_conversion(self._db_conn)
+        except Exception as e:
+            print(f"[PrecomputeStock] Erreur facteurs conversion: {e}")
+            self._facteur_vers_base_par_unite = {}
+
+        # Grouper par (article, magasin, datetime à la seconde)
+        groupes = {}
+        for idx, row in enumerate(self._full_rows):
+            idmg = row.get("idmag")
+            if str(idmg) in ("-1", "", "None", "none"):
+                continue
+            dt = str(row.get("datetime_cible") or "")
+            if not dt:
+                continue
+            key = (int(row["idarticle"]), int(idmg), dt)
+            groupes.setdefault(key, []).append(idx)
+
+        if not groupes:
+            return
+
+        # Demandes uniques pour récupérer le stock "avant la seconde" (strict)
+        demandes = [{"idarticle": k[0], "idmag": k[1], "datetime_cible": k[2]} for k in groupes.keys()]
+
+        # Batch pour éviter des requêtes trop longues
+        stock_avant = {}
+        CHUNK = 400
+        for i in range(0, len(demandes), CHUNK):
+            stock_avant.update(self._stock_base_avant_seconde_batch(self._db_conn, demandes[i:i + CHUNK]))
+
+        # Appliquer deltas séquentiels dans chaque groupe
+        for (idarticle, idmag, dt), indices in groupes.items():
+            base = float(stock_avant.get((idarticle, idmag, dt), 0.0) or 0.0)
+
+            # Ordre stable à l'intérieur de la même seconde: ordre actuel dans _full_rows
+            running = base
+            for idx in indices:
+                r = self._full_rows[idx]
+                idunite = int(r.get("idunite") or 0)
+
+                # delta du mouvement en unité d'origine -> base (sans arrondi)
+                # NB: on utilise les valeurs numériques (avant formatage UI)
+                entree = float(r.get("_entree_num") or 0.0)
+                sortie = float(r.get("_sortie_num") or 0.0)
+                facteur = float(self._facteur_vers_base_par_unite.get(idunite, 1.0) or 1.0)
+                delta_base = (entree - sortie) * facteur
+                running += delta_base
+
+                # conversion base -> unité cible (idunite du mouvement), sans floor
+                facteur_cible = facteur if facteur != 0 else 1.0
+                stock_unite = running / facteur_cible
+                r["display"][7] = self.formater_nombre(stock_unite)
 
     # ── Requete mouvements ────────────────────────────────────────────────────
     def build_mouvements_query(self, date_debut, date_fin, type_doc, idmag):
@@ -1179,6 +1044,8 @@ class PageArticleMouvement(ctk.CTkFrame):
                 "idunite":        idunite,
                 "idmag":          idmag_r,
                 "datetime_cible": datetime_cible,
+                "_entree_num":    entree,
+                "_sortie_num":    sortie,
                 "display": [
                     date_format, reference, article_design, type_doc_display,
                     unite_display, e_fmt, s_fmt, "-",
@@ -1199,6 +1066,14 @@ class PageArticleMouvement(ctk.CTkFrame):
         # Stocker la connexion pour l'utiliser dans _insert_batch
         self._db_conn      = conn
         self._pending_rows = list(self._full_rows)
+
+        # Pré-calculer la colonne Stock (logique StockManager + cas mêmes datetime)
+        self._lbl_progress.configure(text="Calcul stock…")
+        try:
+            self._precompute_stock_apres_mouvements()
+        except Exception as e:
+            print(f"[LoadMouvements] Erreur precompute stock: {e}")
+
         self._insert_batch()
 
     # ── Insertion par blocs avec stock calcule AVANT insertion ────────────────
@@ -1218,29 +1093,8 @@ class PageArticleMouvement(ctk.CTkFrame):
         batch = self._pending_rows[:_BATCH_SIZE]
         self._pending_rows = self._pending_rows[_BATCH_SIZE:]
 
-        # Calcul des stocks pour ce batch
-        stock_map = {}
-        if self._db_conn:
-            try:
-                stock_map = self._calcul_stock_batch_sql(self._db_conn, batch)
-            except Exception as e:
-                print(f"[InsertBatch] Erreur calcul stock: {e}")
-
         offset = len(self.tree.get_children())
         for i, row in enumerate(batch):
-            idmg = row["idmag"]
-            key  = None
-            if str(idmg) not in ("-1", "", "None", "none"):
-                key = (int(row["idarticle"]), int(row["idunite"]),
-                       int(idmg),             str(row["datetime_cible"]))
-
-            stock_str = (self.formater_nombre(stock_map[key])
-                         if key and key in stock_map else "-")
-
-            # Mettre a jour display[7] directement dans la liste row
-            # (row["display"] est une liste mutable, et row est un dict dans _full_rows)
-            row["display"][7] = stock_str
-
             display = row["display"]
             parity = "even" if (offset + i) % 2 == 0 else "odd"
             self.tree.insert("", "end", values=display, tags=(parity,))
