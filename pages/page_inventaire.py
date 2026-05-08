@@ -8,6 +8,7 @@ from resource_utils import get_config_path, safe_file_read
 import traceback
 from app_theme import Theme, Colors, Fonts, Layout, styled
 from log_utils import AppLogger
+from stock_manager import StockManager
 
 
 class PageInventaire(ctk.CTkToplevel):
@@ -107,13 +108,9 @@ class PageInventaire(ctk.CTkToplevel):
         styled.label_heading(inv_card, text="Inventaire ciblé").pack(anchor="w", padx=16, pady=(12, 6))
 
         styled.label_muted(inv_card, text="Magasin", anchor="w").pack(fill="x", padx=16, pady=(4, 2))
-        self.combo_magasin = styled.combobox(inv_card, values=[], command=self.afficher_stock_actuel, width=250)
+        # Changer magasin -> rafraîchir l'affichage des stocks à gauche
+        self.combo_magasin = styled.combobox(inv_card, values=[], command=lambda *_: self.refresh_stocks_overview(), width=250)
         self.combo_magasin.pack(fill="x", padx=16, pady=(0, 8))
-
-        self.label_stock_actuel = styled.label(
-            inv_card, text="Stock actuel: --", size=13, weight="bold", color=Colors.INFO
-        )
-        self.label_stock_actuel.pack(anchor="w", padx=16, pady=(0, 8))
 
         styled.label_muted(inv_card, text="Quantité réelle comptée", anchor="w").pack(
             fill="x", padx=16, pady=(6, 2)
@@ -204,7 +201,6 @@ class PageInventaire(ctk.CTkToplevel):
         return self.unites_dict.get(label)
 
     def on_unite_change(self, _=None):
-        self.afficher_stock_actuel()
         self.refresh_stocks_overview()
 
     def formater_nombre(self, nombre):
@@ -487,27 +483,46 @@ class PageInventaire(ctk.CTkToplevel):
                 conn_local.close()
 
     def afficher_stock_actuel(self, magasin_nom=None):
-        """Affiche le stock actuel du magasin sélectionné (colonne droite)."""
-        if magasin_nom is None:
-            magasin_nom = self.combo_magasin.get()
+        """Ancien label 'Stock actuel' supprimé : on rafraîchit juste l'overview."""
+        self.refresh_stocks_overview()
 
-        idmag    = self.magasins_dict.get(magasin_nom)
-        idunite  = self.get_selected_unite_id()
-        idarticle = self._get_idarticle()
-
-        if not idarticle or not idunite:
-            self.label_stock_actuel.configure(text="Stock actuel : 0,00")
-            return
-
-        # Libellé de l'unité
-        unite_label = self.combo_unite.get().strip()
-
-        # ── Calcul via la requête consolidée ──────────────────────────────────
-        stock = self.calculer_stock_article(idarticle, idunite, idmag)
-
-        self.label_stock_actuel.configure(
-            text=f"Stock Actuelle : {self.formater_nombre(stock)} {unite_label}".strip()
-        )
+    def _calc_stock_via_stockmanager(self, idarticle: int, idunite: int, idmag: int | None) -> float:
+        """
+        Calcule le stock en unité cible via StockManager:
+        - stock_base via get_stock_article_base
+        - conversion base -> unité (division par facteur_vers_base)
+        Aucun arrondi ici (uniquement à l'affichage).
+        """
+        sm = None
+        try:
+            with open(get_config_path('config.json')) as f:
+                cfg = json.load(f)['database']
+            sm = StockManager(
+                host=cfg['host'],
+                port=cfg['port'],
+                dbname=cfg['database'],
+                user=cfg['user'],
+                password=cfg['password'],
+            )
+            stock_base = sm.get_stock_article_base(
+                idarticle=int(idarticle),
+                idmagasin=int(idmag) if idmag is not None else 0,
+                date_fin=None,
+            )
+            base_val = float(stock_base.get('stock_en_base', 0.0) or 0.0)
+            facteur = float(sm.get_facteur_conversion(int(idunite)) or 1.0)
+            if facteur == 0:
+                return 0.0
+            return float(base_val / facteur)
+        except Exception as e:
+            print(f"[PageInventaire] Erreur calcul stock (StockManager): {e}")
+            return 0.0
+        finally:
+            try:
+                if sm:
+                    sm.fermer_connexion()
+            except Exception:
+                pass
 
     def refresh_stocks_overview(self):
         """Recharge la liste des stocks par magasin (colonne gauche)."""
@@ -525,14 +540,14 @@ class PageInventaire(ctk.CTkToplevel):
             return
 
         # ── Stock TOTAL (tous magasins, idmag=None) ────────────────────────────
-        stock_total = self.calculer_stock_article(idarticle, idunite, None)
+        stock_total = self._calc_stock_via_stockmanager(idarticle, idunite, None)
         self.label_stock_total.configure(
             text=f"Stock total : {self.formater_nombre(stock_total)}"
         )
 
         # ── Stock par magasin ──────────────────────────────────────────────────
         for nom_mag, idmag in self.magasins_dict.items():
-            stock_mag = self.calculer_stock_article(idarticle, idunite, idmag)
+            stock_mag = self._calc_stock_via_stockmanager(idarticle, idunite, idmag)
 
             row = styled.frame(self.stock_list)
             row.pack(fill="x", padx=8, pady=4)
