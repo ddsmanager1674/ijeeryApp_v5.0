@@ -631,9 +631,12 @@ class PageArticleMouvement(ctk.CTkFrame):
         for (idarticle, idmag, dt), indices in groupes.items():
             base = float(stock_avant.get((idarticle, idmag, dt), 0.0) or 0.0)
 
-            # Ordre stable à l'intérieur de la même seconde: ordre actuel dans _full_rows
+            # IMPORTANT:
+            # L'affichage est trié par datetime décroissant. Donc, à l'intérieur d'une même seconde,
+            # la ligne "la plus récente" (plus haut dans le tableau) doit montrer le stock APRÈS
+            # tous les mouvements de cette seconde. On accumule donc en sens inverse (bas -> haut).
             running = base
-            for idx in indices:
+            for idx in reversed(indices):
                 r = self._full_rows[idx]
                 idunite = int(r.get("idunite") or 0)
 
