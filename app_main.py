@@ -202,7 +202,6 @@ MENU_STRUCTURE = [
             ("✅  Présence",            "Présence",              "pages.page_presence",         "PagePresence",        None),
             ("💸  Avance 15e",          "Avance 15e",            "pages.page_avance15e",        "PageAVQ",             "iduser"),
             ("💰  Avance Spéciale",     "Avance Spéciale",       "pages.page_avanceSpecial_",   "FenetreAvanceSpec",   "iduser"),
-            ("👔  Fonction",            "Fonction",              "pages.page_fonction",         "PageFonction",        None),
             ("📋  Nouveau SB",          "Nouveau SB",            "pages.page_salaireBase_",     "PageSalaireBase",     "app_root"),
             ("📊  État de Salaire",     "Etat de Salaire",       "pages.page_salaireEtatBase_", "PageSalaireEtatSB",   None),
             ("📊  Salaire Horaire",     "Salaire Horaire",       "pages.page_salaireEtatHoraire_", "PageEtatSalaireHoraire", None),
@@ -240,6 +239,7 @@ MENU_STRUCTURE = [
             ("🔐  Autorisation",        "Autorisation",          "pages.page_autorisation",     "PageAutorisation",    None),
             ("📅  Événements",          "Evenements",            "pages.page_evenement",        "PageEvenement",       None),
             ("💾  Sauvegarde",          "Sauvegarde",            "pages.page_sauvegarde",       "PageSauvegarde",      None),
+            ("👔  Fonction",            "Fonction",              "pages.page_fonction",         "PageFonction",        None),
             ("👨‍💻  Utilisateurs",       "Utilisateurs",          "pages.page_users",            "PageUsers",           None),
             ("📋  Menu",                "Menu",                  "pages.page_menu",             "PageMenu",            None),
             ("📚  Base Liste",          "Base Liste",            "pages.page_BaseListe",        "PageBaseListe",       None),
@@ -447,6 +447,11 @@ class Sidebar(ctk.CTkFrame):
         self._app           = app
         self._session       = session_data
         self._authorized    = {m[0]: m[1] for m in session_data.get("menus", [])}
+        # Compatibilite apres deplacement de "Fonction" de Personnel vers
+        # Base de donnees : les anciens roles peuvent avoir l'item sans le
+        # bloc parent DATABASE.
+        if "Fonction" in self._authorized:
+            self._authorized.setdefault("BLOC: BASE DE DONNÉES", True)
         self._is_open       = True
         self._accordions: list[MenuAccordion] = []
 
@@ -1227,12 +1232,12 @@ def _dummy_session() -> dict:
         "Mouvement d'article", "Mouvement Stock", "Liste mouvements",
         "Suivi Commande", "Prix d'article", "Prix de revient", "Livraison Client",
         "Liste Personnel", "Absence", "Présence", "Avance 15e", "Avance Spéciale",
-        "Fonction", "Nouveau SB", "Etat de Salaire", "Salaire Horaire",
+        "Nouveau SB", "Etat de Salaire", "Salaire Horaire",
         "Taux Horaire", "Paiement Salaire",
         "Caisse", "Facture Liste", "Fournisseur Dettes", "Banque", "Ajout Banque",
         "Transfert Banque", "Transfert Caisse", "Decaissement", "DecaissementBq",
         "Encaissement", "EncaissementBq",
-        "Autorisation", "Evenements", "Sauvegarde", "Utilisateurs",
+        "Autorisation", "Evenements", "Sauvegarde", "Fonction", "Utilisateurs",
         "Menu", "Base Liste", "Autorisation Admin", "Init DB",
     ]
     return {

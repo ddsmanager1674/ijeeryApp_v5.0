@@ -273,7 +273,7 @@ class PageAutorisation(ctk.CTkFrame):
                 "items": [
                     "Liste Personnel", "Suivi de présence", "Gérer Personnels",
                     "Présence Personnel", "Absence", "Présence", "Avance 15e",
-                    "Avance Spéciale", "Fonction", "Nouveau SB", "Etat de Salaire",
+                    "Avance Spéciale", "Nouveau SB", "Etat de Salaire",
                     "Salaire Horaire", "Taux Horaire", "Paiement Salaire",
                 ],
             },
@@ -292,7 +292,7 @@ class PageAutorisation(ctk.CTkFrame):
                 "title": "🗄️  BASE DE DONNÉES",
                 "bloc_designation": "BLOC: BASE DE DONNÉES",
                 "items": [
-                    "Autorisation", "Evenements", "Sauvegarde", "Utilisateurs",
+                    "Autorisation", "Evenements", "Sauvegarde", "Fonction", "Utilisateurs",
                     "Menu", "Base Liste", "Autorisation Admin", "Init DB",
                 ],
             },
@@ -490,6 +490,12 @@ class PageAutorisation(ctk.CTkFrame):
                 (self.selected_fonction_id,),
             )
             authorized_ids = {r[0] for r in self.cursor.fetchall() if r and r[0] is not None}
+            # Compatibilite apres deplacement du menu "Fonction" dans le bloc
+            # Base de donnees : preserve les autorisations deja accordees.
+            fonction_id = self._menu_id_by_designation.get("Fonction")
+            database_bloc_id = self._menu_id_by_designation.get("BLOC: BASE DE DONNÉES")
+            if fonction_id in authorized_ids and database_bloc_id is not None:
+                authorized_ids.add(database_bloc_id)
         except Exception:
             authorized_ids = set()
 
