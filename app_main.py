@@ -1021,16 +1021,13 @@ class App(ctk.CTk):
     def _safe_clear_content(self):
         """
         Détruit proprement tous les widgets enfants du content_frame.
-        Utilise update_idletasks() pour laisser Tkinter traiter les événements
-        pendants AVANT la destruction, ce qui évite le TclError classique :
-        "invalid command name .!widget..." quand un after() se déclenche
-        après que le widget a été détruit.
+        On evite update_idletasks() ici : il peut redessiner brievement
+        l'ancienne page pendant une navigation lente.
         """
         children = self._content.winfo_children()
         if not children:
             return
 
-        # 1. Cacher immédiatement tous les enfants (stoppe les redessins)
         for w in children:
             try:
                 w.grid_remove()
@@ -1038,10 +1035,6 @@ class App(ctk.CTk):
             except Exception:
                 pass
 
-        # 2. Laisser Tkinter vider sa file d'événements (after() en attente)
-        self._content.update_idletasks()
-
-        # 3. Destruction propre
         for w in children:
             try:
                 w.destroy()
