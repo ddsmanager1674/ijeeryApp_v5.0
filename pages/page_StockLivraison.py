@@ -5,9 +5,11 @@ import json
 import os
 from datetime import datetime
 
+from app_theme import Colors, Fonts, Layout, styled
+
 class PageStockLivraison(ctk.CTkFrame):
     def __init__(self, master, db_conn=None, session_data=None, iduser=None):
-        super().__init__(master)
+        super().__init__(master, fg_color=Colors.BG_PAGE, corner_radius=0)
         
         # Gestion de l'ID utilisateur
         if iduser is not None:
@@ -46,60 +48,71 @@ class PageStockLivraison(ctk.CTkFrame):
     
     def setup_ui(self):
         """Création de l'interface utilisateur"""
-        # Titre
-        titre = ctk.CTkLabel(
-            self, 
-            text="📊 Stock et Livraisons en Attente", 
-            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold")
+        self.grid_rowconfigure(1, weight=0)
+        self.grid_columnconfigure(0, weight=1)
+
+        header = styled.frame(self, color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 8))
+        header.grid_columnconfigure(1, weight=1)
+
+        title_box = styled.frame(header, color="transparent")
+        title_box.grid(row=0, column=0, sticky="w")
+        styled.label_heading(title_box, text="Stock Livraison", size=18).pack(anchor="w")
+        styled.label_muted(
+            title_box,
+            text="Stock disponible et reste à livrer par article, magasin et client",
+            size=11,
+        ).pack(anchor="w", pady=(2, 0))
+
+        actions = styled.frame(header, color="transparent")
+        actions.grid(row=0, column=2, sticky="e")
+        styled.button_secondary(
+            actions,
+            text="Actualiser",
+            width=120,
+            height=Layout.BTN_H,
+            command=self.charger_donnees,
+        ).pack(side="left", padx=(0, 8))
+        styled.button_premium(
+            actions,
+            text="Export Excel",
+            width=130,
+            height=Layout.BTN_H,
+            command=self.exporter_excel,
+        ).pack(side="left")
+
+        filter_card = styled.card(self)
+        filter_card.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 10))
+        filter_card.grid_columnconfigure(1, weight=1)
+
+        styled.label_muted(filter_card, text="Recherche", size=11).grid(
+            row=0, column=0, sticky="w", padx=(16, 8), pady=(14, 4)
         )
-        titre.pack(pady=10)
-        
-        # Frame de recherche et filtres
-        frame_filtres = ctk.CTkFrame(self)
-        frame_filtres.pack(fill="x", padx=20, pady=10)
-        
-        # Champ de recherche
-        ctk.CTkLabel(frame_filtres, text="🔍 Recherche:", font=ctk.CTkFont(family="Segoe UI", size=12)).pack(side="left", padx=5)
-        self.entry_recherche = ctk.CTkEntry(
-            frame_filtres, 
-            placeholder_text="Code article ou Désignation...", 
-            width=300
+        self.entry_recherche = styled.entry(
+            filter_card,
+            placeholder="Code article ou désignation",
+            height=Layout.INPUT_H,
         )
-        self.entry_recherche.pack(side="left", padx=5)
+        self.entry_recherche.grid(row=1, column=0, sticky="ew", padx=(16, 8), pady=(0, 14))
         self.entry_recherche.bind('<KeyRelease>', self.filtrer_donnees)
-        
-        # Combobox Magasin
-        ctk.CTkLabel(frame_filtres, text="🏪 Magasin:", font=ctk.CTkFont(family="Segoe UI", size=12)).pack(side="left", padx=(20, 5))
-        self.combo_magasin = ctk.CTkComboBox(
-            frame_filtres,
+
+        styled.label_muted(filter_card, text="Magasin", size=11).grid(
+            row=0, column=1, sticky="w", padx=8, pady=(14, 4)
+        )
+        self.combo_magasin = styled.combobox(
+            filter_card,
             values=["Tous"],
-            width=200,
+            height=Layout.INPUT_H,
             command=self.filtrer_donnees
         )
-        self.combo_magasin.pack(side="left", padx=5)
+        self.combo_magasin.grid(row=1, column=1, sticky="ew", padx=8, pady=(0, 14))
         self.combo_magasin.set("Tous")
-        
-        # Bouton Export Excel
-        ctk.CTkButton(
-            frame_filtres,
-            text="📊 Export Excel",
-            command=self.exporter_excel,
-            fg_color="#0288d1",
-            width=120
-        ).pack(side="right", padx=5)
-        
-        # Bouton Actualiser
-        ctk.CTkButton(
-            frame_filtres,
-            text="🔄 Actualiser",
-            command=self.charger_donnees,
-            fg_color="#2e7d32",
-            width=120
-        ).pack(side="right", padx=5)
-        
-        # Frame pour le tableau
-        frame_tableau = ctk.CTkFrame(self)
-        frame_tableau.pack(fill="both", expand=True, padx=20, pady=10)
+
+        table_card = styled.card(self)
+        table_card.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 10))
+        table_card.grid_rowconfigure(0, weight=1)
+        table_card.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
         
         # Création du Treeview
         colonnes = (
@@ -114,11 +127,12 @@ class PageStockLivraison(ctk.CTkFrame):
         )
         
         self.tree = ttk.Treeview(
-            frame_tableau,
+            table_card,
             columns=colonnes,
             show="headings",
             height=20
         )
+        self._configure_tree_style()
         
         # Configuration des colonnes
         largeurs = {
@@ -138,12 +152,12 @@ class PageStockLivraison(ctk.CTkFrame):
         
         # Scrollbars
         scrollbar_y = ctk.CTkScrollbar(
-            frame_tableau,
+            table_card,
             orientation="vertical",
             command=self.tree.yview
         )
         scrollbar_x = ctk.CTkScrollbar(
-            frame_tableau,
+            table_card,
             orientation="horizontal",
             command=self.tree.xview
         )
@@ -158,26 +172,47 @@ class PageStockLivraison(ctk.CTkFrame):
         scrollbar_y.grid(row=0, column=1, sticky="ns")
         scrollbar_x.grid(row=1, column=0, sticky="ew")
         
-        frame_tableau.grid_rowconfigure(0, weight=1)
-        frame_tableau.grid_columnconfigure(0, weight=1)
-        
-        # Barre d'état
-        frame_info = ctk.CTkFrame(self)
-        frame_info.pack(fill="x", padx=20, pady=10)
-        
-        self.label_total = ctk.CTkLabel(
-            frame_info,
+        info_bar = styled.card(self)
+        info_bar.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
+
+        self.label_total = styled.badge(
+            info_bar,
             text="Total lignes: 0",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold")
+            variant="info",
         )
-        self.label_total.pack(side="left", padx=20)
-        
-        self.label_maj = ctk.CTkLabel(
-            frame_info,
+        self.label_total.pack(side="left", padx=16, pady=12)
+
+        self.label_maj = styled.label_muted(
+            info_bar,
             text="Dernière MAJ: --",
-            font=ctk.CTkFont(family="Segoe UI", size=12)
+            size=11,
         )
-        self.label_maj.pack(side="right", padx=20)
+        self.label_maj.pack(side="right", padx=16, pady=12)
+
+    def _configure_tree_style(self):
+        style = ttk.Style()
+        family = Fonts._family if getattr(Fonts, "_loaded", False) else "Segoe UI"
+        style.configure(
+            "StockLivraison.Treeview",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD,
+            rowheight=Layout.ROW_H,
+            borderwidth=0,
+            font=(family, 9),
+        )
+        style.configure(
+            "StockLivraison.Treeview.Heading",
+            background=Colors.CLOUDS,
+            foreground=Colors.TEXT_PRIMARY,
+            font=(family, 9, "bold"),
+        )
+        style.map(
+            "StockLivraison.Treeview",
+            background=[("selected", Colors.PRIMARY)],
+            foreground=[("selected", Colors.TEXT_ON_DARK)],
+        )
+        self.tree.configure(style="StockLivraison.Treeview")
     
     def charger_magasins(self):
         """Charge la liste des magasins pour le combobox"""

@@ -11,13 +11,15 @@ from tkcalendar import DateEntry
 from typing import Optional, Dict, Any, List
 import threading
 
+from app_theme import Colors, Fonts, Layout, styled
+
 
 class PageLivraisonClient(ctk.CTkFrame):
     # Pool de connexions partagé (évite de recréer une connexion à chaque opération)
     _connection_pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
 
     def __init__(self, master, id_user_connecte: Optional[int] = None) -> None:
-        super().__init__(master)
+        super().__init__(master, fg_color=Colors.BG_PAGE, corner_radius=0)
         if id_user_connecte is None:
             messagebox.showerror("Erreur", "Aucun utilisateur connecté. Veuillez vous reconnecter.")
             self.id_user_connecte = None
@@ -79,8 +81,8 @@ class PageLivraisonClient(ctk.CTkFrame):
     # ─────────────────────────────────────────────
 
     def _configure_table_alternating_colors(self, tree):
-        tree.tag_configure("row_even", background="#FFFFFF")
-        tree.tag_configure("row_odd", background="#F3F7FF")
+        tree.tag_configure("row_even", background=Colors.BG_CARD)
+        tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
 
     def _refresh_table_alternating_colors(self, tree):
         for idx, item in enumerate(tree.get_children()):
@@ -135,44 +137,63 @@ class PageLivraisonClient(ctk.CTkFrame):
     # ─────────────────────────────────────────────
 
     def setup_ui(self):
-        # Barre supérieure
-        header = ctk.CTkFrame(self)
-        header.pack(fill="x", padx=10, pady=10)
+        self.configure(fg_color=Colors.BG_PAGE)
+        self._configure_tree_style()
 
-        ctk.CTkLabel(header, text=f"Date: {datetime.now().strftime('%d/%m/%Y')}").pack(side="left", padx=10)
+        header = styled.frame(self, color="transparent")
+        header.pack(fill="x", padx=16, pady=(16, 8))
+
+        title_box = styled.frame(header, color="transparent")
+        title_box.pack(side="left", fill="x", expand=True)
+        styled.label_heading(title_box, text="Livraison Client", size=18).pack(anchor="w")
+        styled.label_muted(
+            title_box,
+            text=f"Date: {datetime.now().strftime('%d/%m/%Y')}",
+            size=11,
+        ).pack(anchor="w", pady=(2, 0))
 
         self.bl_var = ctk.StringVar(value=self.generate_bl_ref())
-        ctk.CTkLabel(header, text="BL N°:").pack(side="left", padx=5)
-        self.ent_bl = ctk.CTkEntry(header, textvariable=self.bl_var, state="readonly", width=140)
-        self.ent_bl.pack(side="left")
+        bl_box = styled.frame(header, color="transparent")
+        bl_box.pack(side="left", padx=(12, 8))
+        styled.label_muted(bl_box, text="BL N°", size=11).pack(anchor="w")
+        self.ent_bl = styled.entry(
+            bl_box,
+            height=Layout.INPUT_H,
+            textvariable=self.bl_var,
+            state="readonly",
+            width=150,
+        )
+        self.ent_bl.pack()
 
-        ctk.CTkButton(
-            header, text="📦 Suivi Livraison",
+        styled.button_premium(
+            header,
+            text="Suivi Livraison",
             command=self.ouvrir_suivi_livraison,
-            fg_color="#7b3fa0",
-            hover_color="#5e2d7a"
-        ).pack(side="right", padx=5)
+            height=Layout.BTN_H,
+            width=145,
+        ).pack(side="right", padx=(8, 0))
 
-        ctk.CTkButton(
-            header, text="Charger Facture",
+        styled.button_primary(
+            header,
+            text="Charger Facture",
             command=self.ouvrir_selection_facture,
-            fg_color="#1f538d"
-        ).pack(side="right", padx=10)
+            height=Layout.BTN_H,
+            width=145,
+        ).pack(side="right", padx=(8, 0))
 
-        # Infos Client
-        info_frame = ctk.CTkFrame(self, fg_color="transparent")
-        info_frame.pack(fill="x", padx=10, pady=5)
-        self.lbl_client = ctk.CTkLabel(info_frame, text="Client: ---", font=("Arial", 13, "bold"))
-        self.lbl_client.pack(side="left", padx=10)
-        self.lbl_facture = ctk.CTkLabel(info_frame, text="N° Facture: ---", font=("Arial", 13))
-        self.lbl_facture.pack(side="right", padx=10)
+        info_frame = styled.card(self)
+        info_frame.pack(fill="x", padx=16, pady=(0, 10))
+        self.lbl_client = styled.label(info_frame, text="Client: ---", size=13, weight="bold")
+        self.lbl_client.pack(side="left", padx=16, pady=12)
+        self.lbl_facture = styled.badge(info_frame, text="N° Facture: ---", variant="neutral")
+        self.lbl_facture.pack(side="right", padx=16, pady=12)
 
-        # Tableau
-        self.tree_frame = ctk.CTkFrame(self)
-        self.tree_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        self.tree_frame = styled.card(self)
+        self.tree_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         cols = ("code", "nom", "unite", "qt_vente", "qt_livre", "id_art", "id_unite", "id_mag")
         self.tree = ttk.Treeview(self.tree_frame, columns=cols, show="headings", height=15)
+        self.tree.configure(style="LivraisonClient.Treeview")
         self._configure_table_alternating_colors(self.tree)
 
         col_config = [
@@ -195,23 +216,49 @@ class PageLivraisonClient(ctk.CTkFrame):
 
         self.tree.bind("<Double-1>", self.modifier_quantite)
 
-        ctk.CTkLabel(
-            self, text="💡 Double-cliquez sur une ligne pour modifier la quantité à livrer",
-            font=("Arial", 11), text_color="gray"
-        ).pack(pady=5)
+        styled.label_muted(
+            self,
+            text="Double-cliquez sur une ligne pour modifier la quantité à livrer",
+            size=11,
+        ).pack(anchor="w", padx=20, pady=(0, 8))
 
-        # Actions
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=10, pady=10)
+        btn_frame = styled.frame(self, color="transparent")
+        btn_frame.pack(fill="x", padx=16, pady=(0, 16))
 
-        ctk.CTkButton(
-            btn_frame, text="Annuler / Vider", fg_color="#e74c3c",
+        styled.button_danger(
+            btn_frame,
+            text="Annuler / Vider",
             command=self.reinitialiser, width=150
         ).pack(side="left", padx=5)
-        ctk.CTkButton(
-            btn_frame, text="Enregistrer & Imprimer PDF", fg_color="#27ae60",
+        styled.button_success(
+            btn_frame,
+            text="Enregistrer & Imprimer PDF",
             command=self.enregistrer_livraison, width=200
         ).pack(side="right", padx=5)
+
+    def _configure_tree_style(self):
+        style = ttk.Style()
+        family = Fonts._family if getattr(Fonts, "_loaded", False) else "Segoe UI"
+        style.configure(
+            "LivraisonClient.Treeview",
+            background=Colors.BG_CARD,
+            foreground=Colors.TEXT_PRIMARY,
+            fieldbackground=Colors.BG_CARD,
+            rowheight=Layout.ROW_H,
+            borderwidth=0,
+            font=(family, 9),
+        )
+        style.configure(
+            "LivraisonClient.Treeview.Heading",
+            background=Colors.CLOUDS,
+            foreground=Colors.TEXT_PRIMARY,
+            font=(family, 9, "bold"),
+        )
+        style.map(
+            "LivraisonClient.Treeview",
+            background=[("selected", Colors.PRIMARY)],
+            foreground=[("selected", Colors.TEXT_ON_DARK)],
+        )
 
     # ─────────────────────────────────────────────
     # Sélection de la facture — optimisé
@@ -221,16 +268,21 @@ class PageLivraisonClient(ctk.CTkFrame):
         top = ctk.CTkToplevel(self)
         top.title("Sélectionner Facture")
         top.geometry("700x580")
+        top.configure(fg_color=Colors.BG_PAGE)
         top.attributes('-topmost', True)
 
-        # Filtre Date
-        filter_frame = ctk.CTkFrame(top)
-        filter_frame.pack(fill="x", padx=10, pady=10)
+        header = styled.frame(top, color="transparent")
+        header.pack(fill="x", padx=16, pady=(16, 8))
+        styled.label_heading(header, text="Sélectionner une facture", size=17).pack(anchor="w")
+        styled.label_muted(header, text="Choisissez une facture avec un reste à livrer", size=11).pack(anchor="w")
 
-        ctk.CTkLabel(filter_frame, text="Date :").pack(side="left", padx=5)
+        filter_frame = styled.card(top)
+        filter_frame.pack(fill="x", padx=16, pady=(0, 10))
 
-        cal_container = ctk.CTkFrame(filter_frame, fg_color="transparent")
-        cal_container.pack(side="left", padx=5)
+        styled.label_muted(filter_frame, text="Date", size=11).pack(side="left", padx=(14, 8), pady=12)
+
+        cal_container = styled.frame(filter_frame, color="transparent")
+        cal_container.pack(side="left", padx=(0, 8), pady=12)
 
         ent_date = DateEntry(
             cal_container, width=12,
@@ -239,11 +291,19 @@ class PageLivraisonClient(ctk.CTkFrame):
         )
         ent_date.pack(padx=2, pady=2)
 
-        # Label de statut
-        lbl_status = ctk.CTkLabel(top, text="", font=("Arial", 11), text_color="gray")
-        lbl_status.pack(pady=2)
+        styled.button_primary(filter_frame, text="Filtrer", command=lambda: charger_async(ent_date.get_date()), width=90).pack(
+            side="left", padx=(0, 8), pady=12
+        )
+        styled.button_secondary(filter_frame, text="Tout afficher",
+                                command=lambda: charger_async(None), width=115).pack(side="left", pady=12)
 
-        tree_f = ttk.Treeview(top, columns=("ref", "client", "date", "idcli", "idmag"), show="headings")
+        lbl_status = styled.label_muted(top, text="", size=11)
+        lbl_status.pack(anchor="w", padx=18, pady=(0, 4))
+
+        table_box = styled.card(top)
+        table_box.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        tree_f = ttk.Treeview(table_box, columns=("ref", "client", "date", "idcli", "idmag"), show="headings")
+        tree_f.configure(style="LivraisonClient.Treeview")
         self._configure_table_alternating_colors(tree_f)
 
         for c, t, w in [("ref", "N° Facture", 150), ("client", "Nom Client", 250), ("date", "Date", 150)]:
@@ -251,7 +311,10 @@ class PageLivraisonClient(ctk.CTkFrame):
             tree_f.column(c, width=w)
         tree_f.column("idcli", width=0, stretch=False)
         tree_f.column("idmag", width=0, stretch=False)
-        tree_f.pack(fill="both", expand=True, padx=10, pady=5)
+        tree_scroll = ttk.Scrollbar(table_box, orient="vertical", command=tree_f.yview)
+        tree_f.configure(yscrollcommand=tree_scroll.set)
+        tree_scroll.pack(side="right", fill="y", pady=10)
+        tree_f.pack(fill="both", expand=True, side="left", padx=10, pady=10)
 
         # ── Requête optimisée : remplace les 2 sous-requêtes corrélées par des JOIN agrégés ──
         QUERY_BASE = """
@@ -335,13 +398,6 @@ class PageLivraisonClient(ctk.CTkFrame):
             """Lance le chargement dans un thread séparé pour ne pas bloquer l'UI."""
             threading.Thread(target=charger, args=(date_val,), daemon=True).start()
 
-        def on_filter():
-            charger_async(ent_date.get_date())
-
-        ctk.CTkButton(filter_frame, text="Filtrer", command=on_filter, width=80).pack(side="left", padx=5)
-        ctk.CTkButton(filter_frame, text="Tout afficher",
-                      command=lambda: charger_async(None), width=100).pack(side="left", padx=5)
-
         def valider():
             sel = tree_f.selection()
             if sel:
@@ -354,8 +410,8 @@ class PageLivraisonClient(ctk.CTkFrame):
 
         tree_f.bind("<Double-1>", lambda e: valider())
 
-        ctk.CTkButton(top, text="Choisir cette facture", command=valider,
-                      fg_color="#27ae60", width=200).pack(pady=10)
+        styled.button_success(top, text="Choisir cette facture", command=valider,
+                              width=210, height=Layout.BTN_H).pack(pady=(0, 16))
 
         def _on_close_top():
             _top_detruit[0] = True   # signaler au thread avant destroy
@@ -444,18 +500,20 @@ class PageLivraisonClient(ctk.CTkFrame):
         dialog = ctk.CTkToplevel(self)
         dialog.title("Modifier la quantité")
         dialog.geometry("400x200")
+        dialog.configure(fg_color=Colors.BG_PAGE)
         dialog.attributes('-topmost', True)
 
-        ctk.CTkLabel(dialog, text=f"Article: {v[1]}", font=("Arial", 12, "bold")).pack(pady=10)
-        ctk.CTkLabel(dialog, text=f"Quantité vendue: {v[3]}").pack(pady=5)
+        styled.label_heading(dialog, text="Modifier la quantité", size=16).pack(anchor="w", padx=16, pady=(16, 4))
+        styled.label(dialog, text=f"Article: {v[1]}", size=12, weight="bold").pack(anchor="w", padx=16)
+        styled.label_muted(dialog, text=f"Quantité vendue: {v[3]}", size=11).pack(anchor="w", padx=16, pady=(2, 8))
 
-        frame = ctk.CTkFrame(dialog)
-        frame.pack(pady=10)
+        frame = styled.card(dialog)
+        frame.pack(fill="x", padx=16, pady=(0, 10))
 
-        ctk.CTkLabel(frame, text="Quantité à livrer:").pack(side="left", padx=5)
-        entry = ctk.CTkEntry(frame, width=100)
+        styled.label_muted(frame, text="Quantité à livrer", size=11).pack(side="left", padx=(14, 8), pady=12)
+        entry = styled.entry(frame, width=100, height=Layout.INPUT_H)
         entry.insert(0, str(v[4]))
-        entry.pack(side="left", padx=5)
+        entry.pack(side="left", padx=(0, 14), pady=12)
         entry.focus()
 
         def valider():
@@ -476,10 +534,10 @@ class PageLivraisonClient(ctk.CTkFrame):
             except ValueError:
                 messagebox.showerror("Erreur", "Veuillez entrer un nombre valide.")
 
-        btn_frame = ctk.CTkFrame(dialog)
-        btn_frame.pack(pady=10)
-        ctk.CTkButton(btn_frame, text="Valider", command=valider, fg_color="#27ae60").pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Annuler", command=dialog.destroy, fg_color="#e74c3c").pack(side="left", padx=5)
+        btn_frame = styled.frame(dialog, color="transparent")
+        btn_frame.pack(fill="x", padx=16, pady=(0, 16))
+        styled.button_success(btn_frame, text="Valider", command=valider, width=110).pack(side="right", padx=(8, 0))
+        styled.button_secondary(btn_frame, text="Annuler", command=dialog.destroy, width=110).pack(side="right")
         entry.bind("<Return>", lambda e: valider())
 
     # ─────────────────────────────────────────────
