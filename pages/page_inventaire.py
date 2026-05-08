@@ -588,9 +588,10 @@ class PageInventaire(ctk.CTkToplevel):
         rapport.append(f"  Observation : {obs}")
         rapport.append("")
 
+        # Observation optionnelle: si vide -> '-'
+        obs = (obs or "").strip()
         if not obs:
-            messagebox.showwarning("Attention", "L'observation est obligatoire.")
-            return
+            obs = "-"
 
         conn = self.connect_db()
         if not conn:
@@ -650,12 +651,19 @@ class PageInventaire(ctk.CTkToplevel):
             coeff_courant  = 1.0
             rapport.append(f"  {'Niveau':<8} {'Unité':<18} {'qtunite':<10} {'Coeff cumulé':<14}")
             rapport.append(f"  {'------':<8} {'-----':<18} {'-------':<10} {'------------':<14}")
+            idu_base = None
+            code_base = None
+            desig_base = None
             for idu, code_u, qt_u, niv, desig_u in unites_liees_full:
                 qt_safe = qt_u if qt_u and qt_u > 0 else 1
                 coeff_courant *= qt_safe
                 coeffs_cumules[idu] = coeff_courant
                 marker = " ◄ unité saisie" if idu == idunite_saisie else ""
                 rapport.append(f"  {niv:<8} {desig_u or code_u:<18} {qt_safe:<10.4g} {coeff_courant:<14.4g}{marker}")
+                if int(niv or 0) == 0 and idu_base is None:
+                    idu_base = idu
+                    code_base = code_u
+                    desig_base = desig_u or code_u
 
             coeff_unite_saisie = coeffs_cumules.get(idunite_saisie, 1.0)
             qte_unite_base     = nouveau * coeff_unite_saisie
@@ -671,6 +679,8 @@ class PageInventaire(ctk.CTkToplevel):
 
             unites_mises_a_jour = []
             derniers_ids        = []
+            inv_id_global = None
+            inv_delta_base = None
 
             for idx, (idu_lie, code_lie, qt_u_lie, niv_lie, desig_lie) in enumerate(unites_liees_full, 1):
                 coeff_unite_liee = coeffs_cumules.get(idu_lie, 1.0)
@@ -707,20 +717,26 @@ class PageInventaire(ctk.CTkToplevel):
                 rapport.append(f"      ✏ tb_stock      : {action_tb_stock}")
 
                 try:
-                    cursor.execute("""
-                        SELECT setval(pg_get_serial_sequence('tb_inventaire', 'id'),
-                          COALESCE((SELECT MAX(id) FROM tb_inventaire), 0) + 1, false)
-                    """)
-                    obs_trim = obs[:50] if len(obs) > 50 else obs
-                    cursor.execute("""
-                        INSERT INTO tb_inventaire (codearticle, idmag, qtinventaire, iduser, observation, date)
-                        VALUES (%s, %s, %s, %s, %s, NOW()) RETURNING id
-                    """, (code_lie, idmag, delta_inventaire, self.iduser, obs_trim))
+                    # Insertion tb_inventaire: UNE SEULE ligne (unité de base),
+                    # avec delta exprimé en unité de base, pour éviter les duplications.
+                    if idu_base is not None and int(idu_lie) == int(idu_base) and inv_id_global is None:
+                        cursor.execute("""
+                            SELECT setval(pg_get_serial_sequence('tb_inventaire', 'id'),
+                              COALESCE((SELECT MAX(id) FROM tb_inventaire), 0) + 1, false)
+                        """)
+                        obs_trim = obs[:50] if len(obs) > 50 else obs
+                        inv_delta_base = float(delta_inventaire)
+                        cursor.execute("""
+                            INSERT INTO tb_inventaire (codearticle, idmag, qtinventaire, iduser, observation, date)
+                            VALUES (%s, %s, %s, %s, %s, NOW()) RETURNING id
+                        """, (code_lie, idmag, inv_delta_base, self.iduser, obs_trim))
 
-                    resultat = cursor.fetchone()
-                    inv_id   = resultat[0] if resultat else "?"
-                    derniers_ids.append(f"{code_lie}: ID {inv_id}")
-                    rapport.append(f"      ✏ tb_inventaire : INSERT qtinventaire={delta_inventaire:+.4f}  → id={inv_id}")
+                        resultat = cursor.fetchone()
+                        inv_id_global = resultat[0] if resultat else "?"
+                        derniers_ids.append(f"{code_lie}: ID {inv_id_global}")
+                        rapport.append(f"      ✏ tb_inventaire : INSERT (BASE) qtinventaire={inv_delta_base:+.4f}  → id={inv_id_global}")
+                    else:
+                        rapport.append(f"      ✏ tb_inventaire : (skip) — uniquement unité de base")
 
                     cursor.execute("""
                         SELECT setval(pg_get_serial_sequence('tb_log_stock', 'id'),
@@ -742,6 +758,16 @@ class PageInventaire(ctk.CTkToplevel):
                     conn.rollback()
                     messagebox.showerror("Erreur SQL", f"Erreur lors de l'insertion : {e}")
                     return
+
+            if inv_id_global is None:
+                # Cas extrême: pas d'unité base détectée (schéma incohérent) -> bloquer plutôt que d'insérer des doublons
+                conn.rollback()
+                messagebox.showerror(
+                    "Inventaire",
+                    "Impossible d'identifier l'unité de base (niveau 0) pour cet article.\n"
+                    "Aucune écriture n'a été validée."
+                )
+                return
 
             # ── COMMIT ────────────────────────────────────────────────────────
             conn.commit()
