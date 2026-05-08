@@ -22,6 +22,12 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # Thème UI iJeery (référence: page_suiviPresence.py)
 from app_theme import Colors, Fonts, Theme, styled, Layout
+from pages.personnel_structure import (
+    UNKNOWN_LABEL,
+    ensure_personnel_structure,
+    has_personnel_structure,
+    personnel_poste_joins,
+)
 
 # Assurer que le répertoire parent est dans le chemin Python pour les imports absolus
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,8 +53,14 @@ class PageAbsence(ctk.CTkFrame):
             return
             
         self.cursor = self.conn.cursor()
+        try:
+            self._personnel_structure_ready = ensure_personnel_structure(self.conn)
+        except Exception:
+            self._personnel_structure_ready = False
         self.session_data = session_data or getattr(master, "session_data", None) or {}
         self._logger = AppLogger(conn=self.conn, session_data=self.session_data)
+        self._categorie_filter_map = {}
+        self._poste_filter_map = {}
 
         # Charger les informations de la société
         self.info_societe = self.get_info_societe()
@@ -217,8 +229,28 @@ class PageAbsence(ctk.CTkFrame):
         self.search_entry.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="ew")
         self.search_entry.bind("<Return>", self.search_personnel)
 
-        styled.button_primary(tools, text="Rechercher", icon="🔍", width=120, height=32, command=self.search_personnel).grid(row=0, column=2, padx=(0, 8), pady=10, sticky="e")
-        styled.button_success(tools, text="Valider", icon="✅", width=110, height=32, command=self.valider_absence).grid(row=0, column=3, padx=(0, 12), pady=10, sticky="e")
+        ctk.CTkLabel(tools, text="Catégorie :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=2, padx=(0, 6), pady=10, sticky="w")
+        self.combo_filter_categorie = ctk.CTkComboBox(
+            tools, values=["Toutes"], state="readonly", width=135, height=32,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            button_color=Colors.PRIMARY, font=Fonts.body(11),
+            command=lambda v: self._on_filter_category_change(v)
+        )
+        self.combo_filter_categorie.set("Toutes")
+        self.combo_filter_categorie.grid(row=0, column=3, padx=(0, 8), pady=10)
+
+        ctk.CTkLabel(tools, text="Poste :", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=4, padx=(0, 6), pady=10, sticky="w")
+        self.combo_filter_poste = ctk.CTkComboBox(
+            tools, values=["Tous"], state="readonly", width=125, height=32,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            button_color=Colors.PRIMARY, font=Fonts.body(11),
+            command=lambda v: self.search_personnel()
+        )
+        self.combo_filter_poste.set("Tous")
+        self.combo_filter_poste.grid(row=0, column=5, padx=(0, 8), pady=10)
+
+        styled.button_primary(tools, text="Rechercher", icon="🔍", width=120, height=32, command=self.search_personnel).grid(row=0, column=6, padx=(0, 8), pady=10, sticky="e")
+        styled.button_success(tools, text="Valider", icon="✅", width=110, height=32, command=self.valider_absence).grid(row=0, column=7, padx=(0, 12), pady=10, sticky="e")
 
         # Card tableau
         table_card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=12, border_width=1, border_color=Colors.BORDER)
@@ -226,14 +258,15 @@ class PageAbsence(ctk.CTkFrame):
         table_card.grid_columnconfigure(0, weight=1)
         table_card.grid_rowconfigure(0, weight=1)
 
-        cols = ("ID", "Nom", "Prénom", "Matricule", "Fonction")
+        cols = ("ID", "Nom", "Prénom", "Matricule", "Catégorie", "Poste")
         self.personnel_tree = ttk.Treeview(table_card, columns=cols, show="headings", style="P.Treeview", selectmode="browse")
         for col, w, anc in [
             ("ID", 60, "center"),
             ("Nom", 180, "w"),
             ("Prénom", 180, "w"),
             ("Matricule", 120, "w"),
-            ("Fonction", 160, "w"),
+            ("Catégorie", 150, "w"),
+            ("Poste", 160, "w"),
         ]:
             self.personnel_tree.heading(col, text=col)
             self.personnel_tree.column(col, width=w, anchor=anc, minwidth=50)
@@ -255,25 +288,111 @@ class PageAbsence(ctk.CTkFrame):
         styled.button_secondary(actions, text="Imprimer", icon="🖨", width=130, height=32, command=self.imprimer).pack(side="right", padx=10, pady=10)
 
         self.personnel_selectionne_id = None
+        self._load_category_poste_filters()
+
+    def _load_category_poste_filters(self):
+        if not self._personnel_structure_ready:
+            self.combo_filter_categorie.configure(values=["Toutes", UNKNOWN_LABEL])
+            self.combo_filter_poste.configure(values=["Tous", UNKNOWN_LABEL])
+            return
+        try:
+            self.cursor.execute(
+                "SELECT idcategorie, titre FROM tb_categoriepersonnel "
+                "WHERE COALESCE(deleted,0)=0 ORDER BY titre"
+            )
+            cats = self.cursor.fetchall()
+            self._categorie_filter_map = {r[1]: r[0] for r in cats}
+            self.combo_filter_categorie.configure(values=["Toutes", UNKNOWN_LABEL] + [r[1] for r in cats])
+            self._load_poste_filter_values()
+        except Exception:
+            pass
+
+    def _load_poste_filter_values(self):
+        if not self._personnel_structure_ready:
+            self.combo_filter_poste.configure(values=["Tous", UNKNOWN_LABEL])
+            self.combo_filter_poste.set("Tous")
+            return
+        selected_cat = self.combo_filter_categorie.get()
+        try:
+            if selected_cat == "Toutes":
+                self.cursor.execute(
+                    "SELECT idposte, titre FROM tb_postepersonnel "
+                    "WHERE COALESCE(deleted,0)=0 ORDER BY titre"
+                )
+                rows = self.cursor.fetchall()
+                self._poste_filter_map = {r[1]: r[0] for r in rows}
+                values = ["Tous", UNKNOWN_LABEL] + [r[1] for r in rows]
+            elif selected_cat == UNKNOWN_LABEL:
+                self._poste_filter_map = {}
+                values = ["Tous", UNKNOWN_LABEL]
+            else:
+                self.cursor.execute(
+                    "SELECT idposte, titre FROM tb_postepersonnel "
+                    "WHERE COALESCE(deleted,0)=0 AND idcategorie=%s ORDER BY titre",
+                    (self._categorie_filter_map.get(selected_cat),),
+                )
+                rows = self.cursor.fetchall()
+                self._poste_filter_map = {r[1]: r[0] for r in rows}
+                values = ["Tous", UNKNOWN_LABEL] + [r[1] for r in rows]
+            self.combo_filter_poste.configure(values=values)
+            self.combo_filter_poste.set("Tous")
+        except Exception:
+            pass
+
+    def _on_filter_category_change(self, value):
+        self._load_poste_filter_values()
+        self.search_personnel()
 
     def search_personnel(self, event=None):
         search_term = self.search_entry.get().strip()
-        if not search_term:
-            messagebox.showwarning("Recherche", "Veuillez entrer un terme de recherche.")
-            return
 
         for item in self.personnel_tree.get_children():
             self.personnel_tree.delete(item)
         self._refresh_table_alternating_colors(self.personnel_tree)
 
         try:
-            query = """
-                SELECT p.id, p.nom, p.prenom, p.matricule, f.designationfonction
-                FROM tb_personnel p
-                JOIN tb_fonction f ON p.idfonction = f.idfonction
-                WHERE p.matricule ILIKE %s OR p.nom ILIKE %s OR p.prenom ILIKE %s
-            """
-            self.cursor.execute(query, (f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"))
+            if self._personnel_structure_ready and has_personnel_structure(self.conn):
+                query = """
+                    SELECT p.id, p.nom, p.prenom, p.matricule,
+                           COALESCE(cp.titre, 'Inconnu') AS categorie,
+                           COALESCE(pp.titre, 'Inconnu') AS poste
+                    FROM tb_personnel p
+                    {joins}
+                    WHERE COALESCE(p.deleted,0)=0
+                """
+                joins = personnel_poste_joins("p")
+            else:
+                self._personnel_structure_ready = False
+                query = """
+                    SELECT p.id, p.nom, p.prenom, p.matricule,
+                           %s AS categorie,
+                           %s AS poste
+                    FROM tb_personnel p
+                    WHERE COALESCE(p.deleted,0)=0
+                """
+                joins = ""
+            params = []
+            if not self._personnel_structure_ready:
+                params.extend([UNKNOWN_LABEL, UNKNOWN_LABEL])
+            if search_term:
+                query += " AND (p.matricule ILIKE %s OR p.nom ILIKE %s OR p.prenom ILIKE %s)"
+                params.extend([f"%{search_term}%", f"%{search_term}%", f"%{search_term}%"])
+            cat = self.combo_filter_categorie.get()
+            poste = self.combo_filter_poste.get()
+            if self._personnel_structure_ready and cat != "Toutes":
+                if cat == UNKNOWN_LABEL:
+                    query += " AND pp.idcategorie IS NULL"
+                else:
+                    query += " AND pp.idcategorie = %s"
+                    params.append(self._categorie_filter_map.get(cat))
+            if self._personnel_structure_ready and poste != "Tous":
+                if poste == UNKNOWN_LABEL:
+                    query += " AND p.idposte IS NULL"
+                else:
+                    query += " AND p.idposte = %s"
+                    params.append(self._poste_filter_map.get(poste))
+            query += " ORDER BY p.nom, p.prenom"
+            self.cursor.execute(query.format(joins=joins), params)
             personnels = self.cursor.fetchall()
             
             if not personnels:
@@ -370,13 +489,23 @@ class PageAbsence(ctk.CTkFrame):
 
     def generer_pdf(self):
         try:
-            self.cursor.execute("""
+            if self._personnel_structure_ready and has_personnel_structure(self.conn):
+                category_cols = (
+                    "COALESCE(cp.titre, 'Inconnu') AS categorie, "
+                    "COALESCE(pp.titre, 'Inconnu') AS poste"
+                )
+                joins = personnel_poste_joins("p")
+            else:
+                category_cols = "'Inconnu' AS categorie, 'Inconnu' AS poste"
+                joins = ""
+            self.cursor.execute(f"""
                 SELECT
-                    p.matricule, p.nom, p.prenom, f.designationfonction AS fonction,
+                    p.matricule, p.nom, p.prenom,
+                    {category_cols},
                     a.date, a.observation, a.nbreheureabs
                 FROM tb_absence a
                 JOIN tb_personnel p ON a.idpers = p.id
-                JOIN tb_fonction f ON p.idfonction = f.idfonction
+                {joins}
                 ORDER BY a.date DESC, p.nom ASC
             """)
             absences = self.cursor.fetchall()
@@ -414,11 +543,11 @@ class PageAbsence(ctk.CTkFrame):
             elements.append(title)
             elements.append(Spacer(1, 0.2*inch))
             
-            data = [["Matricule", "Nom", "Prénom", "Fonction", "Date d'absence", "Observation", "Nb d'heures"]]
+            data = [["Matricule", "Nom", "Prénom", "Catégorie", "Poste", "Date d'absence", "Observation", "Nb d'heures"]]
             for row in absences:
                 row_list = list(row)
-                if isinstance(row_list[4], datetime) or hasattr(row_list[4], 'strftime'):
-                    row_list[4] = row_list[4].strftime('%d/%m/%Y')
+                if isinstance(row_list[5], datetime) or hasattr(row_list[5], 'strftime'):
+                    row_list[5] = row_list[5].strftime('%d/%m/%Y')
                 data.append(row_list)
 
             table_style = TableStyle([
@@ -471,13 +600,23 @@ class PageAbsence(ctk.CTkFrame):
 
     def generer_pdf_pour_impression(self, filepath):
         try:
-            self.cursor.execute("""
+            if self._personnel_structure_ready and has_personnel_structure(self.conn):
+                category_cols = (
+                    "COALESCE(cp.titre, 'Inconnu') AS categorie, "
+                    "COALESCE(pp.titre, 'Inconnu') AS poste"
+                )
+                joins = personnel_poste_joins("p")
+            else:
+                category_cols = "'Inconnu' AS categorie, 'Inconnu' AS poste"
+                joins = ""
+            self.cursor.execute(f"""
                 SELECT
-                    p.matricule, p.nom, p.prenom, f.designationfonction AS fonction,
+                    p.matricule, p.nom, p.prenom,
+                    {category_cols},
                     a.date, a.observation, a.nbreheureabs
                 FROM tb_absence a
                 JOIN tb_personnel p ON a.idpers = p.id
-                JOIN tb_fonction f ON p.idfonction = f.idfonction
+                {joins}
                 ORDER BY a.date DESC, p.nom ASC
             """)
             absences = self.cursor.fetchall()
@@ -496,11 +635,11 @@ class PageAbsence(ctk.CTkFrame):
             elements.append(Paragraph("Liste des Absences des Personnels", title_style))
             elements.append(Spacer(1, 0.2*inch))
             
-            data = [["Matricule", "Nom", "Prénom", "Fonction", "Date d'absence", "Observation", "Nb d'heures"]]
+            data = [["Matricule", "Nom", "Prénom", "Catégorie", "Poste", "Date d'absence", "Observation", "Nb d'heures"]]
             for row in absences:
                 row_list = list(row)
-                if isinstance(row_list[4], datetime) or hasattr(row_list[4], 'strftime'):
-                    row_list[4] = row_list[4].strftime('%d/%m/%Y')
+                if isinstance(row_list[5], datetime) or hasattr(row_list[5], 'strftime'):
+                    row_list[5] = row_list[5].strftime('%d/%m/%Y')
                 data.append(row_list)
 
             table = Table(data)

@@ -16,6 +16,7 @@ from tkinter import ttk, messagebox, filedialog
 
 from resource_utils import get_config_path
 from app_theme import Colors, Fonts, Theme, styled, Layout
+from pages.personnel_structure import UNKNOWN_LABEL, ensure_personnel_structure, has_personnel_structure, personnel_poste_joins
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -218,10 +219,16 @@ class PageSuiviPresence(ctk.CTkFrame):
                          text_color=Colors.DANGER, font=Fonts.bold(14)
                          ).pack(pady=40)
             return
+        try:
+            self._personnel_structure_ready = ensure_personnel_structure(db_manager.conn)
+        except Exception:
+            self._personnel_structure_ready = False
 
         self.update_rows_cache = {}
         self._all_update_rows  = []
         self._stat_labels      = {}
+        self._categorie_filter_map = {}
+        self._poste_filter_map = {}
         _setup_treeview_style()
 
         self.grid_columnconfigure(0, weight=1)
@@ -230,6 +237,7 @@ class PageSuiviPresence(ctk.CTkFrame):
         self._build_header()
         self._build_tabs_bar()
         self._build_pages()
+        self._load_category_poste_filters()
 
         self._show_tab("Suivi du jour")
         self.load_update_for_date(self.date_entry.get())
@@ -310,7 +318,7 @@ class PageSuiviPresence(ctk.CTkFrame):
         # ── Toolbar 1 ligne compacte ──────────────────────────────────────
         tb = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD, corner_radius=8)
         tb.grid(row=0, column=0, padx=8, pady=(6, 3), sticky="ew")
-        tb.grid_columnconfigure(5, weight=1)
+        tb.grid_columnconfigure(9, weight=1)
 
         def lbl(text, col, padl=10):
             ctk.CTkLabel(tb, text=text, font=Fonts.label(11),
@@ -343,8 +351,28 @@ class PageSuiviPresence(ctk.CTkFrame):
         self.combo_statut.set("Tous")
         self.combo_statut.grid(row=0, column=4, padx=(0, 6), pady=7)
 
+        lbl("Catégorie :", 5, 0)
+        self.combo_filter_categorie = ctk.CTkComboBox(
+            tb, values=["Toutes"], state="readonly", width=125, height=28,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            button_color=Colors.PRIMARY, font=Fonts.body(11),
+            command=lambda v: self._on_filter_category_change(v),
+        )
+        self.combo_filter_categorie.set("Toutes")
+        self.combo_filter_categorie.grid(row=0, column=6, padx=(0, 6), pady=7)
+
+        lbl("Poste :", 7, 0)
+        self.combo_filter_poste = ctk.CTkComboBox(
+            tb, values=["Tous"], state="readonly", width=120, height=28,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            button_color=Colors.PRIMARY, font=Fonts.body(11),
+            command=lambda v: self._apply_filter(),
+        )
+        self.combo_filter_poste.set("Tous")
+        self.combo_filter_poste.grid(row=0, column=8, padx=(0, 6), pady=7)
+
         rg = styled.frame(tb)
-        rg.grid(row=0, column=6, padx=10, pady=7, sticky="e")
+        rg.grid(row=0, column=10, padx=10, pady=7, sticky="e")
         ctk.CTkButton(rg, text="💾 Sauvegarder", width=118, height=28,
                       fg_color=Colors.SUCCESS, hover_color=Colors.SUCCESS_DARK,
                       font=Fonts.bold(11), corner_radius=6,
@@ -382,13 +410,13 @@ class PageSuiviPresence(ctk.CTkFrame):
         tc.grid_columnconfigure(0, weight=1)
         tc.grid_rowconfigure(0, weight=1)
 
-        cols = ("ID", "Nom complet", "Sexe", "Fonction",
+        cols = ("ID", "Nom complet", "Sexe", "Catégorie", "Poste",
                 "Matin", "Après-midi", "Observation")
         self.update_tree = ttk.Treeview(tc, columns=cols, show="headings",
                                          style="P.Treeview", selectmode="browse")
         for col, w, anc in [
             ("ID", 38, "center"), ("Nom complet", 165, "w"),
-            ("Sexe", 48, "center"), ("Fonction", 135, "w"),
+            ("Sexe", 48, "center"), ("Catégorie", 125, "w"), ("Poste", 135, "w"),
             ("Matin", 108, "center"), ("Après-midi", 108, "center"),
             ("Observation", 180, "w"),
         ]:
@@ -478,13 +506,13 @@ class PageSuiviPresence(ctk.CTkFrame):
         tc.grid_columnconfigure(0, weight=1)
         tc.grid_rowconfigure(0, weight=1)
 
-        cols = ("ID", "Nom complet", "Sexe", "Fonction",
+        cols = ("ID", "Nom complet", "Sexe", "Catégorie", "Poste",
                 "✅ Présent", "🟠 Retard", "🔴 Absent", "⬜ Attente")
         self.history_tree = ttk.Treeview(tc, columns=cols, show="headings",
                                           style="P.Treeview", selectmode="browse")
         for col, w, anc in [
             ("ID", 38, "center"), ("Nom complet", 165, "w"),
-            ("Sexe", 48, "center"), ("Fonction", 135, "w"),
+            ("Sexe", 48, "center"), ("Catégorie", 125, "w"), ("Poste", 135, "w"),
             ("✅ Présent", 80, "center"), ("🟠 Retard", 80, "center"),
             ("🔴 Absent", 80, "center"), ("⬜ Attente", 80, "center"),
         ]:
@@ -508,20 +536,85 @@ class PageSuiviPresence(ctk.CTkFrame):
     def on_update_load(self):
         self.load_update_for_date(self.date_entry.get().strip())
 
+    def _load_category_poste_filters(self):
+        if not hasattr(self, "combo_filter_categorie"):
+            return
+        if not self._personnel_structure_ready:
+            self.combo_filter_categorie.configure(values=["Toutes", UNKNOWN_LABEL])
+            self.combo_filter_poste.configure(values=["Tous", UNKNOWN_LABEL])
+            return
+        try:
+            cur = db_manager.get_cursor()
+            cur.execute(
+                "SELECT idcategorie, titre FROM tb_categoriepersonnel "
+                "WHERE COALESCE(deleted,0)=0 ORDER BY titre"
+            )
+            cats = cur.fetchall()
+            self._categorie_filter_map = {r[1]: r[0] for r in cats}
+            self.combo_filter_categorie.configure(values=["Toutes", UNKNOWN_LABEL] + [r[1] for r in cats])
+            self._load_poste_filter_values()
+        except Exception:
+            pass
+
+    def _load_poste_filter_values(self):
+        if not hasattr(self, "combo_filter_poste"):
+            return
+        if not self._personnel_structure_ready:
+            self.combo_filter_poste.configure(values=["Tous", UNKNOWN_LABEL])
+            self.combo_filter_poste.set("Tous")
+            return
+        selected_cat = self.combo_filter_categorie.get()
+        try:
+            cur = db_manager.get_cursor()
+            if selected_cat == "Toutes":
+                cur.execute(
+                    "SELECT idposte, titre FROM tb_postepersonnel "
+                    "WHERE COALESCE(deleted,0)=0 ORDER BY titre"
+                )
+                rows = cur.fetchall()
+                self._poste_filter_map = {r[1]: r[0] for r in rows}
+                values = ["Tous", UNKNOWN_LABEL] + [r[1] for r in rows]
+            elif selected_cat == UNKNOWN_LABEL:
+                self._poste_filter_map = {}
+                values = ["Tous", UNKNOWN_LABEL]
+            else:
+                cur.execute(
+                    "SELECT idposte, titre FROM tb_postepersonnel "
+                    "WHERE COALESCE(deleted,0)=0 AND idcategorie=%s ORDER BY titre",
+                    (self._categorie_filter_map.get(selected_cat),),
+                )
+                rows = cur.fetchall()
+                self._poste_filter_map = {r[1]: r[0] for r in rows}
+                values = ["Tous", UNKNOWN_LABEL] + [r[1] for r in rows]
+            self.combo_filter_poste.configure(values=values)
+            self.combo_filter_poste.set("Tous")
+        except Exception:
+            pass
+
+    def _on_filter_category_change(self, value):
+        self._load_poste_filter_values()
+        self._apply_filter()
+
     def _apply_filter(self):
         target = FILTER_MAP.get(self.combo_statut.get())
+        cat_filter = self.combo_filter_categorie.get() if hasattr(self, "combo_filter_categorie") else "Toutes"
+        poste_filter = self.combo_filter_poste.get() if hasattr(self, "combo_filter_poste") else "Tous"
         self.update_tree.delete(*self.update_tree.get_children())
         self.update_rows_cache = {}
         count = 0
         for row in self._all_update_rows:
-            ms = row[4] or "en_attente"
-            ap = row[5] or "en_attente"
+            ms = row[5] or "en_attente"
+            ap = row[6] or "en_attente"
             if target and ms != target and ap != target:
+                continue
+            if cat_filter != "Toutes" and row[3] != cat_filter:
+                continue
+            if poste_filter != "Tous" and row[4] != poste_filter:
                 continue
             tag = "even" if count % 2 == 0 else "odd"
             iid = self.update_tree.insert("", "end", tags=(tag,), values=(
-                row[0], row[1].strip(), self._safe(row[2]), self._safe(row[3]),
-                STATE_DISPLAY.get(ms), STATE_DISPLAY.get(ap), self._safe(row[6]),
+                row[0], row[1].strip(), self._safe(row[2]), self._safe(row[3]), self._safe(row[4]),
+                STATE_DISPLAY.get(ms), STATE_DISPLAY.get(ap), self._safe(row[7]),
             ))
             self.update_rows_cache[iid] = row
             count += 1
@@ -555,25 +648,38 @@ class PageSuiviPresence(ctk.CTkFrame):
         self.update_rows_cache = {}
         try:
             cur = db_manager.get_cursor()
-            cur.execute(
-                """SELECT p.id, p.nom||' '||COALESCE(p.prenom,''), p.sexe,
-                          f.designationfonction, sp.matin, sp.apresmidi, sp.observation
-                   FROM tb_suivipresence sp
-                   JOIN tb_personnel p ON sp.idpersonnel=p.id
-                   LEFT JOIN tb_fonction f ON p.idfonction=f.idfonction
-                   WHERE sp.datepresence=%s AND sp.deleted=0
-                   ORDER BY p.nom,p.prenom""",
-                (d,)
-            )
+            if self._personnel_structure_ready and has_personnel_structure(db_manager.conn):
+                sql = """SELECT p.id, p.nom||' '||COALESCE(p.prenom,''), p.sexe,
+                                COALESCE(cp.titre, 'Inconnu') AS categorie,
+                                COALESCE(pp.titre, 'Inconnu') AS poste,
+                                sp.matin, sp.apresmidi, sp.observation
+                         FROM tb_suivipresence sp
+                         JOIN tb_personnel p ON sp.idpersonnel=p.id
+                         {joins}
+                         WHERE sp.datepresence=%s AND sp.deleted=0
+                         ORDER BY p.nom,p.prenom""".format(joins=personnel_poste_joins("p"))
+                cur.execute(sql, (d,))
+            else:
+                self._personnel_structure_ready = False
+                cur.execute(
+                    """SELECT p.id, p.nom||' '||COALESCE(p.prenom,''), p.sexe,
+                              %s AS categorie, %s AS poste,
+                              sp.matin, sp.apresmidi, sp.observation
+                       FROM tb_suivipresence sp
+                       JOIN tb_personnel p ON sp.idpersonnel=p.id
+                       WHERE sp.datepresence=%s AND sp.deleted=0
+                       ORDER BY p.nom,p.prenom""",
+                    (UNKNOWN_LABEL, UNKNOWN_LABEL, d),
+                )
             rows = cur.fetchall()
             self._all_update_rows = list(rows)
             for idx, row in enumerate(rows):
-                ms  = row[4] or "en_attente"
-                ap  = row[5] or "en_attente"
+                ms  = row[5] or "en_attente"
+                ap  = row[6] or "en_attente"
                 tag = "even" if idx % 2 == 0 else "odd"
                 iid = self.update_tree.insert("", "end", tags=(tag,), values=(
-                    row[0], row[1].strip(), self._safe(row[2]), self._safe(row[3]),
-                    STATE_DISPLAY.get(ms), STATE_DISPLAY.get(ap), self._safe(row[6]),
+                    row[0], row[1].strip(), self._safe(row[2]), self._safe(row[3]), self._safe(row[4]),
+                    STATE_DISPLAY.get(ms), STATE_DISPLAY.get(ap), self._safe(row[7]),
                 ))
                 self.update_rows_cache[iid] = row
             self._update_stats()
@@ -585,14 +691,14 @@ class PageSuiviPresence(ctk.CTkFrame):
         col  = self.update_tree.identify_column(event.x)
         if not item or not col: return
         ci = int(col.replace("#", "")) - 1
-        if ci in (4, 5):
+        if ci in (5, 6):
             vals = list(self.update_tree.item(item, "values"))
             cur_s  = LABEL_STATE.get(vals[ci], "en_attente")
             next_s = STATE_ORDER[(STATE_ORDER.index(cur_s) + 1) % 4]
             vals[ci] = STATE_DISPLAY[next_s]
             self.update_tree.item(item, values=vals)
             self._update_stats()
-        elif ci == 6:
+        elif ci == 7:
             self._inline_edit(item, ci)
 
     def _inline_edit(self, item, ci):
@@ -624,9 +730,9 @@ class PageSuiviPresence(ctk.CTkFrame):
                 cur.execute(
                     "UPDATE tb_suivipresence SET matin=%s,apresmidi=%s,observation=%s "
                     "WHERE datepresence=%s AND idpersonnel=%s",
-                    (LABEL_STATE.get(vals[4], "en_attente"),
-                     LABEL_STATE.get(vals[5], "en_attente"),
-                     "" if vals[6] == "-" else vals[6],
+                    (LABEL_STATE.get(vals[5], "en_attente"),
+                     LABEL_STATE.get(vals[6], "en_attente"),
+                     "" if vals[7] == "-" else vals[7],
                      d, vals[0])
                 )
             db_manager.conn.commit()
@@ -640,7 +746,7 @@ class PageSuiviPresence(ctk.CTkFrame):
         if not data:
             messagebox.showinfo("Info", "Aucune donnée."); return
         df = pd.DataFrame(data, columns=[
-            "ID", "Nom complet", "Sexe", "Fonction",
+            "ID", "Nom complet", "Sexe", "Catégorie", "Poste",
             "Matin", "Après-midi", "Observation"])
         p = filedialog.asksaveasfilename(defaultextension=".xlsx",
                                           filetypes=[("Excel", "*.xlsx")])
@@ -662,7 +768,7 @@ class PageSuiviPresence(ctk.CTkFrame):
         stats = {k: 0 for k in STATE_ORDER}
         for item in self.update_tree.get_children():
             vals = self.update_tree.item(item, "values")
-            for v in (vals[4], vals[5]):
+            for v in (vals[5], vals[6]):
                 stats[LABEL_STATE.get(v, "en_attente")] += 1
         for key, lbl in self._stat_labels.items():
             lbl.configure(text=str(stats.get(key, 0)))
@@ -689,13 +795,24 @@ class PageSuiviPresence(ctk.CTkFrame):
         self.history_tree.delete(*self.history_tree.get_children())
         try:
             cur = db_manager.get_cursor()
-            cur.execute(
-                """SELECT p.id, p.nom||' '||COALESCE(p.prenom,''), p.sexe,
-                          f.designationfonction
-                   FROM tb_personnel p
-                   LEFT JOIN tb_fonction f ON p.idfonction=f.idfonction
-                   WHERE p.deleted=0 ORDER BY p.nom,p.prenom"""
-            )
+            if self._personnel_structure_ready and has_personnel_structure(db_manager.conn):
+                cur.execute(
+                    """SELECT p.id, p.nom||' '||COALESCE(p.prenom,''), p.sexe,
+                              COALESCE(cp.titre, 'Inconnu') AS categorie,
+                              COALESCE(pp.titre, 'Inconnu') AS poste
+                       FROM tb_personnel p
+                       {joins}
+                       WHERE p.deleted=0 ORDER BY p.nom,p.prenom""".format(joins=personnel_poste_joins("p"))
+                )
+            else:
+                self._personnel_structure_ready = False
+                cur.execute(
+                    """SELECT p.id, p.nom||' '||COALESCE(p.prenom,''), p.sexe,
+                              %s AS categorie, %s AS poste
+                       FROM tb_personnel p
+                       WHERE p.deleted=0 ORDER BY p.nom,p.prenom""",
+                    (UNKNOWN_LABEL, UNKNOWN_LABEL),
+                )
             personnels = cur.fetchall()
             cur.execute(
                 """SELECT datepresence,idpersonnel,matin,apresmidi
@@ -713,7 +830,7 @@ class PageSuiviPresence(ctk.CTkFrame):
                         if x in st: st[x] += 1
                 tag = "even" if idx % 2 == 0 else "odd"
                 self.history_tree.insert("", "end", tags=(tag,), values=(
-                    p[0], p[1].strip(), self._safe(p[2]), self._safe(p[3]),
+                    p[0], p[1].strip(), self._safe(p[2]), self._safe(p[3]), self._safe(p[4]),
                     st["present"], st["retard"], st["absent"], st["en_attente"],
                 ))
         except Exception as e:
@@ -725,7 +842,7 @@ class PageSuiviPresence(ctk.CTkFrame):
         if not data:
             messagebox.showinfo("Info", "Aucune donnée."); return
         df = pd.DataFrame(data, columns=[
-            "ID", "Nom complet", "Sexe", "Fonction",
+            "ID", "Nom complet", "Sexe", "Catégorie", "Poste",
             "Présent", "Retard", "Absent", "En attente"])
         p = filedialog.asksaveasfilename(defaultextension=".xlsx",
                                           filetypes=[("Excel", "*.xlsx")])
