@@ -1032,7 +1032,6 @@ class PageChangementArticle(ctk.CTkFrame):
                 'unite': unite, 'quantite': qty,
             })
             self.annuler_entree()
-            messagebox.showinfo("Succès", f"Article « {designation} » ajouté à l'entrée.")
 
         except ValueError:
             messagebox.showerror("Erreur", "Quantité invalide.")

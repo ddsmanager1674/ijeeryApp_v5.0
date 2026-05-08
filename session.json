@@ -5,12 +5,40 @@
     "fonction_name": "Administration",
     "menus": [
         [
+            "Absence",
+            "PageAbsence"
+        ],
+        [
+            "Ajout Banque",
+            "PageBanqueNv"
+        ],
+        [
             "Article Liste",
             "page_listeArticle"
         ],
         [
             "Autorisation",
             "PageAutorisation"
+        ],
+        [
+            "Autorisation Admin",
+            "PageCodeAutorisation"
+        ],
+        [
+            "Avance 15e",
+            "PageAVQ"
+        ],
+        [
+            "Avance Spéciale",
+            "FenetreAvanceSpec"
+        ],
+        [
+            "Banque",
+            "PageBanque"
+        ],
+        [
+            "Base Liste",
+            "PageBaseListe"
         ],
         [
             "BLOC: BASE DE DONNÉES",
@@ -49,16 +77,56 @@
             "PageClient"
         ],
         [
+            "Decaissement",
+            "PageDecaissement"
+        ],
+        [
+            "DecaissementBq",
+            "PageDecaissementBq"
+        ],
+        [
+            "Encaissement",
+            "PageEncaissement"
+        ],
+        [
+            "EncaissementBq",
+            "PageEncaissementBq"
+        ],
+        [
+            "Etat de Salaire",
+            "PageSalaireEtatSB"
+        ],
+        [
             "Evenements",
             "PageEvenement"
+        ],
+        [
+            "Facturation",
+            "PageFacturation"
         ],
         [
             "Facture Liste",
             "PageFactureListe"
         ],
         [
+            "Fonction",
+            "PageFonction"
+        ],
+        [
             "Fournisseur",
             "PageFournisseur"
+        ],
+        [
+            "Fournisseur Dettes",
+            "PageFrsDette"
+        ],
+        [
+            "Gérer Personnels",
+            "PagePersonnelCRUD"
+        ],
+        [
+            "Init DB",
+            "DBInitializerApp"
         ],
         [
             "Inventaire du Jour",
@@ -77,12 +145,20 @@
             "AppMain"
         ],
         [
+            "Livraison Client",
+            "PageLivraisonClient"
+        ],
+        [
             "Magasin",
             "PageMagasin"
         ],
         [
             "Marge Commerciale",
             "PageStock"
+        ],
+        [
+            "Menu",
+            "PageMenu"
         ],
         [
             "Mouvement d'article",
@@ -93,8 +169,24 @@
             "PageInfoMouvementStock"
         ],
         [
+            "Nouveau SB",
+            "PageSalaireBase"
+        ],
+        [
+            "Paiement Salaire",
+            "PageValidationSalaire"
+        ],
+        [
             "Péremption d'article",
             "PageGestionPeremption"
+        ],
+        [
+            "Présence",
+            "PagePresence"
+        ],
+        [
+            "Présence Personnel",
+            "PagePresencePersonnel"
         ],
         [
             "Prix d'article",
@@ -105,12 +197,24 @@
             "PagePrixRevient"
         ],
         [
+            "Salaire Horaire",
+            "PageEtatSalaireHoraire"
+        ],
+        [
+            "Sauvegarde",
+            "PageSauvegarde"
+        ],
+        [
             "Stock Alerte",
             "PageStockAlerte"
         ],
         [
             "Stock Article",
             "PageStock"
+        ],
+        [
+            "Stock Livraison",
+            "PageStockLivraison"
         ],
         [
             "Suivi Commande",
@@ -123,6 +227,26 @@
         [
             "TABLEAU DE BORD",
             "page_home"
+        ],
+        [
+            "Taux Horaire",
+            "PageTauxHoraire"
+        ],
+        [
+            "Transfert Banque",
+            "PageTransfertBanque"
+        ],
+        [
+            "Transfert Caisse",
+            "PageTransfertCaisse"
+        ],
+        [
+            "Utilisateurs",
+            "PageUsers"
+        ],
+        [
+            "Ventes",
+            "PageVente"
         ],
         [
             "Ventes par Dépôt",
