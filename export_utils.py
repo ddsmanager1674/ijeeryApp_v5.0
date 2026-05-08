@@ -3,14 +3,22 @@ import os
 import time
 from datetime import datetime
 from tkinter import filedialog, messagebox
+import tkinter as tk
 
 import pandas as pd
 import customtkinter as ctk
 from tkinter import ttk
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill
 
 from app_theme import styled, Fonts, Colors
+
+def _try_import_openpyxl():
+    """Import openpyxl à la demande pour éviter de casser l'import global."""
+    try:
+        from openpyxl import Workbook  # type: ignore
+        from openpyxl.styles import Font, Alignment, PatternFill  # type: ignore
+        return Workbook, Font, Alignment, PatternFill
+    except Exception:
+        return None, None, None, None
 
 
 def create_export_excel_button(parent, command, text="Excel",
@@ -98,6 +106,20 @@ def export_treeview_to_excel(treeview, filename_prefix="Export",
         return None
 
     try:
+        Workbook, Font, Alignment, PatternFill = _try_import_openpyxl()
+        if Workbook is None:
+            messagebox.showerror(
+                "Export Excel",
+                "L'export Excel nécessite le module 'openpyxl' (non installé).\n"
+                "Installez-le puis relancez l'application.",
+                parent=parent,
+            )
+            return None
+        try:
+            from openpyxl.utils import get_column_letter  # type: ignore
+        except Exception:
+            get_column_letter = None
+
         wb = Workbook()
         ws = wb.active
         ws.title = sheet_name
@@ -126,7 +148,8 @@ def export_treeview_to_excel(treeview, filename_prefix="Export",
                         max_len = len(v)
                 except Exception:
                     pass
-            ws.column_dimensions[chr(64 + i)].width = min(60, max(10, max_len + 2))
+            col_letter = get_column_letter(i) if get_column_letter else chr(64 + i)
+            ws.column_dimensions[col_letter].width = min(60, max(10, max_len + 2))
 
         wb.save(file_path)
         messagebox.showinfo("Export Excel", f"Export reussi :\n{file_path}", parent=parent)
@@ -138,18 +161,20 @@ def export_treeview_to_excel(treeview, filename_prefix="Export",
 
 class HoverExportExcelIcon:
     """
-    Petit bouton d'export Excel qui apparait au survol d'un conteneur (ex: table).
+    Bouton d'export Excel ancre sur l'entete d'un Treeview.
     """
     def __init__(self, container, command, *, colors=None,
                  text="⬇ Excel", size=15, tooltip="Excel",
                  label_text=None, treeview=None, heading_column=None,
-                 badge=True):
+                 badge=True, always_visible=True):
         self.container = container
         self.command = command
         self.colors = colors or Colors
         self.tooltip = tooltip
         self.treeview = treeview
         self.heading_column = heading_column
+        self.always_visible = always_visible
+        self._context_menu = None
 
         self._hide_job = None
         self._visible = False
@@ -202,6 +227,11 @@ class HoverExportExcelIcon:
         if self.treeview is not None:
             self.treeview.bind("<Motion>", self._on_tree_motion, add="+")
             self.treeview.bind("<Leave>", self._on_tree_leave, add="+")
+            self.treeview.bind("<Configure>", self._on_tree_configure, add="+")
+            self.treeview.bind("<Map>", self._on_tree_configure, add="+")
+            self.treeview.bind("<Button-3>", self._on_tree_heading_context, add="+")
+            self.treeview.bind("<Button-2>", self._on_tree_heading_context, add="+")
+            self.container.after_idle(self._show)
 
     def bind_to(self, *widgets):
         for w in widgets:
@@ -209,13 +239,15 @@ class HoverExportExcelIcon:
             w.bind("<Leave>", self._on_leave, add="+")
 
     def _show(self):
-        if self._visible:
-            return
         self._place_above_heading()
         self._frame.lift()
+        if self._visible:
+            return
         self._visible = True
 
     def _hide(self):
+        if self.always_visible:
+            return
         if not self._visible:
             return
         self._frame.place_forget()
@@ -236,6 +268,8 @@ class HoverExportExcelIcon:
         self._show()
 
     def _on_leave(self, event=None):
+        if self.always_visible:
+            return
         if self.treeview is not None:
             # Ne masque pas si la souris reste sur le badge
             self._schedule_hide_from_tree()
@@ -245,6 +279,9 @@ class HoverExportExcelIcon:
         self._hide_job = self.container.after(120, self._hide_if_outside)
 
     def _on_tree_motion(self, event=None):
+        if self.always_visible:
+            self._show()
+            return
         try:
             region = self.treeview.identify_region(event.x, event.y)
         except Exception:
@@ -256,6 +293,18 @@ class HoverExportExcelIcon:
             self._show()
             return
         if region == "heading":
+            # Optionnel: n'afficher que sur l'entête de la dernière colonne
+            if self.heading_column:
+                try:
+                    col_ids = list(self.treeview["columns"])
+                    if self.heading_column in col_ids:
+                        want_idx = col_ids.index(self.heading_column) + 1
+                        current = self.treeview.identify_column(event.x)
+                        if current != f"#{want_idx}":
+                            self._schedule_hide_from_tree()
+                            return
+                except Exception:
+                    pass
             self._last_heading_ts = time.monotonic()
             if self._hide_job:
                 self.container.after_cancel(self._hide_job)
@@ -268,7 +317,38 @@ class HoverExportExcelIcon:
             self._schedule_hide_from_tree()
 
     def _on_tree_leave(self, event=None):
+        if self.always_visible:
+            return
         self._schedule_hide_from_tree()
+
+    def _on_tree_configure(self, event=None):
+        if self.always_visible:
+            self.container.after_idle(self._show)
+
+    def _on_tree_heading_context(self, event=None):
+        if event is None or self.treeview is None:
+            return
+        try:
+            if self.treeview.identify_region(event.x, event.y) != "heading":
+                return
+        except Exception:
+            return
+
+        if self._context_menu is None:
+            self._context_menu = tk.Menu(self.treeview, tearoff=0)
+            self._context_menu.add_command(
+                label="Exporter en excel",
+                command=self.command,
+            )
+
+        try:
+            self._show()
+            self._context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                self._context_menu.grab_release()
+            except Exception:
+                pass
 
     def _schedule_hide_from_tree(self):
         if self._hide_job:
@@ -328,33 +408,63 @@ class HoverExportExcelIcon:
             return False
 
     def _place_above_heading(self):
-        if not self.treeview or not self.heading_column:
+        # Placement absolu dans le Treeview, aligne sur le bord droit
+        # de la derniere colonne d'entete.
+        if not self.treeview:
             self._frame.place(relx=0.5, rely=0.5, anchor="center")
             return
         try:
-            col_ids = list(self.treeview["columns"])
-            if self.heading_column not in col_ids:
-                self._frame.place(relx=0.5, rely=0.5, anchor="center")
+            tree_width = int(self.treeview.winfo_width() or 0)
+            if tree_width <= 1:
+                # Pas encore rendu -> réessayer au prochain tick
+                self.container.after(30, self._place_above_heading)
                 return
-            col_index = col_ids.index(self.heading_column)
-            x_tree = self.treeview.winfo_x()
-            y_tree = self.treeview.winfo_y()
-            x_offset = 0
-            for col in col_ids[:col_index]:
-                x_offset += int(self.treeview.column(col, "width"))
-            col_width = int(self.treeview.column(self.heading_column, "width"))
-            x = x_tree + x_offset + col_width - 6
-            y = y_tree - 4
-            self._frame.place(x=x, y=y, anchor="ne")
+
+            columns = self._visible_columns()
+            total_width = sum(max(0, int(self.treeview.column(col, "width") or 0))
+                              for col in columns)
+            if total_width <= 0:
+                x = tree_width - 6
+            else:
+                try:
+                    left_fraction = float(self.treeview.xview()[0])
+                except Exception:
+                    left_fraction = 0.0
+                scroll_offset = int(total_width * left_fraction)
+                last_col_right = total_width - scroll_offset
+                x = min(tree_width - 6, max(24, last_col_right - 6))
+
+            self._frame.place(in_=self.treeview, x=x, y=2, anchor="ne")
         except Exception:
             self._frame.place(relx=0.5, rely=0.5, anchor="center")
+
+    def _visible_columns(self):
+        try:
+            display_columns = self.treeview["displaycolumns"]
+            all_columns = list(self.treeview["columns"])
+            if not display_columns or display_columns == "#all":
+                return all_columns
+            columns = []
+            for col in display_columns:
+                if isinstance(col, int):
+                    idx = col - 1
+                    if 0 <= idx < len(all_columns):
+                        columns.append(all_columns[idx])
+                elif col in all_columns:
+                    columns.append(col)
+            return columns or all_columns
+        except Exception:
+            return list(self.treeview["columns"])
 
 
 def enable_treeview_export_badge(*, colors=None, text="⬇Excel",
                                  size=15, tooltip="Excel"):
     """
-    Active un badge d'export pour tous les ttk.Treeview crees apres appel.
+    Active un bouton d'export pour tous les ttk.Treeview crees apres appel.
     """
+    if getattr(ttk.Treeview, "_ijeery_export_patched", False):
+        return
+
     colors = colors or Colors
     original_init = ttk.Treeview.__init__
 
@@ -366,7 +476,9 @@ def enable_treeview_export_badge(*, colors=None, text="⬇Excel",
             cols = list(self["columns"])
             if not cols:
                 return
-            container = self.master
+            # Le badge est placé dans le Treeview lui-même (robuste),
+            # mais on conserve un "parent" pour les after().
+            container = self
             self._export_badge = HoverExportExcelIcon(
                 container=container,
                 command=lambda tv=self: export_treeview_to_excel(
@@ -378,13 +490,15 @@ def enable_treeview_export_badge(*, colors=None, text="⬇Excel",
                 tooltip=tooltip,
                 label_text=None,
                 treeview=self,
-                heading_column=cols[-1]
+                heading_column=cols[-1],
+                always_visible=True
             )
-            self._export_badge.bind_to(self, container)
+            self._export_badge.bind_to(self)
         except Exception:
             pass
 
     ttk.Treeview.__init__ = _init
+    ttk.Treeview._ijeery_export_patched = True
 
 
 # Activation globale
