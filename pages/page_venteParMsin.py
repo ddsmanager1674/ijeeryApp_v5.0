@@ -31,7 +31,6 @@ import customtkinter as ctk
 from tkinter import ttk
 import psycopg2
 import psycopg2.pool
-from resource_utils import get_config_path
 
 # PDF via ReportLab
 from reportlab.lib.pagesizes import A5
@@ -44,6 +43,7 @@ from reportlab.lib import colors
 # ──────────────────────────────────────────────────────────────────────────────
 from app_theme import Colors, Fonts, styled, Theme
 from resource_utils import get_config_path, safe_file_read
+from impression_pdf_utils import build_impression_output_path
 from settings_utils import open_file_if_enabled
 from pages.page_avoir import PageAvoir
 from pages.page_proforma import PageCommandeCli
@@ -2314,11 +2314,13 @@ class PageVenteParMsin(ctk.CTkFrame):
         ref = data['vente']['refvente']
         try:
             if a5:
-                fn = f"Facture_{ref}_{ts}.pdf"
+                base = f"Facture_{ref}_{ts}.pdf"
+                fn, _ = build_impression_output_path(base, temp_prefix="ijeery_facture_")
                 self.generate_pdf_a5(data, fn)
                 self.open_file(fn)
             if ticket:
-                fn = f"Ticket_{ref}_{ts}.pdf"
+                base = f"Ticket_{ref}_{ts}.pdf"
+                fn, _ = build_impression_output_path(base, temp_prefix="ijeery_ticket_")
                 self.generate_ticket_80mm(data, fn)
                 self.open_file(fn)
         except Exception as e:
@@ -2338,10 +2340,12 @@ class PageVenteParMsin(ctk.CTkFrame):
         ts  = datetime.now().strftime('%Y%m%d_%H%M%S')
         ref = data['vente']['refvente']
         if dlg.result == "A5 PDF (Paysage)":
-            fn = f"Facture_{ref}_{ts}.pdf"
+            base = f"Facture_{ref}_{ts}.pdf"
+            fn, _ = build_impression_output_path(base, temp_prefix="ijeery_facture_")
             self.generate_pdf_a5(data, fn)
         else:
-            fn = f"Ticket_{ref}_{ts}.pdf"
+            base = f"Ticket_{ref}_{ts}.pdf"
+            fn, _ = build_impression_output_path(base, temp_prefix="ijeery_ticket_")
             self.generate_ticket_80mm(data, fn)
         self.open_file(fn)
 
@@ -2452,6 +2456,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas as rl_canvas
         from reportlab.platypus import Table as RLTable, TableStyle as RLTableStyle, Paragraph
+        from xml.sax.saxutils import escape
 
         MAX_P1 = 25; MAX_PN = 30; MARGIN = 10 * mm
         c = rl_canvas.Canvas(filename, pagesize=A5)
@@ -2518,48 +2523,77 @@ class PageVenteParMsin(ctk.CTkFrame):
 
         def draw_table(t_top, t_bot, rows, show_tot, total_m=0):
             fh = t_top - t_bot
-            cws = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+            cws = [11*mm, 12*mm, 56*mm, 18*mm, 15*mm, 16*mm]
+            avail_w = sum(cws)
+            style_des_cell = ParagraphStyle(
+                'vpm_des', parent=styles['Normal'],
+                fontName='Helvetica', fontSize=8, leading=9, wordWrap='LTR',
+            )
             rhe = 5.5*mm; max_r = int(fh/rhe)
             res = 2 if show_tot else 0
             slots = max_r - 1 - res
-            body = list(rows)
-            for _ in range(max(0, slots-len(body))): body.append(['']*5)
+            body = []
+            for drow in rows:
+                raw_des = str(drow[2] or '').replace('\r\n', '\n').replace('\r', '\n')
+                des_p = Paragraph(
+                    '<br/>'.join(escape(p) for p in raw_des.split('\n')),
+                    style_des_cell,
+                )
+                body.append([drow[0], drow[1], des_p, drow[3], drow[4], drow[5]])
+            max_fill = max(0, min(slots - len(body), 15))
+            for _ in range(max_fill):
+                body.append(['']*6)
             if show_tot:
-                body += [['', '', 'TOTAL Ar :', self.formater_nombre_pdf(total_m), ''],
-                         ['', '', 'Fmg :',      self.formater_nombre_pdf(total_m*5), '']]
-            td = [['QTE','UNITE','DESIGNATION','PU TTC','MONTANT']] + body
+                body += [['', '', 'TOTAL Ar :', '', '', self.formater_nombre_pdf(total_m)],
+                         ['', '', 'Fmg :', '', '', self.formater_nombre_pdf(total_m*5)]]
+            td = [['QTE','UNITE','DESIGNATION','PU','REMISE','MONTANT']] + body
+            cmds = [
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('LINEBELOW', (0, 0), (-1, 0), 1, rl_colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
+                ('ALIGN', (0, 0), (2, 0), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                ('VALIGN', (0, 1), (-1, -3 if show_tot else -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 2),
+                ('RIGHTPADDING', (3, 0), (-1, -1), 2),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ]
+            if show_tot:
+                cmds += [
+                    ('VALIGN', (0, -2), (-1, -1), 'MIDDLE'),
+                    ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, -2), (-1, -1), 9),
+                    ('LINEABOVE', (0, -2), (-1, -2), 1, rl_colors.black),
+                    ('ALIGN', (2, -2), (2, -1), 'RIGHT'),
+                    ('BACKGROUND', (0, -2), (-1, -1), rl_colors.Color(0.93, 0.93, 0.93)),
+                ]
+            t = RLTable(td, colWidths=cws)
+            t.setStyle(RLTableStyle(cmds))
+            t.wrapOn(c, avail_w, fh * 100)
             c.setLineWidth(1); c.rect(MARGIN, t_bot, width-2*MARGIN, fh)
             xp = MARGIN
             for w_ in cws[:-1]:
                 xp += w_; c.line(xp, t_top, xp, t_bot)
-            arh = fh/len(td)
-            cmds = [
-                ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,0),10),
-                ('LINEBELOW',(0,0),(-1,0),1,rl_colors.black),('FONTSIZE',(0,1),(-1,-1),8),
-                ('ALIGN',(3,0),(-1,-1),'RIGHT'),('ALIGN',(0,0),(2,0),'LEFT'),
-                ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-                ('LEFTPADDING',(0,0),(-1,-1),2),('RIGHTPADDING',(3,0),(-1,-1),2),
-                ('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),
-            ]
-            if show_tot:
-                cmds += [
-                    ('FONTNAME',(0,-2),(-1,-1),'Helvetica-Bold'),('FONTSIZE',(0,-2),(-1,-1),9),
-                    ('LINEABOVE',(0,-2),(-1,-2),1,rl_colors.black),
-                    ('ALIGN',(2,-2),(2,-1),'RIGHT'),
-                    ('BACKGROUND',(0,-2),(-1,-1),rl_colors.Color(0.93,0.93,0.93)),
-                ]
-            t = RLTable(td, colWidths=cws, rowHeights=[arh]*len(td))
-            t.setStyle(RLTableStyle(cmds))
-            t.wrapOn(c, width, height)
-            t.drawOn(c, MARGIN, t_top - len(td)*arh)
+            c.saveState()
+            _clip = c.beginPath()
+            _clip.rect(MARGIN, t_bot, width-2*MARGIN, fh)
+            c.clipPath(_clip, stroke=0, fill=0)
+            t.drawOn(c, MARGIN, t_bot)
+            c.restoreState()
             return t_bot
 
         total_m = 0; all_rows = []
         for d in data['details']:
             mt = d.get('montant_ttc', d.get('montant', 0)); total_m += mt
+            rem = float(d.get('remise', 0) or 0)
+            pu = float(d.get('prixunit', 0) or 0)
             all_rows.append([str(int(d.get('qte',0))), str(d.get('unite','')),
                               str(d.get('designation','')),
-                              self.formater_nombre_pdf(d.get('prixunit',0)),
+                              self.formater_nombre_pdf(pu),
+                              self.formater_nombre_pdf(rem),
                               self.formater_nombre_pdf(mt)])
 
         pages = []
@@ -2633,7 +2667,18 @@ class PageVenteParMsin(ctk.CTkFrame):
                 ('LEFTPADDING',(0,0),(-1,-1),2), ('RIGHTPADDING',(0,0),(-1,-1),0),
                 ('TOPPADDING',(0,0),(-1,-1),0),  ('BOTTOMPADDING',(0,0),(-1,-1),0),
             ]))
-            elems += [ld, Spacer(1, 2*mm)]
+            elems += [ld, Spacer(1, 1*mm)]
+            try:
+                ru = float(d.get('remise', 0) or 0)
+            except (TypeError, ValueError):
+                ru = 0.0
+            if ru:
+                elems += [
+                    Paragraph(f"<i>remise/u: {self.formater_nombre_pdf(ru)}</i>", ss),
+                    Spacer(1, 2*mm),
+                ]
+            else:
+                elems.append(Spacer(1, 2*mm))
             total_ht  += d.get('montant_ht', 0)
             total_rem += d.get('montant_remise', 0)
             total_ttc += d.get('montant_ttc', 0)

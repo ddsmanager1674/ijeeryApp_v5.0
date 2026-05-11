@@ -1034,7 +1034,8 @@ class PagePmtFacture(ctk.CTkToplevel):
                     u.designationunite, 
                     vd.qtvente, 
                     vd.prixunit, 
-                    (vd.qtvente * vd.prixunit) as montant_calcule
+                    COALESCE(vd.remise, 0) AS remise_ligne,
+                    (vd.qtvente * (vd.prixunit - COALESCE(vd.remise, 0))) AS montant_calcule
                 FROM tb_ventedetail vd
                 JOIN tb_vente v ON v.id = vd.idvente
                 JOIN tb_article a ON a.idarticle = vd.idarticle
@@ -1046,7 +1047,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             
             print(f"✓ Nombre d'articles trouvés: {len(articles)}")
             for idx, art in enumerate(articles, 1):
-                idarticle, idunite, idmag, codearticle, designation, unite, qtvente, prixunit, montant = art
+                idarticle, idunite, idmag, codearticle, designation, unite, qtvente, prixunit, remise_ligne, montant = art
                 print(f"\n  Article #{idx}:")
                 print(f"    - ID Article: {idarticle}")
                 print(f"    - Code Article: '{codearticle}'")
@@ -1229,8 +1230,9 @@ class PagePmtFacture(ctk.CTkToplevel):
                     unite = det[5]
                     qte = det[6]
                     prix_unit = det[7]
-                    montant = det[8]
-                    articles_pdf.append((code, designation, unite, qte, prix_unit, montant))
+                    remise_u = det[8]
+                    montant = det[9]
+                    articles_pdf.append((code, designation, unite, qte, prix_unit, remise_u, montant))
                 except Exception:
                     continue
 
@@ -1563,7 +1565,11 @@ class PagePmtFacture(ctk.CTkToplevel):
             total_calcule = 0
 
             for article in articles:
-                code, designation, unite, qte, prix_unit, montant = article
+                if len(article) >= 7:
+                    code, designation, unite, qte, prix_unit, remise_u, montant = article[:7]
+                else:
+                    code, designation, unite, qte, prix_unit, montant = article[:6]
+                    remise_u = 0
                 total_calcule += float(montant)
                 lignes_designation = self._couper_texte(designation, 30)
                 for ligne in lignes_designation:
@@ -1572,6 +1578,13 @@ class PagePmtFacture(ctk.CTkToplevel):
                 detail_qte = f"{qte} {unite or 'unité'} × {prix_unit:.2f} Ar"
                 c.drawString(7 * mm, y, detail_qte)
                 y -= 3.5 * mm
+                try:
+                    rem = float(remise_u or 0)
+                except (TypeError, ValueError):
+                    rem = 0.0
+                if rem:
+                    c.drawString(7 * mm, y, f"  remise/u: {rem:,.2f} Ar".replace(',', ' '))
+                    y -= 3.5 * mm
                 montant_str = f"{montant:,.2f} Ar".replace(',', ' ')
                 c.drawRightString(largeur - 5 * mm, y, montant_str)
                 y -= 5 * mm

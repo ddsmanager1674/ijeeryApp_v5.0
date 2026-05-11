@@ -10,6 +10,7 @@ import os
 import sys # Ajouté pour open_file sur Linux/macOS
 import textwrap # Ajouté pour le formatage du ticket de caisse
 from resource_utils import get_config_path, safe_file_read
+from impression_pdf_utils import build_impression_output_path
 from settings_utils import open_file_if_enabled
 from stock_snapshot import StockSnapshot, format_nombre_auto
 
@@ -1720,21 +1721,29 @@ class PageVente(ctk.CTkFrame):
             return
         
         if result == "A5 PDF (Paysage)":
-            filename = f"Facture_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            base = f"Facture_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            filename, is_temp = build_impression_output_path(base, temp_prefix="ijeery_facture_")
             self.generate_pdf_a5(data, filename)
             try:
                 open_file_if_enabled(filename, operation="open", setting_key="Vente_ImpressionA5", setting_default=1)
             except Exception:
                 self.open_file(filename)
-            messagebox.showinfo("Impression PDF", f"Le fichier PDF '{filename}' a été généré avec succès.")
+            msg = f"Le fichier PDF a été généré avec succès.\n{filename}"
+            if is_temp:
+                msg += "\n\n(Mode impression seule : fichier temporaire, non enregistré dans le dossier configuré.)"
+            messagebox.showinfo("Impression PDF", msg)
         elif result == "Ticket 80mm":
-            filename = f"Ticket_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            base = f"Ticket_{data['vente']['refvente']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            filename, is_temp = build_impression_output_path(base, temp_prefix="ijeery_ticket_")
             self.generate_ticket_80mm(data, filename)
             try:
                 open_file_if_enabled(filename, operation="open", setting_key="Vente_ImpressionTicket", setting_default=0)
             except Exception:
                 self.open_file(filename)
-            messagebox.showinfo("Impression Ticket", f"Le fichier Ticket '{filename}' (texte brut) a été généré avec succès.")
+            msg = f"Le fichier Ticket (texte brut) a été généré avec succès.\n{filename}"
+            if is_temp:
+                msg += "\n\n(Mode impression seule : fichier temporaire.)"
+            messagebox.showinfo("Impression Ticket", msg)
         else:
             messagebox.showinfo("Annulation", "Impression annulée.")
 
@@ -1823,7 +1832,7 @@ class PageVente(ctk.CTkFrame):
             sql_details = """
                 SELECT 
                     u.codearticle, a.designation, u.designationunite, 
-                    vd.qtvente, vd.prixunit, m.designationmag
+                    vd.qtvente, vd.prixunit, COALESCE(vd.remise, 0), m.designationmag
                 FROM tb_ventedetail vd 
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle 
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
@@ -1842,10 +1851,15 @@ class PageVente(ctk.CTkFrame):
                     'code_article': row[0],
                     'designation': row[1],
                     'unite': row[2],
-                    'qte': row[3],
-                    'prixunit': row[4],
-                    'magasin': row[5],
-                    'montant': row[3] * row[4]
+                    'qte': float(row[3] or 0),
+                    'prixunit': float(row[4] or 0),
+                    'remise': float(row[5] or 0),
+                    'magasin': row[6],
+                    'montant_ttc': max(
+                        0.0,
+                        float(row[3] or 0) * float(row[4] or 0)
+                        - float(row[3] or 0) * float(row[5] or 0),
+                    ),
                 }
                 for row in details_rows
             ]
@@ -1876,6 +1890,7 @@ class PageVente(ctk.CTkFrame):
         Génère le PDF de la facture au format A5 avec le modèle canvas amélioré.
         Utilise les données existantes du dictionnaire data.
         """
+        from xml.sax.saxutils import escape
         from reportlab.lib.pagesizes import A5
         from reportlab.lib import colors
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -1943,49 +1958,56 @@ class PageVente(ctk.CTkFrame):
         row_height = 5.5*mm
         max_rows = int(frame_height / row_height)
 
-        # Préparer les données du tableau
-        table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']]
+        style_des_cell = ParagraphStyle(
+            'fact_des',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=8,
+            leading=9,
+            wordWrap='LTR',
+        )
+
+        # Préparer les données du tableau (PU catalogue, remise unitaire, montant net ligne)
+        table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']]
 
         total_montant = 0
         num_articles = 0
         for detail in data['details']:
-            montant = detail.get('montant_ttc', detail.get('montant', 0))
+            qte = float(detail.get('qte', 0) or 0)
+            pu = float(detail.get('prixunit', 0) or 0)
+            rem = float(detail.get('remise', 0) or 0)
+            montant = detail.get('montant_ttc', detail.get('montant'))
+            if montant is None:
+                montant = max(0.0, qte * pu - qte * rem)
+            else:
+                montant = float(montant)
             total_montant += montant
             num_articles += 1
+            raw_des = str(detail.get('designation', '') or '').replace('\r\n', '\n').replace('\r', '\n')
+            des_p = Paragraph('<br/>'.join(escape(part) for part in raw_des.split('\n')), style_des_cell)
             table_data.append([
                 str(int(detail.get('qte', 0))),
                 str(detail.get('unite', '')),
-                str(detail.get('designation', '')),
-                self.formater_nombre(detail.get('prixunit', 0)),
-                self.formater_nombre(montant)
+                des_p,
+                self.formater_nombre(pu),
+                self.formater_nombre(rem),
+                self.formater_nombre(montant),
             ])
 
         # Ajouter des lignes vides
         montant_fmg = int(total_montant * 5)
         empty_rows_needed = max_rows - 1 - num_articles - 2
-        for i in range(max(0, empty_rows_needed)):
-            table_data.append(['', '', '', '', ''])
+        for i in range(max(0, min(empty_rows_needed, 15))):
+            table_data.append(['', '', '', '', '', ''])
 
         # Totaux
-        table_data.append(['', '', 'TOTAL Ar:', self.formater_nombre(total_montant), ''])
-        table_data.append(['', '', 'Fmg:', self.formater_nombre(montant_fmg), ''])
+        table_data.append(['', '', 'TOTAL Ar:', '', '', self.formater_nombre(total_montant)])
+        table_data.append(['', '', 'Fmg:', '', '', self.formater_nombre(montant_fmg)])
 
-        col_widths = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+        col_widths = [11*mm, 12*mm, 56*mm, 18*mm, 15*mm, 16*mm]
+        avail_w = sum(col_widths)
 
-        # Dessiner le cadre et lignes
-        c.setLineWidth(1)
-        c.rect(10*mm, table_bottom, width - 20*mm, frame_height)
-
-        x_pos = 10*mm
-        for w in col_widths[:-1]:
-            x_pos += w
-            c.line(x_pos, table_top, x_pos, table_bottom)
-
-        # Créer le tableau avec hauteurs proportionnelles
-        actual_row_height = frame_height / len(table_data)
-        row_heights = [actual_row_height] * len(table_data)
-
-        articles_table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
+        articles_table = Table(table_data, colWidths=col_widths)
         articles_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('BACKGROUND', (0, -2), (-1, -1), colors.lightgrey),
@@ -1999,17 +2021,30 @@ class PageVente(ctk.CTkFrame):
             ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
             ('ALIGN', (0, 0), (2, 0), 'LEFT'),
             ('ALIGN', (2, -2), (2, -1), 'RIGHT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+            ('VALIGN', (0, 1), (-1, -3), 'TOP'),
+            ('VALIGN', (0, -2), (-1, -1), 'MIDDLE'),
             ('LEFTPADDING', (0, 0), (-1, -1), 1),
             ('RIGHTPADDING', (3, 0), (-1, -1), 1),
             ('TOPPADDING', (0, 0), (-1, -1), 0),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
 
-        articles_table.wrapOn(c, width, height)
-        assert actual_row_height, 'actual_row_height must not be None'
-        actual_total_height = len(table_data) * actual_row_height
-        articles_table.drawOn(c, 10*mm, table_top - actual_total_height)
+        articles_table.wrapOn(c, avail_w, frame_height * 100)
+
+        c.setLineWidth(1)
+        c.rect(10*mm, table_bottom, width - 20*mm, frame_height)
+        x_pos = 10*mm
+        for w in col_widths[:-1]:
+            x_pos += w
+            c.line(x_pos, table_top, x_pos, table_bottom)
+
+        c.saveState()
+        _clip = c.beginPath()
+        _clip.rect(10*mm, table_bottom, width - 20*mm, frame_height)
+        c.clipPath(_clip, stroke=0, fill=0)
+        articles_table.drawOn(c, 10*mm, table_bottom)
+        c.restoreState()
 
         # ✅ 4. TEXTE EN LETTRES
         montant_lettres = nombre_en_lettres_fr(int(total_montant)).upper()
@@ -2055,7 +2090,7 @@ class PageVente(ctk.CTkFrame):
         def line():
             return "-" * MAX_WIDTH
 
-        def format_detail_line(designation, unite, qte, prixunit, montant_total):
+        def format_detail_line(designation, unite, qte, prixunit, montant_total, remise_unitaire=0):
             """Formate une ligne de détail pour le ticket."""
             lines = []
             designation_lines = textwrap.wrap(designation, MAX_WIDTH)
@@ -2073,6 +2108,14 @@ class PageVente(ctk.CTkFrame):
             else:
                  lines.append(qte_pu_line)
                  lines.append(montant_total_str.rjust(MAX_WIDTH)) # Montant sur la ligne suivante
+
+            try:
+                rem = float(remise_unitaire or 0)
+            except (TypeError, ValueError):
+                rem = 0.0
+            if rem != 0:
+                rem_lbl = f"  remise/u: {self.formater_nombre(rem)}"
+                lines.append(rem_lbl[:MAX_WIDTH])
 
             return lines
 
@@ -2095,14 +2138,22 @@ class PageVente(ctk.CTkFrame):
         # --- DÉTAILS ---
         total_general = 0.0
         for detail in details:
-            montant = detail['montant']
+            qte = float(detail.get('qte', 0) or 0)
+            pu = float(detail.get('prixunit', 0) or 0)
+            rem = float(detail.get('remise', 0) or 0)
+            montant = detail.get('montant_ttc', detail.get('montant'))
+            if montant is None:
+                montant = max(0.0, qte * pu - qte * rem)
+            else:
+                montant = float(montant)
             total_general += montant
             content.extend(format_detail_line(
                 detail['designation'], 
                 detail['unite'], 
                 detail['qte'], 
                 detail['prixunit'], 
-                montant
+                montant,
+                rem,
             ))
             content.append("-" * MAX_WIDTH) # Ligne de séparation courte entre articles
 

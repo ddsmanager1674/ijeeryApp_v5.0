@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
+import os
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 import psycopg2
 
 from app_theme import Colors, Fonts
+from impression_pdf_utils import (
+    KEY_DOSSIER_REL,
+    KEY_ENREGISTRER,
+    application_writable_root,
+    default_pdf_export_settings,
+    folder_to_relative_export_path,
+    get_configured_export_directory_abs,
+)
 from settings_utils import (
     GLOBAL_PRINT_KEY,
     load_settings,
@@ -16,12 +25,14 @@ class UserSettingsWindow(ctk.CTkToplevel):
         super().__init__(master)
         self._connect_db = connect_db_callable
         self._settings = load_settings()
+        for _k, _v in default_pdf_export_settings().items():
+            self._settings.setdefault(_k, _v)
 
         self.title("Paramètres utilisateurs")
         self.resizable(True, True)
         self.configure(fg_color=Colors.BG_PAGE)
 
-        w, h = 720, 520
+        w, h = 760, 600
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         self.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
@@ -142,7 +153,7 @@ class UserSettingsWindow(ctk.CTkToplevel):
         card_print = ctk.CTkFrame(body, fg_color=Colors.BG_CARD, corner_radius=10)
         card_print.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(7, 0), pady=(0, 0))
         card_print.grid_columnconfigure(0, weight=1)
-        card_print.grid_rowconfigure(2, weight=1)
+        card_print.grid_rowconfigure(3, weight=1)
 
         ctk.CTkLabel(card_print, text="Options d'impression (PDF)", font=Fonts.bold(13), text_color=Colors.TEXT_PRIMARY).grid(
             row=0, column=0, sticky="w", padx=14, pady=(12, 8)
@@ -160,9 +171,75 @@ class UserSettingsWindow(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY,
         ).grid(row=1, column=0, sticky="w", padx=14, pady=(0, 10))
 
+        # Dossier d'enregistrement des PDF / tickets (racine = dossier de l'application)
+        pdf_export = ctk.CTkFrame(card_print, fg_color="transparent")
+        pdf_export.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 8))
+        pdf_export.grid_columnconfigure(0, weight=1)
+
+        self.var_enregistrer_pdf = ctk.BooleanVar(
+            value=bool(self._settings.get(KEY_ENREGISTRER, 1))
+        )
+        ctk.CTkSwitch(
+            pdf_export,
+            text="Enregistrer les PDF / tickets générés sur le disque",
+            variable=self.var_enregistrer_pdf,
+            onvalue=True,
+            offvalue=False,
+            font=Fonts.body(11),
+            text_color=Colors.TEXT_PRIMARY,
+            command=self._sync_pdf_export_ui,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 4))
+
+        ctk.CTkLabel(
+            pdf_export,
+            text="Si désactivé : fichier temporaire puis ouverture pour impression (aucune copie dans le dossier ci-dessous).",
+            font=Fonts.body(10),
+            text_color=Colors.TEXT_SECONDARY,
+            wraplength=420,
+            justify="left",
+            anchor="w",
+        ).grid(row=1, column=0, sticky="ew", pady=(0, 6))
+
+        ctk.CTkLabel(
+            pdf_export,
+            text="Dossier relatif (sous la racine d'exécution) — saisie ou bouton Parcourir :",
+            font=Fonts.label(11),
+            text_color=Colors.TEXT_SECONDARY,
+            anchor="w",
+        ).grid(row=2, column=0, sticky="w", pady=(0, 4))
+
+        path_row = ctk.CTkFrame(pdf_export, fg_color="transparent")
+        path_row.grid(row=3, column=0, sticky="ew", pady=(0, 0))
+        path_row.grid_columnconfigure(0, weight=1)
+
+        self.entry_pdf_rel = ctk.CTkEntry(
+            path_row,
+            fg_color=Colors.BG_INPUT,
+            border_color=Colors.BORDER,
+            height=32,
+            corner_radius=8,
+            font=Fonts.input(12),
+        )
+        self.entry_pdf_rel.insert(0, str(self._settings.get(KEY_DOSSIER_REL, ".") or "."))
+        self.entry_pdf_rel.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+
+        self.btn_browse_pdf = ctk.CTkButton(
+            path_row,
+            text="📁  Parcourir…",
+            width=118,
+            height=32,
+            corner_radius=8,
+            font=Fonts.bold(11),
+            fg_color=Colors.MIDNIGHT,
+            hover_color=Colors.MIDNIGHT_LIGHT,
+            text_color=Colors.TEXT_ON_DARK,
+            command=self._browse_pdf_export_folder,
+        )
+        self.btn_browse_pdf.grid(row=0, column=1, sticky="e")
+
         # Zone scrollable pour les switches (quand ça dépasse)
         scroll = ctk.CTkScrollableFrame(card_print, fg_color="transparent", corner_radius=0)
-        scroll.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 0))
+        scroll.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 0))
         scroll.grid_columnconfigure(0, weight=1)
 
         # Clés existantes (granularité)
@@ -245,7 +322,7 @@ class UserSettingsWindow(ctk.CTkToplevel):
             height=36,
             corner_radius=8,
             command=self._save_print_settings,
-        ).grid(row=3, column=0, sticky="ew", padx=14, pady=(10, 12))
+        ).grid(row=4, column=0, sticky="ew", padx=14, pady=(10, 12))
 
         # Footer
         footer = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE, corner_radius=0)
@@ -261,6 +338,53 @@ class UserSettingsWindow(ctk.CTkToplevel):
             width=140,
             command=self.destroy,
         ).pack(side="right")
+
+        self._sync_pdf_export_ui()
+
+    def _browse_pdf_export_folder(self):
+        """Ouvre l'explorateur pour choisir un dossier d'export (converti en chemin relatif)."""
+        if not self.var_enregistrer_pdf.get():
+            return
+        try:
+            cur = (self.entry_pdf_rel.get() or ".").strip()
+            draft = {KEY_DOSSIER_REL: cur, KEY_ENREGISTRER: 1}
+            start = get_configured_export_directory_abs(draft)
+            if not os.path.isdir(start):
+                start = application_writable_root()
+        except Exception:
+            start = application_writable_root()
+
+        chosen = filedialog.askdirectory(
+            parent=self,
+            title="Choisir le dossier d'enregistrement des PDF / tickets",
+            initialdir=start,
+        )
+        if not chosen:
+            return
+        rel = folder_to_relative_export_path(chosen)
+        if rel is None:
+            root = application_writable_root()
+            messagebox.showerror(
+                "Dossier invalide",
+                "Le dossier choisi doit se trouver sous la racine d'exécution de l'application :\n\n"
+                f"{root}\n\n"
+                "Choisissez un sous-dossier de cet emplacement (ou ce dossier lui-même).",
+                parent=self,
+            )
+            return
+        self.entry_pdf_rel.configure(state="normal")
+        self.entry_pdf_rel.delete(0, "end")
+        self.entry_pdf_rel.insert(0, rel)
+
+    def _sync_pdf_export_ui(self):
+        """Désactive le dossier relatif si l'enregistrement sur disque est désactivé."""
+        save = self.var_enregistrer_pdf.get()
+        st = "normal" if save else "disabled"
+        try:
+            self.entry_pdf_rel.configure(state=st)
+            self.btn_browse_pdf.configure(state=st)
+        except Exception:
+            pass
 
     def _refresh_user_info(self):
         username = (self._username_var.get() or "").strip()
@@ -378,6 +502,8 @@ class UserSettingsWindow(ctk.CTkToplevel):
     def _save_print_settings(self):
         self._settings = load_settings()
         self._settings[GLOBAL_PRINT_KEY] = 1 if self.var_global_print.get() else 0
+        self._settings[KEY_ENREGISTRER] = 1 if self.var_enregistrer_pdf.get() else 0
+        self._settings[KEY_DOSSIER_REL] = (self.entry_pdf_rel.get() or ".").strip()
         for key, var in self._vars.items():
             self._settings[key] = 1 if var.get() else 0
 

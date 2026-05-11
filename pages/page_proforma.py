@@ -1599,6 +1599,8 @@ class PageCommandeCli(ctk.CTkFrame):
         c.drawCentredString(width/2, height - 51*mm, "PROFORMA")
         c.setFillColor(colors.HexColor("#000000"))
 
+        from xml.sax.saxutils import escape as xml_escape
+
         # ✅ 4. TABLEAU DES ARTICLES
         table_top = height - 55*mm
         table_bottom = 65*mm
@@ -1606,6 +1608,11 @@ class PageCommandeCli(ctk.CTkFrame):
 
         row_height = 5.5*mm
         max_rows = int(frame_height / row_height)
+
+        style_des_cell = ParagraphStyle(
+            'prof_des', parent=styles['Normal'],
+            fontName='Helvetica', fontSize=8, leading=9, wordWrap='LTR',
+        )
 
         # Préparer les données du tableau
         table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']]
@@ -1616,38 +1623,31 @@ class PageCommandeCli(ctk.CTkFrame):
             montant = detail.get('montant_ttc', detail.get('montant', 0))
             total_montant += montant
             num_articles += 1
+            raw_des = str(detail.get('designation', '') or '').replace('\r\n', '\n').replace('\r', '\n')
+            des_p = Paragraph(
+                '<br/>'.join(xml_escape(p) for p in raw_des.split('\n')),
+                style_des_cell,
+            )
             table_data.append([
                 str(int(detail.get('qte', 0))),
                 str(detail.get('unite', '')),
-                str(detail.get('designation', '')),
+                des_p,
                 self.formater_nombre(detail.get('prixunit', 0)),
                 self.formater_nombre(montant)
             ])
 
         # Ajouter des lignes vides
         empty_rows_needed = max_rows - 1 - num_articles - 2
-        for i in range(max(0, empty_rows_needed)):
+        for i in range(max(0, min(empty_rows_needed, 15))):
             table_data.append(['', '', '', '', ''])
 
         # Totaux
         table_data.append(['', '', 'TOTAL Ar:', self.formater_nombre(total_montant), ''])
 
         col_widths = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+        avail_w = sum(col_widths)
 
-        # Dessiner le cadre et lignes
-        c.setLineWidth(1)
-        c.rect(10*mm, table_bottom, width - 20*mm, frame_height)
-
-        x_pos = 10*mm
-        for w in col_widths[:-1]:
-            x_pos += w
-            c.line(x_pos, table_top, x_pos, table_bottom)
-
-        # Créer le tableau avec hauteurs proportionnelles
-        actual_row_height = frame_height / len(table_data)
-        row_heights = [actual_row_height] * len(table_data)
-
-        articles_table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
+        articles_table = Table(table_data, colWidths=col_widths)
         articles_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
@@ -1661,17 +1661,31 @@ class PageCommandeCli(ctk.CTkFrame):
             ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
             ('ALIGN', (0, 0), (2, 0), 'LEFT'),
             ('ALIGN', (2, -1), (2, -1), 'RIGHT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+            ('VALIGN', (0, 1), (-1, -2), 'TOP'),
+            ('VALIGN', (0, -1), (-1, -1), 'MIDDLE'),
             ('LEFTPADDING', (0, 0), (-1, -1), 1),
             ('RIGHTPADDING', (3, 0), (-1, -1), 1),
             ('TOPPADDING', (0, 0), (-1, -1), 0),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
 
-        articles_table.wrapOn(c, width, height)
-        assert actual_row_height, 'actual_row_height must not be None'
-        actual_total_height = len(table_data) * actual_row_height
-        articles_table.drawOn(c, 10*mm, table_top - actual_total_height)
+        articles_table.wrapOn(c, avail_w, frame_height * 100)
+
+        c.setLineWidth(1)
+        c.rect(10*mm, table_bottom, width - 20*mm, frame_height)
+
+        x_pos = 10*mm
+        for w in col_widths[:-1]:
+            x_pos += w
+            c.line(x_pos, table_top, x_pos, table_bottom)
+
+        c.saveState()
+        _clip = c.beginPath()
+        _clip.rect(10*mm, table_bottom, width - 20*mm, frame_height)
+        c.clipPath(_clip, stroke=0, fill=0)
+        articles_table.drawOn(c, 10*mm, table_bottom)
+        c.restoreState()
 
         # ✅ 5. TEXTE EN LETTRES
         montant_lettres = nombre_en_lettres_fr(int(total_montant)).upper()

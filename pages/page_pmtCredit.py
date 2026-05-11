@@ -280,7 +280,32 @@ class PagePmtCredit(ctk.CTkToplevel):
             return None
 
     def _get_articles_vente(self, cursor):
-        """Récupère les articles de la vente"""
+        """Récupère les articles de la vente (tb_ventedetail, avec remise)."""
+        try:
+            cursor.execute(
+                """
+                SELECT 
+                    COALESCE(u.codearticle, '')::text,
+                    a.designation,
+                    COALESCE(u.designationunite, '')::text,
+                    vd.qtvente,
+                    vd.prixunit,
+                    COALESCE(vd.remise, 0),
+                    (vd.qtvente * (vd.prixunit - COALESCE(vd.remise, 0)))
+                FROM tb_ventedetail vd
+                INNER JOIN tb_vente v ON v.id = vd.idvente
+                INNER JOIN tb_article a ON a.idarticle = vd.idarticle
+                LEFT JOIN tb_unite u ON u.idunite = vd.idunite
+                WHERE v.refvente = %s AND COALESCE(vd.deleted, 0) = 0
+                ORDER BY a.designation
+                """,
+                (self.refvente,),
+            )
+            rows = cursor.fetchall()
+            if rows:
+                return rows
+        except Exception as e:
+            print(f"tb_ventedetail indisponible, repli détailvente : {e}")
         try:
             query = """
                 SELECT 
@@ -289,6 +314,7 @@ class PagePmtCredit(ctk.CTkToplevel):
                     p.unite,
                     dv.qtevente,
                     dv.puvente,
+                    0::numeric,
                     (dv.qtevente * dv.puvente) as montant
                 FROM tb_detailvente dv
                 JOIN tb_produit p ON dv.idproduit = p.idproduit
@@ -307,7 +333,7 @@ class PagePmtCredit(ctk.CTkToplevel):
             fd, path = tempfile.mkstemp(prefix='ticket_pmt_', suffix='.pdf')
             os.close(fd)
 
-            total_height = (160 + (len(articles) * 10)) * mm
+            total_height = (160 + (len(articles) * 14)) * mm
             c = canvas.Canvas(path, pagesize=(80*mm, total_height))
             y = total_height - 10*mm
 
@@ -357,25 +383,35 @@ class PagePmtCredit(ctk.CTkToplevel):
             y -= 10*mm
             c.setFont("Helvetica-Bold", 7)
             c.drawString(5*mm, y, "Code")
-            c.drawString(20*mm, y, "Désignation")
+            c.drawString(18*mm, y, "Désignation")
             c.drawRightString(48*mm, y, "Qté")
-            c.drawRightString(62*mm, y, "P.U")
-            c.drawRightString(77*mm, y, "Total")
+            c.drawRightString(58*mm, y, "P.U")
+            c.drawRightString(68*mm, y, "Rm")
+            c.drawRightString(77*mm, y, "Tot")
             y -= 2*mm
             c.line(5*mm, y, 75*mm, y)
             y -= 4*mm
 
             c.setFont("Helvetica", 6.5)
             for art in articles:
-                code = str(art[0])[:8] if art[0] else ""
-                designation = f"{art[1]} ({art[2]})" if art[2] else str(art[1])
-                designation = designation[:20]  # Limite à 20 caractères
+                try:
+                    if len(art) >= 7:
+                        code, desig, unite, qte, pu, remise_u, mtt = art[:7]
+                    else:
+                        code, desig, unite, qte, pu, mtt = art[:6]
+                        remise_u = 0
+                except (ValueError, TypeError):
+                    continue
+                code = str(code)[:8] if code else ""
+                designation = f"{desig} ({unite})" if unite else str(desig)
+                designation = designation[:18]
                 
                 c.drawString(5*mm, y, code)
-                c.drawString(20*mm, y, designation)
-                c.drawRightString(48*mm, y, str(art[3]))
-                c.drawRightString(62*mm, y, f"{art[4]:,.0f}".replace(',', ' '))
-                c.drawRightString(77*mm, y, f"{art[5]:,.0f}".replace(',', ' '))
+                c.drawString(18*mm, y, designation)
+                c.drawRightString(48*mm, y, str(qte))
+                c.drawRightString(58*mm, y, f"{float(pu or 0):,.0f}".replace(',', ' '))
+                c.drawRightString(68*mm, y, f"{float(remise_u or 0):,.0f}".replace(',', ' '))
+                c.drawRightString(77*mm, y, f"{float(mtt or 0):,.0f}".replace(',', ' '))
                 y -= 4*mm
 
             # ============================================

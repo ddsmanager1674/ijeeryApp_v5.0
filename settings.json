@@ -1,5 +1,7 @@
 {
   "Global_Impression": 1,
+  "ImpressionPdf_EnregistrerFichiers": 0,
+  "ImpressionPdf_DossierRelatif": ".",
   "Vente_ImpressionConfirmation": 1,
   "Vente_ImpressionA5": 1,
   "Vente_ImpressionTicket": 1,

@@ -31,6 +31,7 @@ import textwrap
 from decimal import Decimal, InvalidOperation
 
 from resource_utils import get_config_path, safe_file_read
+from impression_pdf_utils import build_impression_output_path
 from app_theme import Colors, Fonts, styled
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
@@ -2307,8 +2308,9 @@ class PageAvoir(ctk.CTkFrame):
 
         try:
             if imprimer_a5 == 1:
-                fn = (f"Avoir_{data['avoir']['refavoir']}_"
-                      f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+                base = (f"Avoir_{data['avoir']['refavoir']}_"
+                        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+                fn, _ = build_impression_output_path(base, temp_prefix="ijeery_avoir_")
                 self.generate_pdf_a5_avoir(data, fn)
                 self.open_file(fn)
                 print(f"✅ Impression A5 : {fn}")
@@ -2324,8 +2326,9 @@ class PageAvoir(ctk.CTkFrame):
             MessageDialog("Attention", "Données de l'avoir introuvables.", type_='warning')
             return
         try:
-            fn = (f"Avoir_{data['avoir']['refavoir']}_"
-                  f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+            base = (f"Avoir_{data['avoir']['refavoir']}_"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+            fn, _ = build_impression_output_path(base, temp_prefix="ijeery_avoir_")
             self.generate_pdf_a5_avoir(data, fn)
             self.open_file(fn)
             MessageDialog("Impression", f"Avoir imprimé : {fn}", type_='info')
@@ -2464,6 +2467,7 @@ class PageAvoir(ctk.CTkFrame):
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas as rl_cv
         from reportlab.platypus import Table, TableStyle, Paragraph
+        from xml.sax.saxutils import escape
 
         MAX_ARTICLES_PAGE1     = 25
         MAX_ARTICLES_SUIVANTES = 30
@@ -2565,36 +2569,41 @@ class PageAvoir(ctk.CTkFrame):
 
         def draw_article_table(table_top, table_bottom, rows, show_totals, total_montant=0):
             frame_height = table_top - table_bottom
-            col_widths   = [12 * mm, 15 * mm, 62 * mm, 19.5 * mm, 19.5 * mm]
+            col_widths   = [11 * mm, 12 * mm, 56 * mm, 18 * mm, 15 * mm, 16 * mm]
+            avail_w      = sum(col_widths)
+            styles       = getSampleStyleSheet()
+            style_des_cell = ParagraphStyle(
+                'avoir_des', parent=styles['Normal'],
+                fontName='Helvetica', fontSize=8, leading=9, wordWrap='LTR',
+            )
             row_height_est = 5.5 * mm
             max_rows = int(frame_height / row_height_est)
             reserved = 2 if show_totals else 0
             content_slots = max_rows - 1 - reserved
 
-            body = list(rows)
-            for _ in range(max(0, content_slots - len(body))):
-                body.append(['', '', '', '', ''])
+            body = []
+            for r in rows:
+                raw_des = str(r[2] or '').replace('\r\n', '\n').replace('\r', '\n')
+                des_p = Paragraph(
+                    '<br/>'.join(escape(p) for p in raw_des.split('\n')),
+                    style_des_cell,
+                )
+                body.append([r[0], r[1], des_p, r[3], r[4], r[5]])
+
+            max_fill = max(0, min(content_slots - len(body), 15))
+            for _ in range(max_fill):
+                body.append(['', '', '', '', '', ''])
 
             if show_totals:
                 montant_fmg = int(total_montant * 5)
                 table_data = (
-                    [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']]
+                    [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']]
                     + body
-                    + [['', '', 'TOTAL Ar :', self.formater_nombre(total_montant), ''],
-                       ['', '', 'Fmg :',      self.formater_nombre(montant_fmg),   '']]
+                    + [['', '', 'TOTAL Ar :', '', '', self.formater_nombre(total_montant)],
+                       ['', '', 'Fmg :', '', '', self.formater_nombre(montant_fmg)]]
                 )
             else:
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']] + body
-
-            c.setLineWidth(1)
-            c.rect(MARGIN, table_bottom, width - 2 * MARGIN, frame_height)
-            x_pos = MARGIN
-            for w in col_widths[:-1]:
-                x_pos += w
-                c.line(x_pos, table_top, x_pos, table_bottom)
-
-            actual_rh   = frame_height / len(table_data)
-            row_heights = [actual_rh] * len(table_data)
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']] + body
 
             style_cmds = [
                 ('BACKGROUND',    (0, 0),  (-1, 0),  colors.lightgrey),
@@ -2604,7 +2613,8 @@ class PageAvoir(ctk.CTkFrame):
                 ('FONTSIZE',      (0, 1),  (-1, -1),  8),
                 ('ALIGN',         (3, 0),  (-1, -1), 'RIGHT'),
                 ('ALIGN',         (0, 0),  (2, 0),   'LEFT'),
-                ('VALIGN',        (0, 0),  (-1, -1), 'MIDDLE'),
+                ('VALIGN',        (0, 0),  (-1, 0),  'MIDDLE'),
+                ('VALIGN',        (0, 1),  (-1, -3 if show_totals else -1), 'TOP'),
                 ('LEFTPADDING',   (0, 0),  (-1, -1),  2),
                 ('RIGHTPADDING',  (3, 0),  (-1, -1),  2),
                 ('TOPPADDING',    (0, 0),  (-1, -1),  0),
@@ -2613,6 +2623,7 @@ class PageAvoir(ctk.CTkFrame):
 
             if show_totals:
                 style_cmds += [
+                    ('VALIGN',     (0, -2), (-1, -1), 'MIDDLE'),
                     ('BACKGROUND', (0, -2), (-1, -1), colors.Color(0.93, 0.93, 0.93)),
                     ('FONTNAME',   (0, -2), (-1, -1), 'Helvetica-Bold'),
                     ('FONTSIZE',   (0, -2), (-1, -1),  9),
@@ -2620,37 +2631,57 @@ class PageAvoir(ctk.CTkFrame):
                     ('ALIGN',      (2, -2), (2, -1),  'RIGHT'),
                 ]
 
-            t = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
+            t = Table(table_data, colWidths=col_widths)
             t.setStyle(TableStyle(style_cmds))
-            t.wrapOn(c, width, height)
-            t.drawOn(c, MARGIN, table_top - len(table_data) * actual_rh)
+            t.wrapOn(c, avail_w, frame_height * 100)
+
+            c.setLineWidth(1)
+            c.rect(MARGIN, table_bottom, width - 2 * MARGIN, frame_height)
+            x_pos = MARGIN
+            for w in col_widths[:-1]:
+                x_pos += w
+                c.line(x_pos, table_top, x_pos, table_bottom)
+
+            c.saveState()
+            _clip = c.beginPath()
+            _clip.rect(MARGIN, table_bottom, width - 2 * MARGIN, frame_height)
+            c.clipPath(_clip, stroke=0, fill=0)
+            t.drawOn(c, MARGIN, table_bottom)
+            c.restoreState()
             return table_bottom
 
         # Préparation des lignes
         total_montant = 0.0
         all_rows      = []
         for detail in data['details']:
+            remise_val = 0.0
+            pu_col = 0.0
             if isinstance(detail, (list, tuple)) and len(detail) >= 8:
                 code, designation, unite, qtavoir, prixunit_net, montant_total, magasin, pu_ttc_brut = detail[:8]
-                prixunit_affiche = pu_ttc_brut
-                montant          = montant_total
+                pu_brut = float(pu_ttc_brut or 0)
+                pu_net = float(prixunit_net or 0)
+                remise_val = max(0.0, pu_brut - pu_net)
+                pu_col = pu_brut
+                montant = float(montant_total or 0)
             elif isinstance(detail, (list, tuple)) and len(detail) >= 7:
                 code, designation, unite, qtavoir, prixunit_net, montant_total, magasin = detail[:7]
-                prixunit_affiche = prixunit_net
-                montant          = montant_total
+                pu_col = float(prixunit_net or 0)
+                montant = float(montant_total or 0)
             else:
-                qtavoir          = detail.get('qtavoir', detail.get('qte', 0))
-                designation      = detail.get('designation', '')
-                unite            = detail.get('unite', '')
-                prixunit_affiche = detail.get('pu_ttc_brut', detail.get('prixunit', 0))
-                montant          = detail.get('montant_ttc', detail.get('montant', 0))
+                qtavoir = detail.get('qtavoir', detail.get('qte', 0))
+                designation = detail.get('designation', '')
+                unite = detail.get('unite', '')
+                pu_col = float(detail.get('pu_ttc_brut', detail.get('prixunit', 0)) or 0)
+                remise_val = float(detail.get('remise', 0) or 0)
+                montant = float(detail.get('montant_ttc', detail.get('montant', 0)) or 0)
 
             total_montant += montant
             all_rows.append([
-                str(int(qtavoir)),
+                str(int(float(qtavoir))),
                 str(unite),
                 str(designation),
-                self.formater_nombre(prixunit_affiche),
+                self.formater_nombre(pu_col),
+                self.formater_nombre(remise_val),
                 self.formater_nombre(montant),
             ])
 
@@ -2724,11 +2755,15 @@ class PageAvoir(ctk.CTkFrame):
             return
 
         if result == "A5 PDF (Paysage)":
-            fn = (f"Avoir_{data['avoir']['refavoir']}_"
-                  f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+            base = (f"Avoir_{data['avoir']['refavoir']}_"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+            fn, is_temp = build_impression_output_path(base, temp_prefix="ijeery_avoir_")
             self.generate_pdf_a5_avoir(data, fn)
             self.open_file(fn)
-            MessageDialog("Impression", f"PDF généré : {fn}", type_='info')
+            msg = f"PDF généré : {fn}"
+            if is_temp:
+                msg += "\n\n(Mode impression seule : fichier temporaire.)"
+            MessageDialog("Impression", msg, type_='info')
         elif result == "Ticket 80mm":
             MessageDialog(
                 "Information",
@@ -2806,8 +2841,8 @@ class PageAvoir(ctk.CTkFrame):
             cursor.execute(
                 """
                 SELECT u.codearticle, a.designation, u.designationunite,
-                       vd.qtvente, vd.prixunit,
-                       vd.qtvente * vd.prixunit AS montant_total,
+                       vd.qtvente, vd.prixunit, COALESCE(vd.remise, 0),
+                       (vd.qtvente * (vd.prixunit - COALESCE(vd.remise, 0))) AS montant_total,
                        m.designationmag
                 FROM tb_ventedetail vd
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
@@ -2845,7 +2880,7 @@ class PageAvoir(ctk.CTkFrame):
         def center(text): return text.center(MAX_WIDTH)
         def line():       return "-" * MAX_WIDTH
 
-        def format_detail_line(designation, qte, unite, prixunit, montant_total):
+        def format_detail_line(designation, qte, unite, prixunit, montant_total, remise_u=0):
             lines = textwrap.wrap(designation, MAX_WIDTH)
             qte_pu_line    = f"{self.formater_nombre(qte)} {unite} @ {self.formater_nombre(prixunit)}"
             montant_str    = self.formater_nombre(montant_total)
@@ -2855,6 +2890,13 @@ class PageAvoir(ctk.CTkFrame):
                 )
             else:
                 lines += [qte_pu_line, montant_str.rjust(MAX_WIDTH)]
+            try:
+                rem = float(remise_u or 0)
+            except (TypeError, ValueError):
+                rem = 0.0
+            if rem != 0:
+                rem_lbl = f"  remise/u: {self.formater_nombre(rem)}"
+                lines.append(rem_lbl[:MAX_WIDTH])
             lines.append("")
             return lines
 
@@ -2870,9 +2912,14 @@ class PageAvoir(ctk.CTkFrame):
         ]
 
         total_general = 0.0
-        for code, designation, unite, qte, prixunit, montant_total, magasin in details:
-            content.extend(format_detail_line(designation, qte, unite, prixunit, montant_total))
-            total_general += montant_total
+        for row in details:
+            if len(row) >= 8:
+                code, designation, unite, qte, prixunit, remise, montant_total, magasin = row[:8]
+            else:
+                code, designation, unite, qte, prixunit, montant_total, magasin = row[:7]
+                remise = 0
+            content.extend(format_detail_line(designation, qte, unite, prixunit, montant_total, remise))
+            total_general += float(montant_total or 0)
 
         content += [
             line(),

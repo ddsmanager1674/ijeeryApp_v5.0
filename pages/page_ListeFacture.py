@@ -7,6 +7,7 @@ from datetime import datetime
 from tkcalendar import DateEntry
 import os
 from resource_utils import get_config_path, get_session_path, safe_file_read
+from impression_pdf_utils import build_impression_output_path
 from log_utils import AppLogger
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
@@ -317,9 +318,16 @@ class PageDetailFacture(ctk.CTkToplevel):
                     'contactcli': contactcli or "N/A",
                 },
                 'details': [
-                    {'code_article': r[0], 'designation': r[1], 'unite': r[2],
-                     'qte': r[3], 'prixunit': r[4], 'remise': r[5], 'magasin': r[6],
-                     'montant': r[3] * (float(r[4]) - float(r[5]))}
+                    {
+                        'code_article': r[0], 'designation': r[1], 'unite': r[2],
+                        'qte': float(r[3] or 0), 'prixunit': float(r[4] or 0),
+                        'remise': float(r[5] or 0), 'magasin': r[6],
+                        'montant_ttc': max(
+                            0.0,
+                            float(r[3] or 0) * float(r[4] or 0)
+                            - float(r[3] or 0) * float(r[5] or 0),
+                        ),
+                    }
                     for r in details_rows
                 ]
             }
@@ -327,12 +335,19 @@ class PageDetailFacture(ctk.CTkToplevel):
             page_vente = PageVente.__new__(PageVente)
             page_vente.infos_societe = societe_info
 
-            filename = os.path.expanduser(
-                f"~\\Desktop\\DUPLICATA_Facture_{refvente.replace('/', '-')}"
-                f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+            safe_ref = refvente.replace("/", "-").replace("\\", "-")
+            basename = f"DUPLICATA_Facture_{safe_ref}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            filename, is_temp = build_impression_output_path(
+                basename, temp_prefix="ijeery_duplicata_"
+            )
 
             self.generate_pdf_a5_duplicata(data, filename, page_vente)
-            messagebox.showinfo(parent=self, title="Succès", message=f"Duplicata généré avec succès !\n{filename}")
+            extra = "\n\n(Fichier temporaire — non enregistré dans le dossier configuré.)" if is_temp else ""
+            messagebox.showinfo(
+                parent=self,
+                title="Succès",
+                message=f"Duplicata généré avec succès !\n{filename}{extra}",
+            )
 
             if os.path.exists(filename):
                 os.startfile(filename)
@@ -411,11 +426,16 @@ class PageDetailFacture(ctk.CTkToplevel):
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas
         from reportlab.platypus import Table, TableStyle, Paragraph
+        from xml.sax.saxutils import escape
         from pages.page_vente import nombre_en_lettres_fr
 
         MAX_ARTICLES_PAGE1     = 25
         MAX_ARTICLES_SUIVANTES = 30
         MARGIN                 = 10 * mm
+
+        dname = os.path.dirname(os.path.abspath(filename))
+        if dname:
+            os.makedirs(dname, exist_ok=True)
 
         c = canvas.Canvas(filename, pagesize=A5)
         width, height = A5
@@ -525,29 +545,35 @@ class PageDetailFacture(ctk.CTkToplevel):
         def draw_article_table(table_top, table_bottom, rows,
                                show_totals, total_montant=0):
             frame_height = table_top - table_bottom
-            col_widths   = [12*mm, 15*mm, 62*mm, 19.5*mm, 19.5*mm]
+            col_widths   = [11*mm, 12*mm, 56*mm, 18*mm, 15*mm, 16*mm]
+            avail_w      = sum(col_widths)
+            styles       = getSampleStyleSheet()
+            style_des_cell = ParagraphStyle(
+                'dup_des', parent=styles['Normal'],
+                fontName='Helvetica', fontSize=8, leading=9, wordWrap='LTR',
+            )
             row_height_est   = 5.5 * mm
             max_rows_visible = int(frame_height / row_height_est)
             reserved_bottom  = 1 if show_totals else 0
             content_slots    = max_rows_visible - 1 - reserved_bottom
-            body = list(rows)
-            for _ in range(max(0, content_slots - len(body))):
-                body.append(['', '', '', '', ''])
+            body = []
+            for r in rows:
+                raw_des = str(r[2] or '').replace('\r\n', '\n').replace('\r', '\n')
+                des_p = Paragraph(
+                    '<br/>'.join(escape(p) for p in raw_des.split('\n')),
+                    style_des_cell,
+                )
+                body.append([r[0], r[1], des_p, r[3], r[4], r[5]])
+            max_fill = max(0, min(content_slots - len(body), 15))
+            for _ in range(max_fill):
+                body.append(['', '', '', '', '', ''])
             if show_totals:
-                total_row  = ['', '', 'TOTAL Ar :', fmt(total_montant), '']
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']] \
+                total_row  = ['', '', 'TOTAL Ar :', '', '', fmt(total_montant)]
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']] \
                              + body + [total_row]
             else:
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU TTC', 'MONTANT']] \
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']] \
                              + body
-            c.setLineWidth(1)
-            c.rect(MARGIN, table_bottom, width - 2*MARGIN, frame_height)
-            x_pos = MARGIN
-            for w in col_widths[:-1]:
-                x_pos += w
-                c.line(x_pos, table_top, x_pos, table_bottom)
-            actual_rh   = frame_height / len(table_data)
-            row_heights = [actual_rh] * len(table_data)
             style_cmds = [
                 ('BACKGROUND',    (0, 0),  (-1, 0),  colors.lightgrey),
                 ('FONTNAME',      (0, 0),  (-1, 0),  'Helvetica-Bold'),
@@ -556,7 +582,7 @@ class PageDetailFacture(ctk.CTkToplevel):
                 ('FONTSIZE',      (0, 1),  (-1, -1),  8),
                 ('ALIGN',         (3, 0),  (-1, -1), 'RIGHT'),
                 ('ALIGN',         (0, 0),  (2, 0),   'LEFT'),
-                ('VALIGN',        (0, 0),  (-1, -1), 'MIDDLE'),
+                ('VALIGN',        (0, 0),  (-1, 0),  'MIDDLE'),
                 ('LEFTPADDING',   (0, 0),  (-1, -1),  2),
                 ('RIGHTPADDING',  (3, 0),  (-1, -1),  2),
                 ('TOPPADDING',    (0, 0),  (-1, -1),  0),
@@ -564,28 +590,51 @@ class PageDetailFacture(ctk.CTkToplevel):
             ]
             if show_totals:
                 style_cmds += [
+                    ('VALIGN', (0, 1), (-1, -2), 'TOP'),
+                    ('VALIGN', (0, -1), (-1, -1), 'MIDDLE'),
                     ('BACKGROUND', (0, -1), (-1, -1), colors.Color(0.93, 0.93, 0.93)),
                     ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
                     ('FONTSIZE',   (0, -1), (-1, -1),  9),
                     ('LINEABOVE',  (0, -1), (-1, -1),  1, colors.black),
                     ('ALIGN',      (2, -1), (2, -1),  'RIGHT'),
                 ]
-            t = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
+            else:
+                style_cmds += [('VALIGN', (0, 1), (-1, -1), 'TOP')]
+            t = Table(table_data, colWidths=col_widths)
             t.setStyle(TableStyle(style_cmds))
-            t.wrapOn(c, width, height)
-            t.drawOn(c, MARGIN, table_top - len(table_data) * actual_rh)
+            t.wrapOn(c, avail_w, frame_height * 100)
+            c.setLineWidth(1)
+            c.rect(MARGIN, table_bottom, width - 2*MARGIN, frame_height)
+            x_pos = MARGIN
+            for w in col_widths[:-1]:
+                x_pos += w
+                c.line(x_pos, table_top, x_pos, table_bottom)
+            c.saveState()
+            _clip = c.beginPath()
+            _clip.rect(MARGIN, table_bottom, width - 2*MARGIN, frame_height)
+            c.clipPath(_clip, stroke=0, fill=0)
+            t.drawOn(c, MARGIN, table_bottom)
+            c.restoreState()
             return table_bottom
 
         total_montant = 0
         all_rows = []
         for detail in data['details']:
-            montant        = detail.get('montant_ttc', detail.get('montant', 0))
+            qte = float(detail.get('qte', 0) or 0)
+            pu = float(detail.get('prixunit', 0) or 0)
+            rem = float(detail.get('remise', 0) or 0)
+            montant = detail.get('montant_ttc', detail.get('montant'))
+            if montant is None:
+                montant = max(0.0, qte * pu - qte * rem)
+            else:
+                montant = float(montant)
             total_montant += montant
             all_rows.append([
                 str(int(detail.get('qte', 0))),
                 str(detail.get('unite', '')),
                 str(detail.get('designation', '')),
-                fmt(detail.get('prixunit', 0)),
+                fmt(pu),
+                fmt(rem),
                 fmt(montant),
             ])
 
