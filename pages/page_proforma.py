@@ -1545,12 +1545,14 @@ class PageCommandeCli(ctk.CTkFrame):
         c = canvas.Canvas(filename, pagesize=A5)
         width, height = A5
 
-        # ✅ 1. EN-TÊTE AVEC VERSET
+        # ✅ 1. EN-TÊTE AVEC VERSET — compact sur 1 ligne
         verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
         c.setLineWidth(1)
-        c.rect(10*mm, height - 15*mm, width - 20*mm, 8*mm)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(width/2, height - 12.5*mm, verset)
+        verset_h = 5 * mm
+        verset_y = height - 11 * mm
+        c.rect(10 * mm, verset_y, width - 20 * mm, verset_h)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(width / 2, verset_y + 1.6 * mm, verset)
 
         # ✅ 2. EN-TÊTE DEUX COLONNES
         styles = getSampleStyleSheet()
@@ -1591,7 +1593,7 @@ class PageCommandeCli(ctk.CTkFrame):
         ]))
 
         header_table.wrapOn(c, width, height)
-        header_table.drawOn(c, 10*mm, height - 48*mm)
+        header_table.drawOn(c, 10 * mm, height - 45 * mm)
 
         # ✅ 3. MARQUEUR PROFORMA (APRÈS L'EN-TÊTE, PETIT, EN ROUGE, MINIMAL SPACE)
         c.setFont("Helvetica-Bold", 14)

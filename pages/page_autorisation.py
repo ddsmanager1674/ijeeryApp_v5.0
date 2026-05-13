@@ -232,8 +232,13 @@ class PageAutorisation(ctk.CTkFrame):
             return
 
         if result[0] == "error":
+            err = result[1] if len(result) > 1 else "Erreur inconnue"
+            try:
+                print(f"[Autorisation] Chargement échoué: {err}")
+            except Exception:
+                pass
             self.status_badge.configure(text="Erreur")
-            self._show_placeholder("Impossible de charger les autorisations.")
+            self._show_placeholder(f"Impossible de charger les autorisations.\n{err}")
             return
 
         _, fonctions, menu_ids, auth = result
@@ -273,6 +278,7 @@ class PageAutorisation(ctk.CTkFrame):
         return names
 
     def _ensure_required_menus(self, cur):
+        self._sync_sequence(cur, "tb_menu_id_seq", "tb_menu", "id")
         cur.execute("SELECT id, designationmenu FROM tb_menu")
         existing = {str(name): int(menu_id) for menu_id, name in cur.fetchall() if name}
 
@@ -287,6 +293,21 @@ class PageAutorisation(ctk.CTkFrame):
 
         cur.connection.commit()
         return existing
+
+    def _sync_sequence(self, cur, seq_name: str, table: str, column: str):
+        """
+        Après une restauration, les séquences peuvent être désynchronisées (duplicate key).
+        On aligne la séquence sur MAX(column)+1 sans casser les données.
+        """
+        cur.execute(
+            f"""
+            SELECT pg_catalog.setval(
+                'public.{seq_name}',
+                COALESCE((SELECT MAX({column}) FROM public.{table}), 0) + 1,
+                false
+            )
+            """
+        )
 
     # ------------------------------------------------------------------
     # Render
@@ -513,6 +534,7 @@ class PageAutorisation(ctk.CTkFrame):
         try:
             conn = self._connect_db()
             with conn.cursor() as cur:
+                self._sync_sequence(cur, "tb_autorisation_id_seq", "tb_autorisation", "id")
                 cur.execute("DELETE FROM tb_autorisation WHERE idfonction = %s", (fonction_id,))
                 for menu_id in selected_ids:
                     cur.execute(

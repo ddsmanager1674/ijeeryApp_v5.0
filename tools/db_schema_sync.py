@@ -311,26 +311,66 @@ def _run_patch_file(conn, path: str, *, dry_run: bool, verbose: bool) -> None:
     with open(path, "r", encoding="utf-8") as f:
         txt = f.read()
 
-    def _strip_line_comments(sql: str) -> str:
-        # Remove full-line and trailing "--" comments (good enough for our patch files)
+    def _strip_full_line_comments(raw: str) -> str:
         out: list[str] = []
-        for ln in sql.splitlines():
+        for ln in raw.splitlines():
             if ln.lstrip().startswith("--"):
                 continue
-            # strip trailing inline comment
-            if "--" in ln:
-                ln = ln.split("--", 1)[0]
             out.append(ln)
-        return "\n".join(out).strip()
+        return "\n".join(out)
 
-    # Split by ';' (patch files here are simple DDL; no dollar-quoted procedures)
-    raw = [s for s in txt.split(";")]
-    statements: list[str] = []
-    for chunk in raw:
-        cleaned = _strip_line_comments(chunk)
-        if cleaned:
-            statements.append(cleaned)
+    def _split_sql_statements(raw: str) -> list[str]:
+        """
+        Split on ';' while respecting dollar-quoted blocks ($$...$$ or $tag$...$tag$).
+        Good enough for our patch files and generated patches.
+        """
+        text = _strip_full_line_comments(raw)
+        statements: list[str] = []
+        buf: list[str] = []
+        i = 0
+        in_quote: str | None = None
 
+        while i < len(text):
+            if in_quote is not None:
+                if text.startswith(in_quote, i):
+                    buf.append(in_quote)
+                    i += len(in_quote)
+                    in_quote = None
+                else:
+                    buf.append(text[i])
+                    i += 1
+                continue
+
+            if text[i] == "$":
+                if i + 1 < len(text) and text[i + 1] == "$":
+                    in_quote = "$$"
+                    buf.append("$$")
+                    i += 2
+                    continue
+                m = re.match(r"\$([a-zA-Z_][a-zA-Z0-9_]*)\$", text[i:])
+                if m:
+                    in_quote = m.group(0)
+                    buf.append(in_quote)
+                    i += len(in_quote)
+                    continue
+
+            if text[i] == ";":
+                stmt = "".join(buf).strip()
+                if stmt:
+                    statements.append(stmt)
+                buf = []
+                i += 1
+                continue
+
+            buf.append(text[i])
+            i += 1
+
+        stmt = "".join(buf).strip()
+        if stmt:
+            statements.append(stmt)
+        return statements
+
+    statements = _split_sql_statements(txt)
     for st in statements:
         _run_sql(conn, st.rstrip() + ";", dry_run=dry_run, verbose=verbose)
 

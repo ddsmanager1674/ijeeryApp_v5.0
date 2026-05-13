@@ -1902,12 +1902,14 @@ class PageVente(ctk.CTkFrame):
         c = canvas.Canvas(filename, pagesize=A5)
         width, height = A5
 
-        # ✅ 1. CADRE DU VERSET (Haut de page avec bordure)
+        # ✅ 1. CADRE DU VERSET (Haut de page) — compact sur 1 ligne
         verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
         c.setLineWidth(1)
-        c.rect(10*mm, height - 15*mm, width - 20*mm, 8*mm)
-        c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(width/2, height - 12.5*mm, verset)
+        verset_h = 5 * mm
+        verset_y = height - 11 * mm
+        c.rect(10 * mm, verset_y, width - 20 * mm, verset_h)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(width / 2, verset_y + 1.6 * mm, verset)
 
         # ✅ 2. EN-TÊTE DEUX COLONNES
         styles = getSampleStyleSheet()
@@ -1942,16 +1944,17 @@ class PageVente(ctk.CTkFrame):
         header_table.setStyle(TableStyle([
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 2),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
         ]))
 
         header_table.wrapOn(c, width, height)
-        header_table.drawOn(c, 10*mm, height - 42*mm)
+        header_table.drawOn(c, 10 * mm, height - 36 * mm)
 
         # ✅ 3. TABLEAU DES ARTICLES
-        table_top = height - 52*mm
+        table_top = height - 46 * mm
         table_bottom = 65*mm
         frame_height = table_top - table_bottom
 
@@ -2007,7 +2010,10 @@ class PageVente(ctk.CTkFrame):
         col_widths = [11*mm, 12*mm, 56*mm, 18*mm, 15*mm, 16*mm]
         avail_w = sum(col_widths)
 
-        articles_table = Table(table_data, colWidths=col_widths)
+        # Header row should stay compact (single-line) on A5
+        header_row_h = 4.2 * mm
+        row_heights = [header_row_h] + [row_height] * max(0, len(table_data) - 1)
+        articles_table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
         articles_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
             ('BACKGROUND', (0, -2), (-1, -1), colors.lightgrey),

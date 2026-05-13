@@ -2504,9 +2504,11 @@ class PageAvoir(ctk.CTkFrame):
         def draw_verset():
             verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
             c.setLineWidth(1)
-            c.rect(MARGIN, height - 15 * mm, width - 2 * MARGIN, 8 * mm)
-            c.setFont("Helvetica-Bold", 9)
-            c.drawCentredString(width / 2, height - 12.5 * mm, verset)
+            verset_h = 5 * mm
+            verset_y = height - 11 * mm
+            c.rect(MARGIN, verset_y, width - 2 * MARGIN, verset_h)
+            c.setFont("Helvetica-Bold", 8)
+            c.drawCentredString(width / 2, verset_y + 1.6 * mm, verset)
 
         def draw_header(is_continuation=False):
             styles  = getSampleStyleSheet()

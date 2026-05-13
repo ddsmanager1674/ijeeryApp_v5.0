@@ -2498,11 +2498,12 @@ class PageVenteParMsin(ctk.CTkFrame):
             ht.setStyle(RLTableStyle([
                 ('GRID', (0,0),(-1,-1), 1, rl_colors.black),
                 ('VALIGN',(0,0),(-1,-1),'TOP'),
-                ('LEFTPADDING',(0,0),(-1,-1),8),
-                ('TOPPADDING',(0,0),(-1,-1),5),
-                ('BOTTOMPADDING',(0,0),(-1,-1),5),
+                ('LEFTPADDING',(0,0),(-1,-1),2),
+                ('RIGHTPADDING',(0,0),(-1,-1),2),
+                ('TOPPADDING',(0,0),(-1,-1),1),
+                ('BOTTOMPADDING',(0,0),(-1,-1),1),
             ]))
-            ht.wrapOn(c, width, height); ht.drawOn(c, MARGIN, height-42*mm)
+            ht.wrapOn(c, width, height); ht.drawOn(c, MARGIN, height-39*mm)
 
         def draw_footer(total_m, table_bottom):
             usable = width - 2*MARGIN
@@ -2570,7 +2571,10 @@ class PageVenteParMsin(ctk.CTkFrame):
                     ('ALIGN', (2, -2), (2, -1), 'RIGHT'),
                     ('BACKGROUND', (0, -2), (-1, -1), rl_colors.Color(0.93, 0.93, 0.93)),
                 ]
-            t = RLTable(td, colWidths=cws)
+            # Header row should stay compact (single-line) on A5
+            header_row_h = 4.2 * mm
+            row_heights = [header_row_h] + [rhe] * max(0, len(td) - 1)
+            t = RLTable(td, colWidths=cws, rowHeights=row_heights)
             t.setStyle(RLTableStyle(cmds))
             t.wrapOn(c, avail_w, fh * 100)
             c.setLineWidth(1); c.rect(MARGIN, t_bot, width-2*MARGIN, fh)
@@ -2607,7 +2611,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         for idx, (ptype, rows) in enumerate(pages):
             last = (idx == len(pages)-1)
             draw_verset(); draw_header(ptype == 'cont')
-            t_top = height-45*mm; t_bot = 55*mm if last else 15*mm
+            t_top = height-42*mm; t_bot = 55*mm if last else 15*mm
             tb = draw_table(t_top, t_bot, rows, last, total_m)
             if last: draw_footer(total_m, tb)
             if len(pages) > 1:

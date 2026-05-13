@@ -469,9 +469,11 @@ class PageDetailFacture(ctk.CTkToplevel):
         def draw_verset():
             verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
             c.setLineWidth(1)
-            c.rect(MARGIN, height - 15*mm, width - 2*MARGIN, 8*mm)
-            c.setFont("Helvetica-Bold", 9)
-            c.drawCentredString(width / 2, height - 12.5*mm, verset)
+            verset_h = 5 * mm
+            verset_y = height - 11 * mm
+            c.rect(MARGIN, verset_y, width - 2 * MARGIN, verset_h)
+            c.setFont("Helvetica-Bold", 8)
+            c.drawCentredString(width / 2, verset_y + 1.6 * mm, verset)
 
         def draw_header(is_continuation=False):
             styles  = getSampleStyleSheet()
@@ -497,12 +499,13 @@ class PageDetailFacture(ctk.CTkToplevel):
             ht.setStyle(TableStyle([
                 ('GRID',          (0, 0), (-1, -1), 1, colors.black),
                 ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING',   (0, 0), (-1, -1), 8),
-                ('TOPPADDING',    (0, 0), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LEFTPADDING',   (0, 0), (-1, -1), 2),
+                ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
+                ('TOPPADDING',    (0, 0), (-1, -1), 1),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
             ]))
             ht.wrapOn(c, width, height)
-            ht.drawOn(c, MARGIN, height - 48*mm)
+            ht.drawOn(c, MARGIN, height - 45*mm)
 
         def draw_duplicata_label():
             c.setFont("Helvetica-Bold", 14)
@@ -600,7 +603,10 @@ class PageDetailFacture(ctk.CTkToplevel):
                 ]
             else:
                 style_cmds += [('VALIGN', (0, 1), (-1, -1), 'TOP')]
-            t = Table(table_data, colWidths=col_widths)
+            # Header row should stay compact (single-line) on A5
+            header_row_h = 4.2 * mm
+            row_heights = [header_row_h] + [row_height_est] * max(0, len(table_data) - 1)
+            t = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
             t.setStyle(TableStyle(style_cmds))
             t.wrapOn(c, avail_w, frame_height * 100)
             c.setLineWidth(1)
