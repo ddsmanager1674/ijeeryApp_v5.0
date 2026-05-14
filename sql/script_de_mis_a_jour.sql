@@ -1,0 +1,312 @@
+-- =============================================================================
+-- Migration : base production (schéma type temp/structure--sg.sql)
+--             -> alignement sur Structure database.sql (référence projet)
+--
+-- Caractères : idempotent (réexécution sans erreur si déjà appliqué).
+-- Exécution  : psql -v ON_ERROR_STOP=1 -f sql/migration_prod_sg_align_structure.sql
+-- =============================================================================
+
+SET client_min_messages = warning;
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1) Tables absentes en prod (CREATE IF NOT EXISTS + séquences + PK)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.event_logs (
+    id_log timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    description text NOT NULL,
+    "user" character varying(150),
+    datetime timestamp with time zone DEFAULT now() NOT NULL
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'event_logs_pkey'
+    ) THEN
+        ALTER TABLE ONLY public.event_logs
+            ADD CONSTRAINT event_logs_pkey PRIMARY KEY (id_log);
+    END IF;
+END $$;
+
+
+CREATE TABLE IF NOT EXISTS public.tb_log_evenements (
+    id_log timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    description text NOT NULL,
+    "user" character varying(150),
+    datetime timestamp with time zone DEFAULT now() NOT NULL
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_log_evenements_pkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_log_evenements
+            ADD CONSTRAINT tb_log_evenements_pkey PRIMARY KEY (id_log);
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_tb_log_evenements_datetime
+    ON public.tb_log_evenements USING btree (datetime DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tb_log_evenements_user
+    ON public.tb_log_evenements USING btree ("user");
+
+
+CREATE TABLE IF NOT EXISTS public.tb_categoriepersonnel (
+    idcategorie integer NOT NULL,
+    titre character varying(120) NOT NULL,
+    description text,
+    dateregistre timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    deleted integer DEFAULT 0
+);
+
+CREATE SEQUENCE IF NOT EXISTS public.tb_categoriepersonnel_idcategorie_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.tb_categoriepersonnel_idcategorie_seq OWNED BY public.tb_categoriepersonnel.idcategorie;
+
+ALTER TABLE ONLY public.tb_categoriepersonnel
+    ALTER COLUMN idcategorie SET DEFAULT nextval('public.tb_categoriepersonnel_idcategorie_seq'::regclass);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_categoriepersonnel_pkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_categoriepersonnel
+            ADD CONSTRAINT tb_categoriepersonnel_pkey PRIMARY KEY (idcategorie);
+    END IF;
+END $$;
+
+
+CREATE TABLE IF NOT EXISTS public.tb_postepersonnel (
+    idposte integer NOT NULL,
+    idcategorie integer,
+    titre character varying(120) NOT NULL,
+    description text,
+    dateregistre timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    deleted integer DEFAULT 0
+);
+
+CREATE SEQUENCE IF NOT EXISTS public.tb_postepersonnel_idposte_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.tb_postepersonnel_idposte_seq OWNED BY public.tb_postepersonnel.idposte;
+
+ALTER TABLE ONLY public.tb_postepersonnel
+    ALTER COLUMN idposte SET DEFAULT nextval('public.tb_postepersonnel_idposte_seq'::regclass);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_postepersonnel_pkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_postepersonnel
+            ADD CONSTRAINT tb_postepersonnel_pkey PRIMARY KEY (idposte);
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_postepersonnel_idcategorie_fkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_postepersonnel
+            ADD CONSTRAINT tb_postepersonnel_idcategorie_fkey
+            FOREIGN KEY (idcategorie) REFERENCES public.tb_categoriepersonnel(idcategorie)
+            ON UPDATE CASCADE ON DELETE SET NULL;
+    END IF;
+END $$;
+
+
+CREATE TABLE IF NOT EXISTS public.tb_entree (
+    id integer NOT NULL,
+    refentree character varying(50),
+    iduser integer,
+    dateregistre timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    description character varying(150),
+    deleted integer DEFAULT 0
+);
+
+CREATE SEQUENCE IF NOT EXISTS public.tb_entree_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.tb_entree_id_seq OWNED BY public.tb_entree.id;
+
+ALTER TABLE ONLY public.tb_entree
+    ALTER COLUMN id SET DEFAULT nextval('public.tb_entree_id_seq'::regclass);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_entree_pkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_entree
+            ADD CONSTRAINT tb_entree_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+
+CREATE TABLE IF NOT EXISTS public.tb_entreedetail (
+    id integer NOT NULL,
+    idmag integer,
+    idarticle integer,
+    idunite integer,
+    qtentree double precision,
+    typemouvement integer DEFAULT 1,
+    deleted integer DEFAULT 0,
+    identree integer,
+    motif character varying(250)
+);
+
+CREATE SEQUENCE IF NOT EXISTS public.tb_entreedetail_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.tb_entreedetail_id_seq OWNED BY public.tb_entreedetail.id;
+
+ALTER TABLE ONLY public.tb_entreedetail
+    ALTER COLUMN id SET DEFAULT nextval('public.tb_entreedetail_id_seq'::regclass);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_entreedetail_pkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_entreedetail
+            ADD CONSTRAINT tb_entreedetail_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+
+CREATE TABLE IF NOT EXISTS public.tb_livraisoncli_attente (
+    id integer NOT NULL,
+    refvente character varying(50),
+    idarticle integer,
+    idunite integer,
+    idmag integer,
+    idclient integer,
+    qt_a_livrer double precision,
+    qt_bl double precision DEFAULT 0,
+    statut character varying(20) DEFAULT 'EN_ATTENTE'::character varying,
+    dateregistre timestamp without time zone,
+    iduser integer
+);
+
+CREATE SEQUENCE IF NOT EXISTS public.tb_livraisoncli_attente_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.tb_livraisoncli_attente_id_seq OWNED BY public.tb_livraisoncli_attente.id;
+
+ALTER TABLE ONLY public.tb_livraisoncli_attente
+    ALTER COLUMN id SET DEFAULT nextval('public.tb_livraisoncli_attente_id_seq'::regclass);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_livraisoncli_attente_pkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_livraisoncli_attente
+            ADD CONSTRAINT tb_livraisoncli_attente_pkey PRIMARY KEY (id);
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_livcli_attente_statut
+    ON public.tb_livraisoncli_attente USING btree (statut);
+
+CREATE INDEX IF NOT EXISTS idx_livcli_attente_refvente
+    ON public.tb_livraisoncli_attente USING btree (refvente);
+
+
+-- ---------------------------------------------------------------------------
+-- 2) Colonnes à ajouter sur tables existantes (prod SG)
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE public.tb_magasin
+    ADD COLUMN IF NOT EXISTS livraison_auto_client smallint NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN public.tb_magasin.livraison_auto_client IS
+    '1 = BL auto (tb_livraisoncli) à la validation facture pour ce magasin ; 0 = manuel.';
+
+ALTER TABLE public.tb_fournisseur
+    ADD COLUMN IF NOT EXISTS nombanque character varying(50);
+
+ALTER TABLE public.tb_fournisseur
+    ADD COLUMN IF NOT EXISTS comptebancaire character varying(50);
+
+ALTER TABLE public.tb_fournisseur
+    ADD COLUMN IF NOT EXISTS adressebanque character varying(75);
+
+ALTER TABLE public.tb_personnel
+    ADD COLUMN IF NOT EXISTS idposte integer;
+
+COMMENT ON COLUMN public.tb_personnel.idposte IS
+    'Lien optionnel vers tb_postepersonnel (nullable, affichage).';
+
+
+-- ---------------------------------------------------------------------------
+-- 3) Type tb_avancepers.datepmt : date -> timestamp (référence)
+-- ---------------------------------------------------------------------------
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tb_avancepers'
+          AND column_name = 'datepmt'
+          AND data_type = 'date'
+    ) THEN
+        ALTER TABLE public.tb_avancepers
+            ALTER COLUMN datepmt TYPE timestamp without time zone
+            USING (datepmt::timestamp without time zone);
+    END IF;
+END $$;
+
+
+-- ---------------------------------------------------------------------------
+-- 4) FK personnel -> poste (après colonne + table poste)
+-- ---------------------------------------------------------------------------
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tb_personnel_idposte_fkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_personnel
+            ADD CONSTRAINT tb_personnel_idposte_fkey
+            FOREIGN KEY (idposte) REFERENCES public.tb_postepersonnel(idposte)
+            ON UPDATE CASCADE ON DELETE SET NULL;
+    END IF;
+END $$;
+
+COMMIT;

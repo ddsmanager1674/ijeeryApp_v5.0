@@ -9,8 +9,8 @@ Objectif:
 - Appliquer les DEFAULT nextval(...) présents dans le dump
 
 Usage:
-  python tools/sync_schema_from_dump.py --dump "Structure database.sql" --out "sql/patch_from_structure_dump.sql" --apply
-  python tools/sync_schema_from_dump.py --dump "Structure database.sql" --out "sql/patch_from_structure_dump.sql"
+  python tools/sync_schema_from_dump.py --dump "Structure database.sql" --out "patch_from_structure_dump.sql" --apply
+  python tools/sync_schema_from_dump.py --dump "Structure database.sql" --out "patch_from_structure_dump.sql"
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 iJeery — DB schema sync (non-destructive)
 
 Goal:
-- Compare the *expected* schema (from `Structure database.sql` + optional patch SQL files)
+- Compare the *expected* schema (from `Structure database.sql` + optional extra SQL via `--extra-sql`)
   with the *actual* schema in PostgreSQL (public schema),
   then apply ONLY additive changes: missing tables, columns, PK/FK constraints, indexes.
 
@@ -523,7 +523,7 @@ def main(argv: list[str]) -> int:
         for st in plan:
             _run_sql(conn, st, dry_run=dry_run, verbose=args.verbose)
 
-        # Run patch SQL files (idempotent) except Structure database.sql which is the dump
+        # Run optional extra SQL files (idempotent) after dump-driven creates
         for p in sql_files:
             if os.path.normcase(p) == os.path.normcase(structure_path):
                 continue
