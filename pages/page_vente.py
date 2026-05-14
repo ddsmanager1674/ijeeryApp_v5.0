@@ -274,7 +274,14 @@ class PageVente(ctk.CTkFrame):
     def formater_nombre(self, nombre):
         """Format auto: 2 décimales sauf si ,00 => entier."""
         return format_nombre_auto(nombre)
-    
+
+    def formater_nombre_pdf(self, n):
+        """Entiers pour PDF A5 (même format que ventes par dépôt)."""
+        try:
+            return "{:,.0f}".format(float(n)).replace(",", ".")
+        except Exception:
+            return "0"
+
     def parser_nombre(self, texte):
         """Convertit un nombre formaté (1.000.000,00) en float"""
         try:

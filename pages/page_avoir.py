@@ -449,6 +449,13 @@ class PageAvoir(ctk.CTkFrame):
             .replace('_TEMP_', '.')
         )
 
+    def formater_nombre_pdf(self, n) -> str:
+        """Entiers pour PDF A5 (même format que ventes par dépôt)."""
+        try:
+            return "{:,.0f}".format(float(n)).replace(",", ".")
+        except Exception:
+            return "0"
+
     def parser_nombre(self, texte) -> float:
         """Convertit un nombre formaté (1.000.000,00) en float."""
         try:
@@ -2490,283 +2497,45 @@ class PageAvoir(ctk.CTkFrame):
 
     def generate_pdf_a5_avoir(self, data: Dict[str, Any], filename: str):
         """
-        Génère un PDF A5 pour un AVOIR.
-        Multi-pages si articles > 25.
-        TOTAL Ar / Fmg en bas du tableau.
-        *** LOGIQUE MÉTIER IMPRESSION — NE PAS MODIFIER ***
+        Génère un PDF A5 pour un AVOIR (même modèle visuel que la facture ventes par dépôt).
+        Les montants et lignes proviennent de `data` (tb_avoirdetail / jointures).
         """
-        from reportlab.lib.pagesizes import A5
-        from reportlab.lib import colors
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import mm
-        from reportlab.pdfgen import canvas as rl_cv
-        from reportlab.platypus import Table, TableStyle, Paragraph
-        from xml.sax.saxutils import escape
-
-        MAX_ARTICLES_PAGE1     = 25
-        MAX_ARTICLES_SUIVANTES = 30
-        MARGIN                 = 10 * mm
-
-        c = rl_cv.Canvas(filename, pagesize=A5)
-        width, height = A5
-
-        societe     = data['societe']
-        utilisateur = data['utilisateur']
-        client      = data['client']
-        avoir       = data.get('avoir', {})
-
-        nomsociete     = societe.get('nomsociete', 'N/A')
-        adressesociete = societe.get('adressesociete') or 'N/A'
-        contactsociete = societe.get('contactsociete') or 'N/A'
-        nifsociete     = societe.get('nifsociete') or 'N/A'
-        statsociete    = societe.get('statsociete') or 'N/A'
-
-        if isinstance(utilisateur, dict):
-            user_name = f"{utilisateur.get('prenomuser','') or ''} {utilisateur.get('nomuser','') or ''}".strip()
-        else:
-            user_name = str(utilisateur or '')
-
-        refavoir          = avoir.get('refavoir', 'N/A')
-        refvente_associe  = avoir.get('refvente_associe') or 'N/A'
-        magasin_vente     = avoir.get('magasin_vente') or 'N/A'
-        dateavoir         = avoir.get('dateavoir')
-        dateavoir_affiche = (
-            dateavoir.strftime("%d/%m/%Y %H:%M")
-            if isinstance(dateavoir, datetime) else (dateavoir or "")
+        from pages.pdf_modele_facture_a5 import (
+            generer_pdf_a5_modele_ventedepot,
+            html_entete_droite_avoir,
         )
 
-        def draw_verset():
-            verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
-            c.setLineWidth(1)
-            verset_h = 5 * mm
-            verset_y = height - 11 * mm
-            c.rect(MARGIN, verset_y, width - 2 * MARGIN, verset_h)
-            c.setFont("Helvetica-Bold", 8)
-            c.drawCentredString(width / 2, verset_y + 1.6 * mm, verset)
-
-        def draw_header(is_continuation=False):
-            styles  = getSampleStyleSheet()
-            style_p = ParagraphStyle('p', fontSize=9, leading=11, parent=styles['Normal'])
-
-            suite_label = " <i>(suite)</i>" if is_continuation else ""
-            gauche = Paragraph(
-                f"<b>{nomsociete}</b><br/>{adressesociete}<br/>"
-                f"TEL: {contactsociete}<br/>NIF: {nifsociete}<br/>STAT: {statsociete}",
-                style_p,
-            )
-            droite = Paragraph(
-                f"<b>AVOIR N°: {refavoir}{suite_label}</b><br/>"
-                f"<b>Du Ref: {refvente_associe}</b><br/>"
-                f"{dateavoir_affiche}<br/>"
-                f"<b>Magasin {magasin_vente}</b><br/>"
-                f"<b>CLIENT: {client['nomcli']}</b><br/>"
-                f"<font size='8'>Op: {user_name}</font>",
-                style_p,
-            )
-            ht = Table([[gauche, droite]], colWidths=[64 * mm, 64 * mm])
-            ht.setStyle(TableStyle([
-                ('GRID',          (0, 0), (-1, -1), 1, colors.black),
-                ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING',   (0, 0), (-1, -1), 8),
-                ('TOPPADDING',    (0, 0), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ]))
-            ht.wrapOn(c, width, height)
-            ht.drawOn(c, MARGIN, height - 42 * mm)
-
-        def draw_footer(total_montant, table_bottom):
-            styles  = getSampleStyleSheet()
-            usable_width = width - 2 * MARGIN
-            montant_lettres = nombre_en_lettres_fr(int(total_montant)).upper()
-
-            p_lettre = Paragraph(
-                f"ARRETE A LA SOMME DE {montant_lettres} ARIARY TTC",
-                ParagraphStyle('fb', parent=styles['Normal'],
-                               fontName='Helvetica-Bold', fontSize=9,
-                               leading=12, alignment=1),
-            )
-            p_mention = Paragraph(
-                "Nous déclinons la responsabilité des marchandises "
-                "non livrées au-delà de 5 jours",
-                ParagraphStyle('fi', parent=styles['Normal'],
-                               fontName='Helvetica-Oblique', fontSize=8,
-                               leading=10, alignment=1),
-            )
-            _, h_l = p_lettre.wrap(usable_width, 40 * mm)
-            _, h_m = p_mention.wrap(usable_width, 20 * mm)
-
-            p_lettre.drawOn(c,  MARGIN, table_bottom - 3 * mm - h_l)
-            p_mention.drawOn(c, MARGIN, table_bottom - 3 * mm - h_l - 2 * mm - h_m)
-
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(MARGIN, 15 * mm, "Le Client")
-            c.drawCentredString(width / 2, 15 * mm, "Le Caissier")
-            c.drawString(width - 35 * mm, 15 * mm, "Le Magasinier")
-
-        def draw_article_table(table_top, table_bottom, rows, show_totals, total_montant=0):
-            frame_height = table_top - table_bottom
-            col_widths   = [11 * mm, 12 * mm, 56 * mm, 18 * mm, 15 * mm, 16 * mm]
-            avail_w      = sum(col_widths)
-            styles       = getSampleStyleSheet()
-            style_des_cell = ParagraphStyle(
-                'avoir_des', parent=styles['Normal'],
-                fontName='Helvetica', fontSize=8, leading=9, wordWrap='LTR',
-            )
-            row_height_est = 5.5 * mm
-            max_rows = int(frame_height / row_height_est)
-            reserved = 2 if show_totals else 0
-            content_slots = max_rows - 1 - reserved
-
-            body = []
-            for r in rows:
-                raw_des = str(r[2] or '').replace('\r\n', '\n').replace('\r', '\n')
-                des_p = Paragraph(
-                    '<br/>'.join(escape(p) for p in raw_des.split('\n')),
-                    style_des_cell,
-                )
-                body.append([r[0], r[1], des_p, r[3], r[4], r[5]])
-
-            max_fill = max(0, min(content_slots - len(body), 15))
-            for _ in range(max_fill):
-                body.append(['', '', '', '', '', ''])
-
-            if show_totals:
-                montant_fmg = int(total_montant * 5)
-                table_data = (
-                    [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']]
-                    + body
-                    + [['', '', 'TOTAL Ar :', '', '', self.formater_nombre(total_montant)],
-                       ['', '', 'Fmg :', '', '', self.formater_nombre(montant_fmg)]]
-                )
-            else:
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']] + body
-
-            style_cmds = [
-                ('BACKGROUND',    (0, 0),  (-1, 0),  colors.lightgrey),
-                ('FONTNAME',      (0, 0),  (-1, 0),  'Helvetica-Bold'),
-                ('FONTSIZE',      (0, 0),  (-1, 0),  10),
-                ('LINEBELOW',     (0, 0),  (-1, 0),  1, colors.black),
-                ('FONTSIZE',      (0, 1),  (-1, -1),  8),
-                ('ALIGN',         (3, 0),  (-1, -1), 'RIGHT'),
-                ('ALIGN',         (0, 0),  (2, 0),   'LEFT'),
-                ('VALIGN',        (0, 0),  (-1, 0),  'MIDDLE'),
-                ('VALIGN',        (0, 1),  (-1, -3 if show_totals else -1), 'TOP'),
-                ('LEFTPADDING',   (0, 0),  (-1, -1),  2),
-                ('RIGHTPADDING',  (3, 0),  (-1, -1),  2),
-                ('TOPPADDING',    (0, 0),  (-1, -1),  0),
-                ('BOTTOMPADDING', (0, 0),  (-1, -1),  0),
-            ]
-
-            if show_totals:
-                style_cmds += [
-                    ('VALIGN',     (0, -2), (-1, -1), 'MIDDLE'),
-                    ('BACKGROUND', (0, -2), (-1, -1), colors.Color(0.93, 0.93, 0.93)),
-                    ('FONTNAME',   (0, -2), (-1, -1), 'Helvetica-Bold'),
-                    ('FONTSIZE',   (0, -2), (-1, -1),  9),
-                    ('LINEABOVE',  (0, -2), (-1, -2),  1, colors.black),
-                    ('ALIGN',      (2, -2), (2, -1),  'RIGHT'),
-                ]
-
-            t = Table(table_data, colWidths=col_widths)
-            t.setStyle(TableStyle(style_cmds))
-            t.wrapOn(c, avail_w, frame_height * 100)
-
-            c.setLineWidth(1)
-            c.rect(MARGIN, table_bottom, width - 2 * MARGIN, frame_height)
-            x_pos = MARGIN
-            for w in col_widths[:-1]:
-                x_pos += w
-                c.line(x_pos, table_top, x_pos, table_bottom)
-
-            c.saveState()
-            _clip = c.beginPath()
-            _clip.rect(MARGIN, table_bottom, width - 2 * MARGIN, frame_height)
-            c.clipPath(_clip, stroke=0, fill=0)
-            t.drawOn(c, MARGIN, table_bottom)
-            c.restoreState()
-            return table_bottom
-
-        # Préparation des lignes
-        total_montant = 0.0
-        all_rows      = []
-        for detail in data['details']:
-            remise_val = 0.0
-            pu_col = 0.0
-            if isinstance(detail, (list, tuple)) and len(detail) >= 8:
-                code, designation, unite, qtavoir, prixunit_net, montant_total, magasin, pu_ttc_brut = detail[:8]
-                pu_brut = float(pu_ttc_brut or 0)
-                pu_net = float(prixunit_net or 0)
-                remise_val = max(0.0, pu_brut - pu_net)
-                pu_col = pu_brut
-                montant = float(montant_total or 0)
-                p_remise_cell = (
-                    self.formater_nombre(pu_net) if remise_val > 0 else ""
-                )
-            elif isinstance(detail, (list, tuple)) and len(detail) >= 7:
-                code, designation, unite, qtavoir, prixunit_net, montant_total, magasin = detail[:7]
-                pu_col = float(prixunit_net or 0)
-                montant = float(montant_total or 0)
-                p_remise_cell = ""
-            else:
-                qtavoir = detail.get('qtavoir', detail.get('qte', 0))
-                designation = detail.get('designation', '')
-                unite = detail.get('unite', '')
-                pu_col = float(detail.get('pu_ttc_brut', detail.get('prixunit', 0)) or 0)
-                remise_val = float(detail.get('remise', 0) or 0)
-                montant = float(detail.get('montant_ttc', detail.get('montant', 0)) or 0)
-                p_remise_cell = (
-                    self.formater_nombre(max(0.0, pu_col - remise_val)) if remise_val > 0 else ""
-                )
-
-            total_montant += montant
-            all_rows.append([
-                str(int(float(qtavoir))),
-                str(unite),
-                str(designation),
-                self.formater_nombre(pu_col),
-                p_remise_cell,
-                self.formater_nombre(montant),
-            ])
-
-        # Découpage en pages
-        pages = []
-        if len(all_rows) <= MAX_ARTICLES_PAGE1:
-            pages.append(('first', all_rows))
+        avoir = data.get("avoir") or {}
+        util = data.get("utilisateur") or {}
+        user_name = f"{util.get('prenomuser', '') or ''} {util.get('nomuser', '') or ''}".strip()
+        mag = str(avoir.get("magasin_vente") or "")
+        da = avoir.get("dateavoir")
+        if isinstance(da, datetime):
+            date_effet = da.strftime("%d/%m/%Y %H:%M")
         else:
-            pages.append(('first', all_rows[:MAX_ARTICLES_PAGE1]))
-            reste = all_rows[MAX_ARTICLES_PAGE1:]
-            while reste:
-                pages.append(('continuation', reste[:MAX_ARTICLES_SUIVANTES]))
-                reste = reste[MAX_ARTICLES_SUIVANTES:]
+            date_effet = str(da or "")
+        date_txt = f"{avoir.get('dateregistre', '') or ''} · Effet: {date_effet}".strip()
 
-        # Rendu page par page
-        for page_idx, (page_type, rows) in enumerate(pages):
-            is_last = (page_idx == len(pages) - 1)
-
-            draw_verset()
-            draw_header(is_continuation=(page_type == 'continuation'))
-
-            table_top    = height - 52 * mm
-            table_bottom = 55 * mm if is_last else 15 * mm
-
-            tb = draw_article_table(
-                table_top, table_bottom, rows,
-                show_totals=is_last, total_montant=total_montant,
-            )
-
-            if is_last:
-                draw_footer(total_montant, table_bottom=tb)
-
-            if len(pages) > 1:
-                c.setFont("Helvetica", 7)
-                c.drawCentredString(width / 2, 8 * mm,
-                                    f"Page {page_idx + 1} / {len(pages)}")
-
-            if not is_last:
-                c.showPage()
-
+        html_r = html_entete_droite_avoir(
+            str(avoir.get("refavoir", "N/A")),
+            str(avoir.get("refvente_associe") or "N/A"),
+            date_txt,
+            mag,
+            (data.get("client") or {}).get("nomcli", "Client"),
+            user_name,
+        )
         try:
-            c.save()
+            generer_pdf_a5_modele_ventedepot(
+                filename,
+                societe=data.get("societe") or {},
+                utilisateur=util,
+                client=data.get("client") or {},
+                magasin_nom=mag,
+                html_right_header=html_r,
+                details=data.get("details") or [],
+                nombre_en_lettres_fr=nombre_en_lettres_fr,
+                formater_nombre_pdf=self.formater_nombre_pdf,
+            )
             print(f"✅ PDF généré : {filename}")
         except Exception as e:
             print(f"❌ Erreur PDF : {e}")

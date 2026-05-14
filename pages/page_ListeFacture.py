@@ -451,278 +451,65 @@ class PageDetailFacture(ctk.CTkToplevel):
 
     def generate_pdf_a5_duplicata(self, data, filename, page_vente):
         """
-        Génère un PDF duplicata avec le label 'DUPLICATA'.
-        - Multi-pages si articles > 25
-        - TOTAL Ar toujours en bas du tableau
-        - Somme en lettres avec retour à la ligne auto + marges gauche/droite
+        Duplicata A5 : même modèle visuel que la facture « ventes par dépôt »,
+        avec mention DUPLICATA et pied de page complémentaire.
         """
-        from reportlab.lib.pagesizes import A5
-        from reportlab.lib import colors
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors as rl_colors
         from reportlab.lib.units import mm
-        from reportlab.pdfgen import canvas
-        from reportlab.platypus import Table, TableStyle, Paragraph
-        from xml.sax.saxutils import escape
-        from pages.page_vente import nombre_en_lettres_fr
 
-        MAX_ARTICLES_PAGE1     = 25
-        MAX_ARTICLES_SUIVANTES = 30
-        MARGIN                 = 10 * mm
+        from pages.pdf_modele_facture_a5 import (
+            generer_pdf_a5_modele_ventedepot,
+            html_entete_droite_facture,
+        )
 
         dname = os.path.dirname(os.path.abspath(filename))
         if dname:
             os.makedirs(dname, exist_ok=True)
 
-        c = canvas.Canvas(filename, pagesize=A5)
-        width, height = A5
+        vente = data["vente"]
+        util = data.get("utilisateur") or {}
+        user_name = f"{util.get('prenomuser') or ''} {util.get('nomuser') or ''}".strip()
+        mag_label = (
+            (data.get("details") or [{}])[0].get("magasin", "N/A")
+            if data.get("details")
+            else "N/A"
+        )
 
-        societe     = data['societe']
-        utilisateur = data['utilisateur']
-        client      = data['client']
-        vente       = data['vente']
+        html_r = html_entete_droite_facture(
+            str(vente.get("refvente", "")),
+            str(vente.get("dateregistre", "")),
+            str(mag_label),
+            (data.get("client") or {}).get("nomcli", "Client"),
+            user_name,
+        )
 
-        nomsociete     = societe.get('nomsociete', 'N/A')
-        adressesociete = societe.get('adressesociete') or societe.get('adresse', 'N/A')
-        contactsociete = societe.get('contactsociete') or societe.get('tel', 'N/A')
-        nifsociete     = societe.get('nifsociete') or societe.get('nif', 'N/A')
-        statsociete    = societe.get('statsociete') or societe.get('stat', 'N/A')
-
-        if isinstance(utilisateur, dict):
-            pren      = utilisateur.get('prenomuser') or ''
-            nomu      = utilisateur.get('nomuser') or ''
-            user_name = f"{pren} {nomu}".strip()
-        else:
-            user_name = str(utilisateur) if utilisateur is not None else ''
-
-        def fmt(valeur):
-            if hasattr(page_vente, 'formater_nombre'):
-                return page_vente.formater_nombre(valeur)
-            try:
-                return f"{float(valeur):,.0f}".replace(",", " ")
-            except Exception:
-                return str(valeur)
-
-        def draw_verset():
-            verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
-            c.setLineWidth(1)
-            verset_h = 5 * mm
-            verset_y = height - 11 * mm
-            c.rect(MARGIN, verset_y, width - 2 * MARGIN, verset_h)
-            c.setFont("Helvetica-Bold", 8)
-            c.drawCentredString(width / 2, verset_y + 1.6 * mm, verset)
-
-        def draw_header(is_continuation=False):
-            styles  = getSampleStyleSheet()
-            style_p = ParagraphStyle('style_p', fontSize=9, leading=11,
-                                     parent=styles['Normal'])
-            gauche_text = (
-                f"<b>{nomsociete}</b><br/>"
-                f"{adressesociete}<br/>"
-                f"TEL: {contactsociete}<br/>"
-                f"NIF: {nifsociete} | STAT: {statsociete}"
-            )
-            suite_label = " <i>(suite)</i>" if is_continuation else ""
-            droite_text = (
-                f"<b>Facture N°: {vente['refvente']}{suite_label}</b><br/>"
-                f"{vente['dateregistre']}<br/>"
-                f"<b>Magasin: {data['details'][0]['magasin'] if data['details'] else 'N/A'}</b><br/>"
-                f"<b>Client: {client['nomcli']}</b><br/>"
-                f"<font size='8'>Op: {user_name}</font>"
-            )
-            gauche = Paragraph(gauche_text, style_p)
-            droite = Paragraph(droite_text, style_p)
-            ht = Table([[gauche, droite]], colWidths=[64*mm, 64*mm])
-            ht.setStyle(TableStyle([
-                ('GRID',          (0, 0), (-1, -1), 1, colors.black),
-                ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING',   (0, 0), (-1, -1), 2),
-                ('RIGHTPADDING',  (0, 0), (-1, -1), 2),
-                ('TOPPADDING',    (0, 0), (-1, -1), 1),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-            ]))
-            ht.wrapOn(c, width, height)
-            ht.drawOn(c, MARGIN, height - 45*mm)
-
-        def draw_duplicata_label():
-            c.setFont("Helvetica-Bold", 14)
-            c.setFillColor(colors.HexColor("#D32F2F"))
-            c.drawCentredString(width / 2, height - 51*mm, "DUPLICATA")
-            c.setFillColor(colors.HexColor("#000000"))
-
-        def draw_footer(total_montant, table_bottom):
-            usable_width    = width - 2 * MARGIN
-            montant_lettres = nombre_en_lettres_fr(int(total_montant)).upper()
-            full_text       = f"ARRETE A LA SOMME DE {montant_lettres}"
-            styles  = getSampleStyleSheet()
-            style_b = ParagraphStyle('footer_bold', parent=styles['Normal'],
-                                     fontName='Helvetica-Bold', fontSize=9,
-                                     leading=12, alignment=1)
-            style_i = ParagraphStyle('footer_italic', parent=styles['Normal'],
-                                     fontName='Helvetica-Oblique', fontSize=8,
-                                     leading=10, alignment=1)
-            p_lettre   = Paragraph(full_text, style_b)
-            p_mention1 = Paragraph(
-                "Nous déclinons la responsabilité des marchandises "
-                "non livrées au-delà de 5 jours", style_i)
-            p_mention2 = Paragraph("CECI EST UN DUPLICATA DE LA FACTURE", style_i)
-            _, h_l  = p_lettre.wrap(usable_width, 40*mm)
-            _, h_m1 = p_mention1.wrap(usable_width, 20*mm)
-            _, h_m2 = p_mention2.wrap(usable_width, 20*mm)
-            gap        = 3 * mm
-            y_lettre   = table_bottom - gap - h_l
-            y_mention1 = y_lettre   - 2*mm - h_m1
-            y_mention2 = y_mention1 - 1*mm - h_m2
-            p_lettre.drawOn(c,   MARGIN, y_lettre)
-            p_mention1.drawOn(c, MARGIN, y_mention1)
-            p_mention2.drawOn(c, MARGIN, y_mention2)
-            sig_y = 15*mm
-            c.setFont("Helvetica-Bold", 10)
-            c.drawString(MARGIN, sig_y, "Le Client")
-            c.drawCentredString(width / 2, sig_y, "Le Caissier")
-            c.drawString(width - 35*mm, sig_y, "Le Magasinier")
-
-        def draw_article_table(table_top, table_bottom, rows,
-                               show_totals, total_montant=0):
-            frame_height = table_top - table_bottom
-            col_widths   = [11*mm, 12*mm, 56*mm, 18*mm, 15*mm, 16*mm]
-            avail_w      = sum(col_widths)
-            styles       = getSampleStyleSheet()
-            style_des_cell = ParagraphStyle(
-                'dup_des', parent=styles['Normal'],
-                fontName='Helvetica', fontSize=8, leading=9, wordWrap='LTR',
-            )
-            row_height_est   = 5.5 * mm
-            max_rows_visible = int(frame_height / row_height_est)
-            reserved_bottom  = 1 if show_totals else 0
-            content_slots    = max_rows_visible - 1 - reserved_bottom
-            body = []
-            for r in rows:
-                raw_des = str(r[2] or '').replace('\r\n', '\n').replace('\r', '\n')
-                des_p = Paragraph(
-                    '<br/>'.join(escape(p) for p in raw_des.split('\n')),
-                    style_des_cell,
-                )
-                body.append([r[0], r[1], des_p, r[3], r[4], r[5]])
-            max_fill = max(0, min(content_slots - len(body), 15))
-            for _ in range(max_fill):
-                body.append(['', '', '', '', '', ''])
-            if show_totals:
-                total_row  = ['', '', 'TOTAL Ar :', '', '', fmt(total_montant)]
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']] \
-                             + body + [total_row]
-            else:
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']] \
-                             + body
-            style_cmds = [
-                ('BACKGROUND',    (0, 0),  (-1, 0),  colors.lightgrey),
-                ('FONTNAME',      (0, 0),  (-1, 0),  'Helvetica-Bold'),
-                ('FONTSIZE',      (0, 0),  (-1, 0),  10),
-                ('LINEBELOW',     (0, 0),  (-1, 0),  1, colors.black),
-                ('FONTSIZE',      (0, 1),  (-1, -1),  8),
-                ('ALIGN',         (3, 0),  (-1, -1), 'RIGHT'),
-                ('ALIGN',         (0, 0),  (2, 0),   'LEFT'),
-                ('VALIGN',        (0, 0),  (-1, 0),  'MIDDLE'),
-                ('LEFTPADDING',   (0, 0),  (-1, -1),  2),
-                ('RIGHTPADDING',  (3, 0),  (-1, -1),  2),
-                ('TOPPADDING',    (0, 0),  (-1, -1),  0),
-                ('BOTTOMPADDING', (0, 0),  (-1, -1),  0),
-            ]
-            if show_totals:
-                style_cmds += [
-                    ('VALIGN', (0, 1), (-1, -2), 'TOP'),
-                    ('VALIGN', (0, -1), (-1, -1), 'MIDDLE'),
-                    ('BACKGROUND', (0, -1), (-1, -1), colors.Color(0.93, 0.93, 0.93)),
-                    ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
-                    ('FONTSIZE',   (0, -1), (-1, -1),  9),
-                    ('LINEABOVE',  (0, -1), (-1, -1),  1, colors.black),
-                    ('ALIGN',      (2, -1), (2, -1),  'RIGHT'),
-                ]
-            else:
-                style_cmds += [('VALIGN', (0, 1), (-1, -1), 'TOP')]
-            # Header row should stay compact (single-line) on A5
-            header_row_h = 4.2 * mm
-            row_heights = [header_row_h] + [row_height_est] * max(0, len(table_data) - 1)
-            t = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
-            t.setStyle(TableStyle(style_cmds))
-            t.wrapOn(c, avail_w, frame_height * 100)
-            c.setLineWidth(1)
-            c.rect(MARGIN, table_bottom, width - 2*MARGIN, frame_height)
-            x_pos = MARGIN
-            for w in col_widths[:-1]:
-                x_pos += w
-                c.line(x_pos, table_top, x_pos, table_bottom)
+        def overlay_duplicata(c, width, height):
             c.saveState()
-            _clip = c.beginPath()
-            _clip.rect(MARGIN, table_bottom, width - 2*MARGIN, frame_height)
-            c.clipPath(_clip, stroke=0, fill=0)
-            t.drawOn(c, MARGIN, table_bottom)
+            c.setFont("Helvetica-Bold", 12)
+            c.setFillColor(rl_colors.HexColor("#D32F2F"))
+            c.drawCentredString(width / 2, height - 43.5 * mm, "DUPLICATA")
             c.restoreState()
-            return table_bottom
 
-        total_montant = 0
-        all_rows = []
-        for detail in data['details']:
-            qte = float(detail.get('qte', 0) or 0)
-            pu = float(detail.get('prixunit', 0) or 0)
-            rem = float(detail.get('remise', 0) or 0)
-            montant = detail.get('montant_ttc', detail.get('montant'))
-            if montant is None:
-                montant = max(0.0, qte * pu - qte * rem)
-            else:
-                montant = float(montant)
-            total_montant += montant
-            p_remise_cell = (
-                fmt(max(0.0, pu - rem)) if rem > 0 else ""
-            )
-            all_rows.append([
-                str(int(detail.get('qte', 0))),
-                str(detail.get('unite', '')),
-                str(detail.get('designation', '')),
-                fmt(pu),
-                p_remise_cell,
-                fmt(montant),
-            ])
+        fmt_pdf = getattr(page_vente, "formater_nombre_pdf", None)
+        from pages.page_vente import nombre_en_lettres_fr as _nef
 
-        pages = []
-        if len(all_rows) <= MAX_ARTICLES_PAGE1:
-            pages.append(('first', all_rows))
-        else:
-            pages.append(('first', all_rows[:MAX_ARTICLES_PAGE1]))
-            reste = all_rows[MAX_ARTICLES_PAGE1:]
-            while reste:
-                pages.append(('continuation', reste[:MAX_ARTICLES_SUIVANTES]))
-                reste = reste[MAX_ARTICLES_SUIVANTES:]
+        generer_pdf_a5_modele_ventedepot(
+            filename,
+            societe=data.get("societe") or {},
+            utilisateur=util,
+            client=data.get("client") or {},
+            magasin_nom=str(mag_label),
+            html_right_header=html_r,
+            details=data.get("details") or [],
+            nombre_en_lettres_fr=_nef,
+            formater_nombre_pdf=fmt_pdf,
+            overlay_apres_entete=overlay_duplicata,
+            paragraphes_footer_supplement=("<i>CECI EST UN DUPLICATA DE LA FACTURE</i>",),
+        )
 
-        for page_idx, (page_type, rows) in enumerate(pages):
-            is_last = (page_idx == len(pages) - 1)
-            draw_verset()
-            draw_header(is_continuation=(page_type == 'continuation'))
-            draw_duplicata_label()
-            table_top    = height - 55*mm
-            table_bottom = 65*mm if is_last else 15*mm
-            tb = draw_article_table(table_top, table_bottom, rows,
-                                    show_totals=is_last,
-                                    total_montant=total_montant)
-            if is_last:
-                draw_footer(total_montant, table_bottom=tb)
-            if len(pages) > 1:
-                c.setFont("Helvetica", 7)
-                c.drawCentredString(width / 2, 8*mm,
-                                    f"Page {page_idx + 1} / {len(pages)}")
-            if not is_last:
-                c.showPage()
-
-        try:
-            c.save()
-        except Exception as e:
-            print(f"❌ Erreur PDF Duplicata : {e}")
-            import traceback
-            traceback.print_exc()
-
-
-# ====================================================================
-# PageListeFacture
-# ====================================================================
+    # --------------------------------------------------------------------
+    # Fin génération duplicata A5
+    # --------------------------------------------------------------------
 
 class PageListeFacture(ctk.CTkFrame):
 
