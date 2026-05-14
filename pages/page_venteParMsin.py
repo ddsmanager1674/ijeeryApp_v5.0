@@ -731,12 +731,12 @@ class PageVenteParMsin(ctk.CTkFrame):
         # utilitaires pour colonnes dynamiques
         def _hide_remise():
             try:
-                self.tree_details.column("Remise (Ar)", width=0, anchor="e", minwidth=0, stretch=False)
+                self.tree_details.column("P.Remise", width=0, anchor="e", minwidth=0, stretch=False)
             except Exception:
                 pass
         def _show_remise():
             try:
-                self.tree_details.column("Remise (Ar)", width=110, anchor="e", minwidth=80, stretch=True)
+                self.tree_details.column("P.Remise", width=110, anchor="e", minwidth=80, stretch=True)
             except Exception:
                 pass
         # intégration sur self pour usage ultérieur
@@ -766,7 +766,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         # ── Colonnes ─────────────────────────────────────────────────────────
         cols = ("ID_Article", "ID_Unite", "ID_Magasin",
                 "Code Article", "Désignation", "Magasin",
-                "Unité", "Remise (Ar)", "Prix Unitaire",
+                "Unité", "Prix Unitaire", "P.Remise",
                 "Quantité Vente", "Montant")
 
         self.tree_details = ttk.Treeview(
@@ -777,13 +777,16 @@ class PageVenteParMsin(ctk.CTkFrame):
         self.tree_details.tag_configure("odd",  background=Colors.BG_ROW_ALT)
 
         for col in cols:
-            self.tree_details.heading(col, text=col.replace("_", " ").title())
+            if col == "P.Remise":
+                self.tree_details.heading(col, text="P.Remise")
+            else:
+                self.tree_details.heading(col, text=col.replace("_", " ").title())
             # cacher certaines colonnes par défaut
             if "ID" in col or col in ("Code Article",):
                 # colonnes techniques ou peu utiles en mode normal
                 self.tree_details.column(col, width=0, stretch=False)
-            elif col == "Remise (Ar)":
-                # remise masquée par défaut et dévoilée dynamiquement
+            elif col == "P.Remise":
+                # masquée si aucune ligne n'a de remise ; sinon prix unitaire après remise
                 self.tree_details.column(col, width=0, anchor="e", minwidth=0, stretch=False)
             elif col in ("Quantité Vente", "Prix Unitaire", "Montant"):
                 self.tree_details.column(col, width=110, anchor="e", minwidth=80)
@@ -928,6 +931,11 @@ class PageVenteParMsin(ctk.CTkFrame):
                     self.tree_details.column("Magasin",         width=max(110, int(w * 0.13)))
                     self.tree_details.column("Unité",           width=max(80,  int(w * 0.08)))
                     self.tree_details.column("Prix Unitaire",   width=max(100, int(w * 0.10)))
+                    try:
+                        if int(self.tree_details.column("P.Remise", "width") or 0) > 1:
+                            self.tree_details.column("P.Remise", width=max(90, int(w * 0.09)))
+                    except Exception:
+                        pass
                     self.tree_details.column("Quantité Vente",  width=max(100, int(w * 0.10)))
                     self.tree_details.column("Montant",         width=max(110, int(w * 0.11)))
         except Exception:
@@ -1335,6 +1343,10 @@ class PageVenteParMsin(ctk.CTkFrame):
         qtvente  = float(detail.get('qtvente', detail.get('qte', 0)))
         prixunit = float(detail.get('prixunit', 0))
         montant_net = max(0, qtvente * prixunit - remise * qtvente)
+        # P.Remise : uniquement si remise > 0 (prix unitaire net = PU - remise unitaire)
+        p_remise_txt = (
+            self.formater_nombre(max(0, prixunit - remise)) if remise > 0 else ""
+        )
         return (
             detail.get('idarticle', ''),
             detail.get('idunite', ''),
@@ -1343,8 +1355,8 @@ class PageVenteParMsin(ctk.CTkFrame):
             detail.get('nom_article', ''),
             detail.get('designationmag', ''),
             detail.get('nom_unite', ''),
-            self.formater_nombre(remise),
             self.formater_nombre(prixunit),
+            p_remise_txt,
             self.formater_nombre(qtvente),
             self.formater_nombre(montant_net),
         )

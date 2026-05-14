@@ -127,7 +127,22 @@ class PageDetailFacture(ctk.CTkToplevel):
         tbl.grid_rowconfigure(0, weight=1)
         tbl.grid_columnconfigure(0, weight=1)
 
-        cols = ("code", "designation", "qte", "prix", "total")
+        def _hide_p_remise():
+            try:
+                self.tree.column("p_remise", width=0, minwidth=0, stretch=False)
+            except Exception:
+                pass
+
+        def _show_p_remise():
+            try:
+                self.tree.column("p_remise", width=100, minwidth=70, anchor="e", stretch=False)
+            except Exception:
+                pass
+
+        self._hide_p_remise_column = _hide_p_remise
+        self._show_p_remise_column = _show_p_remise
+
+        cols = ("code", "designation", "qte", "prix", "p_remise", "total")
         self.tree = ttk.Treeview(tbl, columns=cols, show="headings",
                                  style="Detail.Treeview")
         self.tree.tag_configure("even", background=C.BG_CARD)
@@ -137,13 +152,15 @@ class PageDetailFacture(ctk.CTkToplevel):
         self.tree.heading("designation", text="Désignation")
         self.tree.heading("qte",         text="Qté")
         self.tree.heading("prix",        text="Prix Unit.")
+        self.tree.heading("p_remise",    text="P.Remise")
         self.tree.heading("total",       text="Total")
 
         self.tree.column("code",        width=80,  minwidth=60, anchor="center")
-        self.tree.column("designation", width=350, anchor="w")
+        self.tree.column("designation", width=300, anchor="w")
         self.tree.column("qte",         width=70,  anchor="center")
-        self.tree.column("prix",        width=110, anchor="e")
-        self.tree.column("total",       width=130, anchor="e")
+        self.tree.column("prix",        width=100, anchor="e")
+        self.tree.column("p_remise",    width=0, minwidth=0, stretch=False, anchor="e")
+        self.tree.column("total",       width=120, anchor="e")
 
         sy = ctk.CTkScrollbar(tbl, orientation="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sy.set)
@@ -232,20 +249,39 @@ class PageDetailFacture(ctk.CTkToplevel):
 
             sql = """
                 SELECT u.codearticle, a.designation, vd.qtvente, vd.prixunit,
-                       (vd.qtvente * (vd.prixunit - vd.remise)) as total
+                       COALESCE(vd.remise, 0) AS remise,
+                       (vd.qtvente * (COALESCE(vd.prixunit, 0) - COALESCE(vd.remise, 0))) AS total
                 FROM tb_ventedetail vd
                 INNER JOIN tb_unite u ON vd.idunite = u.idunite
                 INNER JOIN tb_article a ON vd.idarticle = a.idarticle
                 WHERE vd.idvente = %s
             """
             cursor.execute(sql, (idvente,))
-            for idx, r in enumerate(cursor.fetchall()):
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            rows = cursor.fetchall()
+            any_remise = False
+            for idx, r in enumerate(rows):
+                code, des, qte, pu, remise, total = r
+                pu_f = float(pu or 0)
+                rem_f = float(remise or 0)
+                if rem_f > 0:
+                    any_remise = True
+                p_cell = (
+                    self.formater_montant(max(0.0, pu_f - rem_f)) if rem_f > 0 else ""
+                )
                 tag = "even" if idx % 2 == 0 else "odd"
                 self.tree.insert("", "end", values=(
-                    r[0], r[1], self.formater_montant(float(r[2])),
-                    f"{self.formater_montant(float(r[3]))}",
-                    f"{self.formater_montant(float(r[4]))}"
+                    code, des,
+                    self.formater_montant(float(qte or 0)),
+                    self.formater_montant(pu_f),
+                    p_cell,
+                    self.formater_montant(float(total or 0)),
                 ), tags=(tag,))
+            if any_remise:
+                self._show_p_remise_column()
+            else:
+                self._hide_p_remise_column()
             conn.close()
         except Exception as e:
             messagebox.showerror("Erreur SQL",
@@ -572,10 +608,10 @@ class PageDetailFacture(ctk.CTkToplevel):
                 body.append(['', '', '', '', '', ''])
             if show_totals:
                 total_row  = ['', '', 'TOTAL Ar :', '', '', fmt(total_montant)]
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']] \
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']] \
                              + body + [total_row]
             else:
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']] \
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']] \
                              + body
             style_cmds = [
                 ('BACKGROUND',    (0, 0),  (-1, 0),  colors.lightgrey),
@@ -635,12 +671,15 @@ class PageDetailFacture(ctk.CTkToplevel):
             else:
                 montant = float(montant)
             total_montant += montant
+            p_remise_cell = (
+                fmt(max(0.0, pu - rem)) if rem > 0 else ""
+            )
             all_rows.append([
                 str(int(detail.get('qte', 0))),
                 str(detail.get('unite', '')),
                 str(detail.get('designation', '')),
                 fmt(pu),
-                fmt(rem),
+                p_remise_cell,
                 fmt(montant),
             ])
 

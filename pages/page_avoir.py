@@ -677,6 +677,21 @@ class PageAvoir(ctk.CTkFrame):
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(0, weight=1)
 
+        def _hide_p_remise():
+            try:
+                self.tree_details.column("P.Remise", width=0, anchor='e', minwidth=0, stretch=False)
+            except Exception:
+                pass
+
+        def _show_p_remise():
+            try:
+                self.tree_details.column("P.Remise", width=110, anchor='e', minwidth=80, stretch=True)
+            except Exception:
+                pass
+
+        self._hide_p_remise_column = _hide_p_remise
+        self._show_p_remise_column = _show_p_remise
+
         # ── Style TTK (défini une seule fois) ────────────────────────────────
         style = ttk.Style()
         style.theme_use("clam")
@@ -706,7 +721,7 @@ class PageAvoir(ctk.CTkFrame):
         colonnes = (
             "ID_Article", "ID_Unite", "ID_Magasin",
             "Code Article", "Désignation", "Magasin",
-            "Unité", "Prix Unitaire", "Quantité Avoir", "Montant",
+            "Unité", "Prix Unitaire", "P.Remise", "Quantité Avoir", "Montant",
         )
         self.tree_details = ttk.Treeview(
             frame, columns=colonnes, show='headings',
@@ -719,15 +734,20 @@ class PageAvoir(ctk.CTkFrame):
 
         # En-têtes et largeurs
         for col in colonnes:
-            self.tree_details.heading(col, text=col.replace('_', ' '))
+            if col == "P.Remise":
+                self.tree_details.heading(col, text="P.Remise")
+            else:
+                self.tree_details.heading(col, text=col.replace('_', ' '))
             if "ID" in col:
                 self.tree_details.column(col, width=0, stretch=False)
+            elif col == "P.Remise":
+                self.tree_details.column(col, width=0, anchor='e', minwidth=0, stretch=False)
             elif col in ("Quantité Avoir", "Prix Unitaire"):
                 self.tree_details.column(col, width=110, anchor='e')
             elif col == "Montant":
                 self.tree_details.column(col, width=120, anchor='e')
             elif col == "Désignation":
-                self.tree_details.column(col, width=320, anchor='w')
+                self.tree_details.column(col, width=300, anchor='w')
             elif col == "Code Article":
                 self.tree_details.column(col, width=120, anchor='w')
             else:
@@ -1416,6 +1436,8 @@ class PageAvoir(ctk.CTkFrame):
                     return
 
             # Mise à jour de la ligne existante
+            if 'remise' in detail_original:
+                nouveau_detail['remise'] = float(detail_original.get('remise', 0) or 0)
             self.detail_avoir[self.index_ligne_selectionnee] = nouveau_detail
             selected_item = self.tree_details.selection()[0]
             self.tree_details.item(
@@ -1436,6 +1458,10 @@ class PageAvoir(ctk.CTkFrame):
 
         self.calculer_totaux()
         self.reset_detail_form()
+        if not any(float(d.get('remise', 0) or 0) > 0 for d in self.detail_avoir):
+            self._hide_p_remise_column()
+        else:
+            self._show_p_remise_column()
 
     def format_detail_for_treeview(self, detail) -> tuple:
         """Formate un dict de détail en tuple pour le Treeview."""
@@ -1443,6 +1469,9 @@ class PageAvoir(ctk.CTkFrame):
         prixunit  = float(detail.get('prixunit', 0) or 0)
         remise    = float(detail.get('remise', 0) or 0)
         montant   = qtvente * (prixunit - remise)
+        p_remise_txt = (
+            self.formater_nombre(max(0.0, prixunit - remise)) if remise > 0 else ""
+        )
 
         return (
             detail['idarticle'],
@@ -1453,6 +1482,7 @@ class PageAvoir(ctk.CTkFrame):
             detail['designationmag'],
             detail['nom_unite'],
             self.formater_nombre(prixunit),
+            p_remise_txt,
             self.formater_nombre(qtvente),
             self.formater_nombre(montant),
         )
@@ -1470,6 +1500,10 @@ class PageAvoir(ctk.CTkFrame):
             )
 
         self.calculer_totaux()
+        if not any(float(d.get('remise', 0) or 0) > 0 for d in self.detail_avoir):
+            self._hide_p_remise_column()
+        else:
+            self._show_p_remise_column()
 
     def modifier_detail(self, event):
         """
@@ -2599,13 +2633,13 @@ class PageAvoir(ctk.CTkFrame):
             if show_totals:
                 montant_fmg = int(total_montant * 5)
                 table_data = (
-                    [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']]
+                    [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']]
                     + body
                     + [['', '', 'TOTAL Ar :', '', '', self.formater_nombre(total_montant)],
                        ['', '', 'Fmg :', '', '', self.formater_nombre(montant_fmg)]]
                 )
             else:
-                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'REMISE', 'MONTANT']] + body
+                table_data = [['QTE', 'UNITE', 'DESIGNATION', 'PU', 'P.Remise', 'MONTANT']] + body
 
             style_cmds = [
                 ('BACKGROUND',    (0, 0),  (-1, 0),  colors.lightgrey),
@@ -2665,10 +2699,14 @@ class PageAvoir(ctk.CTkFrame):
                 remise_val = max(0.0, pu_brut - pu_net)
                 pu_col = pu_brut
                 montant = float(montant_total or 0)
+                p_remise_cell = (
+                    self.formater_nombre(pu_net) if remise_val > 0 else ""
+                )
             elif isinstance(detail, (list, tuple)) and len(detail) >= 7:
                 code, designation, unite, qtavoir, prixunit_net, montant_total, magasin = detail[:7]
                 pu_col = float(prixunit_net or 0)
                 montant = float(montant_total or 0)
+                p_remise_cell = ""
             else:
                 qtavoir = detail.get('qtavoir', detail.get('qte', 0))
                 designation = detail.get('designation', '')
@@ -2676,6 +2714,9 @@ class PageAvoir(ctk.CTkFrame):
                 pu_col = float(detail.get('pu_ttc_brut', detail.get('prixunit', 0)) or 0)
                 remise_val = float(detail.get('remise', 0) or 0)
                 montant = float(detail.get('montant_ttc', detail.get('montant', 0)) or 0)
+                p_remise_cell = (
+                    self.formater_nombre(max(0.0, pu_col - remise_val)) if remise_val > 0 else ""
+                )
 
             total_montant += montant
             all_rows.append([
@@ -2683,7 +2724,7 @@ class PageAvoir(ctk.CTkFrame):
                 str(unite),
                 str(designation),
                 self.formater_nombre(pu_col),
-                self.formater_nombre(remise_val),
+                p_remise_cell,
                 self.formater_nombre(montant),
             ])
 
@@ -3019,6 +3060,10 @@ class PageAvoir(ctk.CTkFrame):
         # Vider le Treeview
         for item in self.tree_details.get_children():
             self.tree_details.delete(item)
+        try:
+            self._hide_p_remise_column()
+        except Exception:
+            pass
 
         # Remettre les boutons dans leur état initial
         self.btn_enregistrer.configure(

@@ -422,7 +422,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             relief="flat"
         )
 
-        cols = ("Qté", "Article", "Unité", "PU", "Remise", "Montant")
+        cols = ("Qté", "Article", "Unité", "PU", "P.Remise", "Montant")
         tree = ttk.Treeview(tbl_wrap, columns=cols, show="headings", style="Apercu.Treeview", height=12)
         tree.tag_configure("even", background=Colors.BG_CARD)
         tree.tag_configure("odd", background="#F0F4F8")
@@ -432,12 +432,12 @@ class PagePmtFacture(ctk.CTkToplevel):
             "Article": (280, "w"),
             "Unité": (110, "w"),
             "PU": (110, "e"),
-            "Remise": (100, "e"),
+            "P.Remise": (100, "e"),
             "Montant": (120, "e"),
         }
         for col in cols:
             wcol, anc = cfg[col]
-            tree.heading(col, text=col)
+            tree.heading(col, text="P.Remise" if col == "P.Remise" else col)
             tree.column(col, width=wcol, anchor=anc)
 
         sy = ctk.CTkScrollbar(tbl_wrap, orientation="vertical", command=tree.yview)
@@ -447,14 +447,19 @@ class PagePmtFacture(ctk.CTkToplevel):
 
         for i, r in enumerate(details):
             qte, art, unite, pu, remise, montant = r
+            pu_f = float(pu or 0)
+            rem_f = float(remise or 0)
+            p_remise_txt = (
+                self._formater_montant(max(0.0, pu_f - rem_f)) if rem_f > 0 else ""
+            )
             tree.insert(
                 "", "end",
                 values=(
                     str(qte or ""),
                     str(art or ""),
                     str(unite or ""),
-                    self._formater_montant(float(pu or 0)),
-                    self._formater_montant(float(remise or 0)),
+                    self._formater_montant(pu_f),
+                    p_remise_txt,
                     self._formater_montant(float(montant or 0)),
                 ),
                 tags=("even" if i % 2 == 0 else "odd",)
