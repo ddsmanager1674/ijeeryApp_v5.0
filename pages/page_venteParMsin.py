@@ -2443,7 +2443,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             if 'cur' in locals(): cur.close()
             self._put_conn(conn)
 
-    # ── generate_pdf_a5 : inchangé (logique ReportLab complexe) ───────────────
+    # ── generate_pdf_a5 (aligné sur import-version2 — modèle A5 ventes par dépôt) ─
     def generate_pdf_a5(self, data: dict, filename: str):
         """
         Génère le PDF de la facture au format A5 paysage.
@@ -2456,7 +2456,6 @@ class PageVenteParMsin(ctk.CTkFrame):
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas as rl_canvas
         from reportlab.platypus import Table as RLTable, TableStyle as RLTableStyle, Paragraph
-        from xml.sax.saxutils import escape
 
         MAX_P1 = 25; MAX_PN = 30; MARGIN = 10 * mm
         c = rl_canvas.Canvas(filename, pagesize=A5)
@@ -2498,106 +2497,125 @@ class PageVenteParMsin(ctk.CTkFrame):
             ht.setStyle(RLTableStyle([
                 ('GRID', (0,0),(-1,-1), 1, rl_colors.black),
                 ('VALIGN',(0,0),(-1,-1),'TOP'),
-                ('LEFTPADDING',(0,0),(-1,-1),2),
-                ('RIGHTPADDING',(0,0),(-1,-1),2),
-                ('TOPPADDING',(0,0),(-1,-1),1),
-                ('BOTTOMPADDING',(0,0),(-1,-1),1),
+                ('LEFTPADDING',(0,0),(-1,-1),8),
+                ('TOPPADDING',(0,0),(-1,-1),5),
+                ('BOTTOMPADDING',(0,0),(-1,-1),5),
             ]))
-            ht.wrapOn(c, width, height); ht.drawOn(c, MARGIN, height-39*mm)
+            ht.wrapOn(c, width, height); ht.drawOn(c, MARGIN, height-42*mm)
 
         def draw_footer(total_m, table_bottom):
             usable = width - 2*MARGIN
             lettres = nombre_en_lettres_fr(int(total_m)).upper()
+
+            # ── Bande TOTAL séparée (sous le tableau) ─────────────────────────
+            band_h = 14*mm
+            band_y = table_bottom - band_h
+            c.setLineWidth(1.2)
+            c.rect(MARGIN, band_y, usable, band_h)
+
+            # Ligne de séparation horizontale entre les deux lignes de total
+            mid_y = band_y + band_h / 2
+            c.setLineWidth(0.5)
+            c.line(MARGIN, mid_y, MARGIN + usable, mid_y)
+
+            # Ligne verticale séparant libellé et montant
+            sep_x = MARGIN + usable * 0.60
+            c.line(sep_x, band_y, sep_x, band_y + band_h)
+
+            # Ligne 1 : TOTAL ARIARY
+            c.setFont("Helvetica-Bold", 10)
+            c.drawRightString(sep_x - 3, band_y + band_h/2 + 1.5*mm, "TOTAL ARIARY:")
+            c.setFont("Helvetica-Bold", 11)
+            c.drawRightString(MARGIN + usable - 3, band_y + band_h/2 + 1.5*mm,
+                              self.formater_nombre_pdf(total_m))
+
+            # Ligne 2 : TOTAL en FMG
+            c.setFont("Helvetica-BoldOblique", 9)
+            c.drawRightString(sep_x - 3, band_y + band_h/2 - 5.5*mm, "TOTAL en FMG:")
+            c.setFont("Helvetica-Bold", 9)
+            c.drawRightString(MARGIN + usable - 3, band_y + band_h/2 - 5.5*mm,
+                              self.formater_nombre_pdf(total_m * 5))
+
+            # ── Texte en lettres + mention ─────────────────────────────────────
             pb = ParagraphStyle('pb', parent=styles['Normal'],
                                 fontName='Helvetica-Bold', fontSize=9, leading=12, alignment=1)
             pi = ParagraphStyle('pi', parent=styles['Normal'],
                                 fontName='Helvetica-Oblique', fontSize=8, leading=10, alignment=1)
             pl = Paragraph(f"ARRETE A LA SOMME DE {lettres} ARIARY TTC", pb)
             pm = Paragraph("Nous déclinons la responsabilité des marchandises non livrées au-delà de 5 jours", pi)
-            _, hl = pl.wrap(usable, 40*mm); _, hm = pm.wrap(usable, 20*mm)
-            yl = table_bottom - 3*mm - hl; ym = yl - 2*mm - hm
+            _, hl = pl.wrap(usable, 20*mm); _, hm = pm.wrap(usable, 15*mm)
+            yl = band_y - 2*mm - hl
+            ym = yl - 1.5*mm - hm
             pl.drawOn(c, MARGIN, yl); pm.drawOn(c, MARGIN, ym)
+
+            # ── Signatures ────────────────────────────────────────────────────
             c.setFont("Helvetica-Bold", 10)
             c.drawString(MARGIN, 15*mm, "Le Client")
             c.drawCentredString(width/2, 15*mm, "Le Caissier")
             c.drawString(width-35*mm, 15*mm, "Le Magasinier")
 
         def draw_table(t_top, t_bot, rows, show_tot, total_m=0):
+            from reportlab.lib.styles import ParagraphStyle as _PS
+            from reportlab.platypus import Paragraph as _Para
             fh = t_top - t_bot
-            cws = [11*mm, 12*mm, 56*mm, 18*mm, 15*mm, 16*mm]
-            avail_w = sum(cws)
-            style_des_cell = ParagraphStyle(
-                'vpm_des', parent=styles['Normal'],
-                fontName='Helvetica', fontSize=8, leading=9, wordWrap='LTR',
-            )
+            cws = [12*mm, 15*mm, 50*mm, 17*mm, 17*mm, 17*mm]
             rhe = 5.5*mm; max_r = int(fh/rhe)
-            res = 2 if show_tot else 0
-            slots = max_r - 1 - res
-            body = []
-            for drow in rows:
-                raw_des = str(drow[2] or '').replace('\r\n', '\n').replace('\r', '\n')
-                des_p = Paragraph(
-                    '<br/>'.join(escape(p) for p in raw_des.split('\n')),
-                    style_des_cell,
-                )
-                body.append([drow[0], drow[1], des_p, drow[3], drow[4], drow[5]])
-            max_fill = max(0, min(slots - len(body), 15))
-            for _ in range(max_fill):
-                body.append(['']*6)
-            if show_tot:
-                body += [['', '', 'TOTAL Ar :', '', '', self.formater_nombre_pdf(total_m)],
-                         ['', '', 'Fmg :', '', '', self.formater_nombre_pdf(total_m*5)]]
-            td = [['QTE','UNITE','DESIGNATION','PU','REMISE','MONTANT']] + body
+            slots = max_r - 1
+
+            # Style pour la désignation avec wrapping
+            ps_desig = _PS('desig', fontName='Helvetica', fontSize=8,
+                           leading=9, wordWrap='LTR')
+
+            def make_row(r):
+                """Convertit la cellule désignation (col 2) en Paragraph pour le wrap."""
+                row = list(r)
+                if row[2] and isinstance(row[2], str):
+                    row[2] = _Para(row[2], ps_desig)
+                return row
+
+            body = [make_row(r) for r in rows]
+            for _ in range(max(0, slots-len(body))): body.append(['']*6)
+
+            hdr = [['QTE','UNITE','DESIGNATION','PU TTC','P.REMISE','MONTANT']]
+            td = hdr + body
+
+            # Hauteur fixe pour l'entête, None (auto) pour les lignes de données
+            row_heights = [rhe] + [None] * len(body)
+
             cmds = [
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('LINEBELOW', (0, 0), (-1, 0), 1, rl_colors.black),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('ALIGN', (3, 0), (-1, -1), 'RIGHT'),
-                ('ALIGN', (0, 0), (2, 0), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
-                ('VALIGN', (0, 1), (-1, -3 if show_tot else -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 2),
-                ('RIGHTPADDING', (3, 0), (-1, -1), 2),
-                ('TOPPADDING', (0, 0), (-1, -1), 0),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('FONTSIZE',(0,0),(-1,0),9),
+                ('LINEBELOW',(0,0),(-1,0),1,rl_colors.black),('FONTSIZE',(0,1),(-1,-1),8),
+                ('ALIGN',(3,0),(-1,-1),'RIGHT'),('ALIGN',(0,0),(2,0),'LEFT'),
+                ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+                ('LEFTPADDING',(0,0),(-1,-1),2),('RIGHTPADDING',(3,0),(-1,-1),2),
+                ('TOPPADDING',(0,0),(-1,-1),1),('BOTTOMPADDING',(0,0),(-1,-1),1),
+                ('GRID',(0,0),(-1,-1),0.3,rl_colors.Color(0.75,0.75,0.75)),
+                ('LINEBELOW',(0,0),(-1,0),1,rl_colors.black),
             ]
-            if show_tot:
-                cmds += [
-                    ('VALIGN', (0, -2), (-1, -1), 'MIDDLE'),
-                    ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, -2), (-1, -1), 9),
-                    ('LINEABOVE', (0, -2), (-1, -2), 1, rl_colors.black),
-                    ('ALIGN', (2, -2), (2, -1), 'RIGHT'),
-                    ('BACKGROUND', (0, -2), (-1, -1), rl_colors.Color(0.93, 0.93, 0.93)),
-                ]
-            # Header row should stay compact (single-line) on A5
-            header_row_h = 4.2 * mm
-            row_heights = [header_row_h] + [rhe] * max(0, len(td) - 1)
             t = RLTable(td, colWidths=cws, rowHeights=row_heights)
             t.setStyle(RLTableStyle(cmds))
-            t.wrapOn(c, avail_w, fh * 100)
-            c.setLineWidth(1); c.rect(MARGIN, t_bot, width-2*MARGIN, fh)
+            tw, th = t.wrapOn(c, width - 2*MARGIN, fh)
+            t.drawOn(c, MARGIN, t_top - th)
+            c.setLineWidth(1); c.rect(MARGIN, t_top - th, width-2*MARGIN, th)
             xp = MARGIN
             for w_ in cws[:-1]:
-                xp += w_; c.line(xp, t_top, xp, t_bot)
-            c.saveState()
-            _clip = c.beginPath()
-            _clip.rect(MARGIN, t_bot, width-2*MARGIN, fh)
-            c.clipPath(_clip, stroke=0, fill=0)
-            t.drawOn(c, MARGIN, t_bot)
-            c.restoreState()
-            return t_bot
+                xp += w_; c.line(xp, t_top, xp, t_top - th)
+            return t_top - th
 
         total_m = 0; all_rows = []
         for d in data['details']:
             mt = d.get('montant_ttc', d.get('montant', 0)); total_m += mt
-            rem = float(d.get('remise', 0) or 0)
-            pu = float(d.get('prixunit', 0) or 0)
+            pu = d.get('prixunit', 0)
+            remise = d.get('remise', 0)
+            # P.REMISE vide si aucune remise, sinon prix unitaire - remise
+            if float(remise) > 0:
+                prix_remise_str = self.formater_nombre_pdf(max(0, float(pu) - float(remise)))
+            else:
+                prix_remise_str = ""
             all_rows.append([str(int(d.get('qte',0))), str(d.get('unite','')),
                               str(d.get('designation','')),
                               self.formater_nombre_pdf(pu),
-                              self.formater_nombre_pdf(rem),
+                              prix_remise_str,
                               self.formater_nombre_pdf(mt)])
 
         pages = []
@@ -2611,7 +2629,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         for idx, (ptype, rows) in enumerate(pages):
             last = (idx == len(pages)-1)
             draw_verset(); draw_header(ptype == 'cont')
-            t_top = height-42*mm; t_bot = 55*mm if last else 15*mm
+            t_top = height-45*mm; t_bot = 69*mm if last else 15*mm
             tb = draw_table(t_top, t_bot, rows, last, total_m)
             if last: draw_footer(total_m, tb)
             if len(pages) > 1:
