@@ -8,7 +8,7 @@ import subprocess
 from datetime import datetime
 from typing import Optional, Dict, Any
 from resource_utils import get_config_path, safe_file_read
-from app_theme import Colors, Fonts
+from app_theme import Colors, Fonts, styled
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
 from stock_snapshot import StockSnapshot, format_nombre_auto
@@ -1527,35 +1527,49 @@ class PasswordDialog(ctk.CTkToplevel):
 
 class PageInfoMouvementStock(ctk.CTkFrame):
     """Frame principal avec navigation - Pour intégration dans app_main"""
+
+    _SIDEBAR_W_EXPANDED = 200
+    _SIDEBAR_W_COLLAPSED = 56
+
+    _MENU_ITEMS = (
+        ("🧾", "Bon de commande", PageCommandeFrs),
+        ("📥", "Bon de réception", PageBonReception),
+        ("📥", "Entrée", PageEntree),
+        ("🔄", "Transferts", PageTransfert),
+        ("📤", "Sortie/Consommation", PageSortie),
+        ("🔁", "Changements", PageChangementArticle),
+        ("🚚", "Transporteurs", PageTransporteur),
+        ("🧾", "Infos Charges", PageInfosCharges),
+    )
+
     def __init__(self, parent, iduser, **kwargs):
-        super().__init__(parent, **kwargs)
-        
-        self.iduser = iduser  # ID de l'utilisateur connecté
-        
-        # Configuration du thème
+        super().__init__(parent, fg_color=Colors.BG_PAGE, corner_radius=0, **kwargs)
+
+        self.iduser = iduser
+        self._sidebar_collapsed = True
+        self._current_menu_label: Optional[str] = None
+
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
-        
-        # Connexion à la base de données
+
         self.db_connection = self.connect_db()
-        
         if not self.db_connection:
-            messagebox.showwarning("Avertissement", "L'application démarre sans connexion à la base de données.")
-        
-        # Container principal - Configuration de la grille
+            messagebox.showwarning(
+                "Avertissement",
+                "L'application démarre sans connexion à la base de données.",
+            )
+
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
-        
-        # Création des composants
+
+        self.pages: Dict[str, Any] = {}
+        self.current_page = None
+        self.menu_buttons: Dict[str, ctk.CTkButton] = {}
+
         self.create_sidebar()
         self.create_content_area()
-        
-        # Dictionnaire des pages
-        self.pages = {}
-        self.current_page = None
-        
-        # Afficher la première page par défaut
-        self.show_page("🧾 Bon de commande")
+
+        self.show_page(self._MENU_ITEMS[0][1])
     
     def connect_db(self):
         """Connexion à la base de données PostgreSQL"""
@@ -1586,60 +1600,168 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             messagebox.showerror("Erreur d'encodage", f"Problème d'encodage du fichier de configuration : {err}")
             return None
         
-    def create_sidebar(self):
-        """Créer le menu latéral"""
-        self.sidebar = ctk.CTkFrame(self, width=150, corner_radius=0, fg_color="#3b82f6")
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(7, weight=1)
-        self.sidebar.grid_propagate(False)  # Empêcher le redimensionnement
-        
-        # Titre du menu
-        title = ctk.CTkLabel(
-            self.sidebar,
-            text="Mise à jour",
-            font=("Arial", 20, "bold"),
-            text_color="white"
+    def _sidebar_width(self) -> int:
+        return (
+            self._SIDEBAR_W_COLLAPSED
+            if self._sidebar_collapsed
+            else self._SIDEBAR_W_EXPANDED
         )
-        title.grid(row=0, column=0, padx=20, pady=30)
-        
-        # Boutons du menu
-        self.menu_buttons = {}
-        menus = [
-            ("🧾 Bon de commande", "PageCommandeFrs"),
-            ("📥 Bon de réception", "PageBonReception"),
-            ("📥 Entrée", "PageEntree"),
-            ("🔄 Transferts", "PageTransfert"),
-            ("📤 Sortie/Consommation", "PageSortie"),
-            ("🔁 Changements", "PageChangementArticle"),
-            ("🚚 Transporteurs", "PageTransporteur"),
-            ("🧾 Infos Charges", "PageInfosCharges")
-        ]
-        
-        for idx, (menu_name, page_class) in enumerate(menus, start=1):
+
+    def _menu_button_text(self, icon: str, label: str) -> str:
+        if self._sidebar_collapsed:
+            return icon
+        return f"{icon}  {label}"
+
+    def _toggle_sidebar(self):
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        w = self._sidebar_width()
+        self.sidebar.configure(width=w)
+        padx_btn = 4 if self._sidebar_collapsed else 10
+        for icon, label, _cls in self._MENU_ITEMS:
+            btn = self.menu_buttons[label]
+            btn.configure(
+                text=self._menu_button_text(icon, label),
+                anchor="center" if self._sidebar_collapsed else "w",
+            )
+            btn.grid_configure(padx=padx_btn)
+
+    def create_sidebar(self):
+        """Menu latéral rétractable (mode hamburger — icônes seules par défaut)."""
+        self.sidebar = ctk.CTkFrame(
+            self,
+            width=self._sidebar_width(),
+            corner_radius=0,
+            fg_color=Colors.PRIMARY,
+        )
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_propagate(False)
+        self.sidebar.grid_columnconfigure(0, weight=1)
+
+        self.btn_sidebar_toggle = ctk.CTkButton(
+            self.sidebar,
+            text="☰",
+            width=40,
+            height=40,
+            fg_color="transparent",
+            hover_color=Colors.PRIMARY_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            font=ctk.CTkFont(size=18),
+            corner_radius=8,
+            command=self._toggle_sidebar,
+        )
+        self.btn_sidebar_toggle.grid(row=0, column=0, padx=6, pady=(12, 8), sticky="ew")
+
+        for idx, (icon, label, _page_cls) in enumerate(self._MENU_ITEMS, start=1):
             btn = ctk.CTkButton(
                 self.sidebar,
-                text=menu_name,
-                font=("Arial", 13),
+                text=self._menu_button_text(icon, label),
+                font=ctk.CTkFont(size=13),
                 fg_color="transparent",
-                hover_color="#2563eb",
-                anchor="w",
+                hover_color=Colors.PRIMARY_HOVER,
+                text_color=Colors.TEXT_ON_DARK,
+                anchor="center" if self._sidebar_collapsed else "w",
                 height=40,
-                command=lambda m=menu_name: self.show_page(m)
+                corner_radius=8,
+                command=lambda lbl=label: self.show_page(lbl),
             )
-            btn.grid(row=idx, column=0, padx=10, pady=6, sticky="ew")
-            self.menu_buttons[menu_name] = btn
-    
+            padx = 4 if self._sidebar_collapsed else 10
+            btn.grid(row=idx, column=0, padx=padx, pady=4, sticky="ew")
+            self.menu_buttons[label] = btn
+
+        self.sidebar.grid_rowconfigure(len(self._MENU_ITEMS) + 1, weight=1)
+
+    def _create_main_header(self):
+        """En-tête fixe sombre (comme les autres barres de navigation iJeery)."""
+        hdr = ctk.CTkFrame(
+            self.right_panel,
+            fg_color=Colors.MIDNIGHT,
+            corner_radius=0,
+            height=48,
+        )
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.grid_propagate(False)
+        hdr.grid_columnconfigure(0, weight=1)
+
+        bar = ctk.CTkFrame(hdr, fg_color="transparent", corner_radius=0)
+        bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(10, 10))
+        bar.grid_columnconfigure(0, weight=1)
+
+        self.lbl_main_title = ctk.CTkLabel(
+            bar,
+            text="Mouvement de stock",
+            font=Fonts.bold(15),
+            text_color=Colors.TEXT_ON_DARK,
+            anchor="w",
+        )
+        self.lbl_main_title.grid(row=0, column=0, sticky="w")
+
+        links = ctk.CTkFrame(bar, fg_color="transparent", corner_radius=0)
+        links.grid(row=0, column=1, sticky="ne", padx=(12, 0))
+
+        family = Fonts._family if getattr(Fonts, "_loaded", False) else "Segoe UI"
+        link_font = ctk.CTkFont(family=family, size=11, underline=True)
+
+        self.lbl_parametres = ctk.CTkLabel(
+            links,
+            text="⚙  Paramètres",
+            font=link_font,
+            text_color=Colors.PRIMARY_LIGHT,
+            cursor="hand2",
+        )
+        self.lbl_parametres.pack(side="left", padx=(0, 14))
+        self.lbl_parametres.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
+
+        self.lbl_configuration = ctk.CTkLabel(
+            links,
+            text="🔧  Configuration",
+            font=link_font,
+            text_color=Colors.INFO_LIGHT,
+            cursor="hand2",
+        )
+        self.lbl_configuration.pack(side="left")
+        self.lbl_configuration.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
+
+    def _ouvrir_parametres(self):
+        path = get_config_path("settings.json")
+        try:
+            os.startfile(path)
+        except Exception:
+            messagebox.showinfo(
+                "Paramètres",
+                f"Fichier des paramètres d'impression et options :\n{path}",
+            )
+
+    def _ouvrir_configuration(self):
+        path = get_config_path("config.json")
+        try:
+            os.startfile(path)
+        except Exception:
+            messagebox.showinfo(
+                "Configuration",
+                f"Fichier de configuration de l'application :\n{path}",
+            )
+
     def create_content_area(self):
-        """Créer la zone de contenu principal"""
-        self.content_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#f8fafc")
-        self.content_frame.grid(row=0, column=1, sticky="nsew")
-        
-        # Message initial
+        """Zone principale : en-tête fixe + contenu des mouvements."""
+        self.right_panel = ctk.CTkFrame(self, corner_radius=0, fg_color=Colors.BG_PAGE)
+        self.right_panel.grid(row=0, column=1, sticky="nsew")
+        self.right_panel.grid_rowconfigure(1, weight=1)
+        self.right_panel.grid_columnconfigure(0, weight=1)
+
+        self._create_main_header()
+
+        self.content_frame = ctk.CTkFrame(
+            self.right_panel,
+            corner_radius=0,
+            fg_color=Colors.BG_PAGE,
+        )
+        self.content_frame.grid(row=1, column=0, sticky="nsew")
+
         self.initial_label = ctk.CTkLabel(
             self.content_frame,
             text="⚙️ Prêt à travailler\n\nSélectionnez une option dans le menu",
             font=("Arial", 18),
-            text_color="#94a3b8"
+            text_color=Colors.TEXT_MUTED,
         )
         self.initial_label.place(relx=0.5, rely=0.5, anchor="center")
         
@@ -1658,71 +1780,52 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             print(f"Erreur vérification code: {e}")
             return False
     
-    def show_page(self, menu_name):
-        """Afficher la page correspondant au menu sélectionné"""
-        
-              
-        # Cacher le label initial
+    def _page_class_for_label(self, label: str):
+        for _icon, lbl, page_cls in self._MENU_ITEMS:
+            if lbl == label:
+                return page_cls
+        return None
+
+    def show_page(self, menu_label: str):
+        """Afficher la page correspondant au menu sélectionné."""
+        page_class = self._page_class_for_label(menu_label)
+        if page_class is None:
+            return
+
         if self.initial_label:
             self.initial_label.place_forget()
             self.initial_label = None
-        
-        # Mapping menu -> classe de page (IMPORTÉES)
-        page_mapping = {
-            "🧾 Bon de commande": PageCommandeFrs,
-            "📥 Bon de réception": PageBonReception,
-            "📥 Entrée": PageEntree,
-            "🔄 Transferts": PageTransfert,
-            "📤 Sortie/Consommation": PageSortie,
-            "🔁 Changements": PageChangementArticle,
-            "🚚 Transporteurs": PageTransporteur,
-            "🧾 Infos Charges": PageInfosCharges
-        }
-        
-        # Cacher la page actuelle
+
+        self._current_menu_label = menu_label
+        self.lbl_main_title.configure(
+            text=f"Mouvement de stock - {menu_label}",
+        )
+
         if self.current_page:
             self.current_page.pack_forget()
-        
-        # Créer ou afficher la page demandée
-        if menu_name not in self.pages:
-            page_class = page_mapping[menu_name]
-            
-            # IMPORTANT : Passer le bon paramètre selon la classe
+
+        if menu_label not in self.pages:
             try:
-                if page_class == PageCommandeFrs:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageBonReception:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageEntree:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageTransfert:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageSortie:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageChangementArticle:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageTransporteur:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageInfosCharges:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                else:
-                    self.pages[menu_name] = page_class(self.content_frame, self.iduser)
+                self.pages[menu_label] = page_class(self.content_frame, self.iduser)
             except Exception as e:
-                messagebox.showerror("Erreur", f"Erreur lors du chargement de la page {menu_name}:\n{str(e)}")
+                messagebox.showerror(
+                    "Erreur",
+                    f"Erreur lors du chargement de la page {menu_label}:\n{e}",
+                )
                 return
-        
-        self.current_page = self.pages[menu_name]
+
+        self.current_page = self.pages[menu_label]
         self.current_page.pack(fill="both", expand=True)
-        
-        # Forcer la mise à jour de l'affichage
         self.content_frame.update_idletasks()
-        
-        # Mettre à jour l'apparence des boutons
-        for btn_name, btn in self.menu_buttons.items():
-            if btn_name == menu_name:
-                btn.configure(fg_color="#2563eb")
-            else:
-                btn.configure(fg_color="transparent")
+
+        for btn_label, btn in self.menu_buttons.items():
+            btn.configure(
+                fg_color=(
+                    Colors.PRIMARY_HOVER
+                    if btn_label == menu_label
+                    else "transparent"
+                ),
+            )
 
 
 # Test standalone si lancé directement

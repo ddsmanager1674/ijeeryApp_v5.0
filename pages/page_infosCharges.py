@@ -52,15 +52,6 @@ class PageInfosCharges(ctk.CTkFrame):
     # UI
     # ─────────────────────────────────────────────────────────────────────────
     def _build_ui(self):
-        header = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=42)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-
-        ctk.CTkLabel(
-            header, text="Infos Charges",
-            font=Fonts.bold(14), text_color=Colors.TEXT_ON_DARK
-        ).pack(side="left", padx=14)
-
         body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE)
         body.pack(fill="both", expand=True, padx=8, pady=6)
 

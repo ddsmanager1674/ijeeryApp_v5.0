@@ -262,12 +262,6 @@ class PageCommandeFrs(ctk.CTkFrame):
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        self.titre = ctk.CTkLabel(
-            header, text="Nouvelle Commande Fournisseur",
-            font=Fonts.bold(14), text_color=Colors.TEXT_ON_DARK
-        )
-        self.titre.pack(side="left", padx=14, pady=0)
-
         styled.button_info(
             header, text="Charger", icon="📂",
             command=self.ouvrir_recherche_commande, width=120, height=28
@@ -942,7 +936,6 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.btn_modifier_ligne.configure(state="normal", text="✅  Valider Modif.")
         self.btn_annuler_selection.configure(state="normal")
         self.calculer_total_ligne_preview()
-        self.titre.configure(text=f"⚠️  Modification ligne {index + 1}")
 
     def modifier_ligne_article(self):
         sel = self.tree.selection()
@@ -995,11 +988,6 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.btn_modifier_ligne.configure(state="disabled", text="✏️  Modifier Ligne")
         self.btn_annuler_selection.configure(state="disabled")
         self.tree.selection_remove(self.tree.selection())
-        ref = self.entry_ref.get()
-        if self.mode_modification and self.idcom_charge:
-            self.titre.configure(text=f"Modification Commande : {ref}")
-        else:
-            self.titre.configure(text="Nouvelle Commande Fournisseur")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Génération référence
@@ -1255,7 +1243,6 @@ class PageCommandeFrs(ctk.CTkFrame):
             self.reinitialiser_formulaire(generer_ref=False)
             self.mode_modification = True
             self.idcom_charge = idcom
-            self.titre.configure(text=f"Modification Commande : {commande[1]}")
 
             self.entry_ref.configure(state="normal")
             self.entry_ref.delete(0, "end")
@@ -1575,7 +1562,6 @@ class PageCommandeFrs(ctk.CTkFrame):
                 self.imprimer_bon_commande()
 
             self.mode_modification = False
-            self.titre.configure(text="Nouvelle Commande Fournisseur")
             self.reinitialiser_formulaire()
 
         except Exception as e:
@@ -1628,7 +1614,6 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.reinitialiser_formulaire()
         self.mode_modification = False
         self.idcom_charge = None
-        self.titre.configure(text="Nouvelle Commande Fournisseur")
 
     # ─────────────────────────────────────────────────────────────────────────
     # IMPRESSION

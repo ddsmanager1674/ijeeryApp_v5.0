@@ -66,7 +66,7 @@ class PageEntree(ctk.CTkFrame):
         self.scrollbar_details = None
 
         self.grid_columnconfigure(0, weight=1)
-        for row, w in enumerate([0, 0, 0, 0, 1, 0]):
+        for row, w in enumerate([0, 0, 0, 1, 0]):
             self.grid_rowconfigure(row, weight=w)
 
         self._setup_ui()
@@ -103,27 +103,15 @@ class PageEntree(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _setup_ui(self):
-        self._build_info_band()     # Row 0
-        self._build_header_band()   # Row 1
-        self._build_motif_band()    # Row 2
-        self._build_article_band()  # Row 3
-        self._build_tree_zone()     # Row 4
-        self._build_actions_band()  # Row 5
-
-    def _build_info_band(self):
-        card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        card.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 2))
-
-        ctk.CTkLabel(
-            card,
-            text="Bon d'Entrée (BE) — ajout direct au stock du magasin",
-            font=Fonts.bold(12),
-            text_color=Colors.TEXT_SECONDARY,
-        ).pack(side="left", padx=12, pady=8)
+        self._build_header_band()   # Row 0
+        self._build_motif_band()    # Row 1
+        self._build_article_band()  # Row 2
+        self._build_tree_zone()     # Row 3
+        self._build_actions_band()  # Row 4
 
     def _build_header_band(self):
         card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        card.grid(row=1, column=0, sticky="ew", padx=0, pady=(0, 2))
+        card.grid(row=0, column=0, sticky="ew", padx=0, pady=(0, 2))
         for col in range(5):
             card.grid_columnconfigure(col, weight=1)
 
@@ -178,7 +166,7 @@ class PageEntree(ctk.CTkFrame):
 
     def _build_motif_band(self):
         card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        card.grid(row=2, column=0, sticky="ew", padx=0, pady=(0, 2))
+        card.grid(row=1, column=0, sticky="ew", padx=0, pady=(0, 2))
         card.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
@@ -200,7 +188,7 @@ class PageEntree(ctk.CTkFrame):
 
     def _build_article_band(self):
         card = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        card.grid(row=3, column=0, sticky="ew", padx=0, pady=(0, 2))
+        card.grid(row=2, column=0, sticky="ew", padx=0, pady=(0, 2))
         for col in range(6):
             card.grid_columnconfigure(col, weight=1)
 
@@ -268,7 +256,7 @@ class PageEntree(ctk.CTkFrame):
 
     def _build_tree_zone(self):
         self.tree_container = ctk.CTkFrame(self, fg_color=Colors.BG_CARD, corner_radius=0)
-        self.tree_container.grid(row=4, column=0, sticky="nsew", padx=0, pady=(0, 2))
+        self.tree_container.grid(row=3, column=0, sticky="nsew", padx=0, pady=(0, 2))
         self.tree_container.grid_columnconfigure(0, weight=1)
         self.tree_container.grid_rowconfigure(0, weight=1)
 
@@ -345,7 +333,7 @@ class PageEntree(ctk.CTkFrame):
 
     def _build_actions_band(self):
         bar = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE, corner_radius=0)
-        bar.grid(row=5, column=0, sticky="ew", padx=0, pady=(2, 0))
+        bar.grid(row=4, column=0, sticky="ew", padx=0, pady=(2, 0))
         bar.grid_columnconfigure(3, weight=1)
 
         btn_nouveau = ctk.CTkButton(

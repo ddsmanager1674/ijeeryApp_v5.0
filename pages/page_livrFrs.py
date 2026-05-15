@@ -132,11 +132,7 @@ class PageBonReception(ctk.CTkFrame):
         header.pack(fill="x")
         header.pack_propagate(False)
 
-        self.titre = ctk.CTkLabel(header, text="Bon de Réception Fournisseur",
-                                  font=Fonts.bold(14), text_color=Colors.TEXT_ON_DARK)
-        self.titre.pack(side="left", padx=14)
-
-        # ── Toggle "Fournisseur à payer" inline après le titre ────────────────
+        # ── Toggle "Fournisseur à payer" ─────────────────────────────────────
         self.switch_a_payer = ctk.CTkSwitch(
             header,
             text="Fournisseur à payer",
@@ -148,7 +144,7 @@ class PageBonReception(ctk.CTkFrame):
             progress_color=Colors.SUCCESS_DARK,
             switch_width=38, switch_height=20,
         )
-        self.switch_a_payer.pack(side="left", padx=(16, 0))
+        self.switch_a_payer.pack(side="left", padx=(14, 0))
 
         styled.button_secondary(header, text="🔄 Nouveau",
                                 command=self.nouveau_bon_reception, width=100, height=28
