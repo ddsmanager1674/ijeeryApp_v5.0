@@ -10,6 +10,8 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
+import os
+import tkinter as tk
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
@@ -17,6 +19,11 @@ import json
 import threading
 from resource_utils import get_config_path, get_session_path, safe_file_read
 from log_utils import AppLogger
+
+try:
+    from pages.prix_article_config import get_afficher_variation_prix_defaut
+except ImportError:
+    from prix_article_config import get_afficher_variation_prix_defaut
 
 # page_prixSaisie doit rester optionnel
 try:
@@ -59,6 +66,32 @@ class _C:
 
 C = Colors if _T else _C
 
+COL_CODE = "Code Article"
+COL_NOM = "Nom d'article"
+COL_UNITE = "Unité"
+COL_MINMAX = "Min.Prix - Max.Prix"
+COL_MOY = "Moyenne.Prix"
+COL_PRIX = "Prix"
+ALL_COLS = (COL_CODE, COL_NOM, COL_UNITE, COL_MINMAX, COL_MOY, COL_PRIX)
+
+# Poids relatifs pour la répartition proportionnelle de la largeur utile
+_COL_WEIGHTS = {
+    COL_CODE: 14,
+    COL_NOM: 32,
+    COL_UNITE: 12,
+    COL_MINMAX: 20,
+    COL_MOY: 14,
+    COL_PRIX: 14,
+}
+_COL_MINWIDTH = {
+    COL_CODE: 90,
+    COL_NOM: 120,
+    COL_UNITE: 80,
+    COL_MINMAX: 130,
+    COL_MOY: 85,
+    COL_PRIX: 85,
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Page principale
@@ -95,9 +128,17 @@ class PagePrixListe(ctk.CTkFrame):
         # Protection contre les double-clics
         self.is_opening_window = False
         self._destroyed        = False
+        self._afficher_variation = get_afficher_variation_prix_defaut(
+            self.iduser, default=False,
+        )
 
         # Mapping item_id → (code_article brut, idunite)
         self.code_mapping = {}
+        self._tbl_frame = None
+        self._scroll_y = None
+        self._resize_after_id = None
+        self._ajustement_en_cours = False
+        self._derniere_cle_colonnes = None
 
         self._apply_tree_style()
         self._build_ui()
@@ -170,6 +211,116 @@ class PagePrixListe(ctk.CTkFrame):
         except (ValueError, TypeError):
             return "0,00"
 
+    def _fmt_minmax(self, prix_min, prix_max) -> str:
+        return f"{self._fmt_prix(prix_min)} - {self._fmt_prix(prix_max)}"
+
+    def _colonnes_affichees(self):
+        if self._afficher_variation:
+            return (COL_CODE, COL_NOM, COL_UNITE, COL_MINMAX, COL_MOY, COL_PRIX)
+        return (COL_CODE, COL_NOM, COL_UNITE, COL_PRIX)
+
+    def _appliquer_colonnes_treeview(self):
+        try:
+            self.tree.configure(displaycolumns=self._colonnes_affichees())
+            self._derniere_cle_colonnes = None
+            self._planifier_ajustement_colonnes()
+        except tk.TclError:
+            pass
+
+    def _largeur_zone_tableau(self) -> int:
+        """Largeur utile pour les colonnes (zone treeview, hors scrollbar verticale)."""
+        w = 0
+        try:
+            if self.tree.winfo_exists():
+                w = self.tree.winfo_width()
+        except tk.TclError:
+            pass
+        if w <= 1 and self._tbl_frame is not None:
+            try:
+                w = self._tbl_frame.winfo_width()
+                if self._scroll_y is not None and self._scroll_y.winfo_ismapped():
+                    w -= max(self._scroll_y.winfo_width(), 14)
+            except tk.TclError:
+                pass
+        if w <= 1:
+            return 0
+        return max(w - 4, 200)
+
+    @staticmethod
+    def _largeurs_proportionnelles(colonnes, disponible: int):
+        """Min. respectés, puis espace restant réparti selon les poids relatifs."""
+        if not colonnes:
+            return []
+        mins = [_COL_MINWIDTH[c] for c in colonnes]
+        poids = [_COL_WEIGHTS[c] for c in colonnes]
+        somme_min = sum(mins)
+        if disponible <= somme_min:
+            return list(mins)
+
+        reste = disponible - somme_min
+        total_poids = sum(poids) or 1
+        largeurs = [
+            mins[i] + int(reste * poids[i] / total_poids)
+            for i in range(len(colonnes))
+        ]
+        ecart = disponible - sum(largeurs)
+        if ecart:
+            idx = colonnes.index(COL_NOM) if COL_NOM in colonnes else len(colonnes) - 1
+            largeurs[idx] += ecart
+        return largeurs
+
+    def _planifier_ajustement_colonnes(self):
+        if self._resize_after_id is not None:
+            try:
+                self.after_cancel(self._resize_after_id)
+            except tk.TclError:
+                pass
+        self._resize_after_id = self.after(25, self._ajuster_largeurs_colonnes)
+
+    def _ajuster_largeurs_colonnes(self):
+        """Répartit toujours 100 % de la largeur utile entre les colonnes visibles."""
+        self._resize_after_id = None
+        if self._destroyed or self._ajustement_en_cours:
+            return
+        try:
+            if not self.winfo_exists() or not self.tree.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        visible = self._colonnes_affichees()
+        disponible = self._largeur_zone_tableau()
+        if disponible <= 0:
+            self._planifier_ajustement_colonnes()
+            return
+
+        largeurs = self._largeurs_proportionnelles(visible, disponible)
+        cle = (visible, disponible, tuple(largeurs))
+        if cle == self._derniere_cle_colonnes:
+            return
+        self._derniere_cle_colonnes = cle
+
+        self._ajustement_en_cours = True
+        try:
+            for col in ALL_COLS:
+                if col not in visible:
+                    self.tree.column(col, width=0, minwidth=0, stretch=False)
+            for col, larg in zip(visible, largeurs):
+                mw = min(_COL_MINWIDTH[col], larg)
+                self.tree.column(
+                    col,
+                    width=int(larg),
+                    minwidth=mw,
+                    stretch=False,
+                )
+        except tk.TclError:
+            self._derniere_cle_colonnes = None
+        finally:
+            self._ajustement_en_cours = False
+
+    def _on_tbl_configure(self, _event=None):
+        self._planifier_ajustement_colonnes()
+
     # ── Style treeview ────────────────────────────────────────────────────────
     def _apply_tree_style(self):
         s = ttk.Style()
@@ -192,13 +343,47 @@ class PagePrixListe(ctk.CTkFrame):
 
     # ── Construction UI ───────────────────────────────────────────────────────
     def _build_ui(self):
-        # ── En-tête ──────────────────────────────────────────────────────────
-        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
+        # ── En-tête (titre + Paramètres / Configuration) ───────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0, height=48)
         hdr.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(hdr, text="Liste des Prix",
-                     font=self._f(18, "bold"),
-                     text_color="#FFFFFF"
-                     ).pack(side="left", padx=16, pady=8)
+        hdr.grid_propagate(False)
+        hdr.grid_columnconfigure(0, weight=1)
+
+        bar = ctk.CTkFrame(hdr, fg_color="transparent", corner_radius=0)
+        bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(10, 10))
+        bar.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            bar, text="Prix Article",
+            font=self._f(15, "bold"),
+            text_color="#FFFFFF",
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+
+        links = ctk.CTkFrame(bar, fg_color="transparent", corner_radius=0)
+        links.grid(row=0, column=1, sticky="ne", padx=(12, 0))
+        link_font = self._f(11)
+        if _T:
+            link_font = ctk.CTkFont(
+                family=getattr(Fonts, "_family", "Segoe UI"),
+                size=11, underline=True,
+            )
+        color_param = getattr(C, "PRIMARY_LIGHT", C.PRIMARY)
+        color_conf = getattr(C, "INFO_LIGHT", C.PRIMARY)
+
+        lbl_param = ctk.CTkLabel(
+            links, text="⚙  Paramètres",
+            font=link_font, text_color=color_param, cursor="hand2",
+        )
+        lbl_param.pack(side="left", padx=(0, 14))
+        lbl_param.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
+
+        lbl_conf = ctk.CTkLabel(
+            links, text="🔧  Configuration",
+            font=link_font, text_color=color_conf, cursor="hand2",
+        )
+        lbl_conf.pack(side="left")
+        lbl_conf.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
 
         # ── Barre de filtres ─────────────────────────────────────────────────
         panel = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
@@ -243,10 +428,12 @@ class PagePrixListe(ctk.CTkFrame):
         tbl.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 4))
         tbl.grid_rowconfigure(0, weight=1)
         tbl.grid_columnconfigure(0, weight=1)
+        self._tbl_frame = tbl
 
-        cols = ("Code Article", "Nom d'article", "Unité", "Prix")
-        self.tree = ttk.Treeview(tbl, columns=cols, show="headings",
-                                 style="Prix.Treeview", height=20)
+        self.tree = ttk.Treeview(
+            tbl, columns=ALL_COLS, show="headings",
+            style="Prix.Treeview", height=20,
+        )
 
         # Tags
         self.tree.tag_configure("even",      background=C.BG_CARD)
@@ -256,41 +443,105 @@ class PagePrixListe(ctk.CTkFrame):
         self.tree.tag_configure("odd_zero",  background="#F0F4F8",
                                 foreground=C.DANGER)
 
-        col_cfg = {
-            "Code Article": (150, "center"),
-            "Nom d'article": (340, "w"),
-            "Unité":         (150, "center"),
-            "Prix":          (150, "e"),
+        col_anchor = {
+            COL_CODE: "center",
+            COL_NOM: "w",
+            COL_UNITE: "center",
+            COL_MINMAX: "center",
+            COL_MOY: "e",
+            COL_PRIX: "e",
         }
-        for col in cols:
-            w, anchor = col_cfg[col]
+        for col in ALL_COLS:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=w, anchor=anchor)
+            self.tree.column(col, anchor=col_anchor[col], stretch=False)
+        self._appliquer_colonnes_treeview()
 
-        sy = ctk.CTkScrollbar(tbl, orientation="vertical",
-                              command=self.tree.yview)
-        sx = ctk.CTkScrollbar(tbl, orientation="horizontal",
-                              command=self.tree.xview)
-        self.tree.configure(yscrollcommand=sy.set,
-                            xscrollcommand=sx.set)
-        self.tree.grid(row=0, column=0, sticky="nsew",
-                       padx=(6, 0), pady=(6, 0))
-        sy.grid(row=0, column=1, sticky="ns", pady=(6, 0))
-        sx.grid(row=1, column=0, sticky="ew", padx=(6, 0))
+        self._scroll_y = ctk.CTkScrollbar(
+            tbl, orientation="vertical", command=self.tree.yview,
+        )
+        self.tree.configure(yscrollcommand=self._scroll_y.set)
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=(6, 0))
+        self._scroll_y.grid(row=0, column=1, sticky="ns", pady=(6, 0))
 
+        tbl.bind("<Configure>", self._on_tbl_configure)
+        self.bind("<Configure>", self._on_tbl_configure)
+        self.bind("<Map>", self._on_tbl_configure)
         self.tree.bind("<Double-Button-1>", self._on_double_click)
+
+        self.after(80, self._planifier_ajustement_colonnes)
 
         # ── Footer ───────────────────────────────────────────────────────────
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 8))
+        footer.grid_columnconfigure(1, weight=1)
+
         self._lbl_count = ctk.CTkLabel(
             footer, text="0 article(s)",
-            font=self._f(10, "bold"), text_color=C.PRIMARY)
-        self._lbl_count.pack(side="left")
+            font=self._f(10, "bold"), text_color=C.PRIMARY,
+        )
+        self._lbl_count.grid(row=0, column=0, sticky="w")
+
         self._lbl_status = ctk.CTkLabel(
             footer, text="",
-            font=self._f(9), text_color=C.TEXT_MUTED)
-        self._lbl_status.pack(side="right")
+            font=self._f(9), text_color=C.TEXT_MUTED,
+        )
+        self._lbl_status.grid(row=0, column=1, sticky="e", padx=(8, 12))
+
+        self._chk_variation = ctk.CTkCheckBox(
+            footer,
+            text="Afficher la variation du prix",
+            font=self._f(10),
+            checkbox_width=18,
+            checkbox_height=18,
+            command=self._on_toggle_variation,
+        )
+        self._chk_variation.grid(row=0, column=2, sticky="e")
+        if self._afficher_variation:
+            self._chk_variation.select()
+        else:
+            self._chk_variation.deselect()
+
+    def _on_toggle_variation(self):
+        self._afficher_variation = bool(self._chk_variation.get())
+        self._derniere_cle_colonnes = None
+        self._appliquer_colonnes_treeview()
+        self.load_data_async(self._var_search.get().strip())
+
+    def _ouvrir_parametres(self):
+        path = get_config_path("settings.json")
+        try:
+            os.startfile(path)
+        except Exception:
+            messagebox.showinfo(
+                "Paramètres",
+                f"Fichier des paramètres (impression, options globales) :\n{path}",
+            )
+
+    def _on_configuration_saved(self):
+        pref = get_afficher_variation_prix_defaut(self.iduser, default=False)
+        self._afficher_variation = pref
+        self._derniere_cle_colonnes = None
+        if pref:
+            self._chk_variation.select()
+        else:
+            self._chk_variation.deselect()
+        self._appliquer_colonnes_treeview()
+        self.load_data_async(self._var_search.get().strip())
+
+    def _ouvrir_configuration(self):
+        try:
+            from pages.window_configuration_prix_article import (
+                ConfigurationPrixArticleWindow,
+            )
+        except ImportError:
+            from window_configuration_prix_article import (
+                ConfigurationPrixArticleWindow,
+            )
+        ConfigurationPrixArticleWindow(
+            self,
+            id_user=self.iduser,
+            on_saved=self._on_configuration_saved,
+        )
 
     # ── Chargement des données ────────────────────────────────────────────────
     def load_data_async(self, search_term=""):
@@ -315,7 +566,10 @@ class PagePrixListe(ctk.CTkFrame):
                     a.designation,
                     u.designationunite,
                     COALESCE(p.prix, 0) AS prix,
-                    u.idunite
+                    u.idunite,
+                    st.prix_min,
+                    st.prix_max,
+                    st.prix_moy
                 FROM tb_unite u
                 INNER JOIN tb_article a ON u.idarticle = a.idarticle
                 LEFT JOIN (
@@ -325,6 +579,15 @@ class PagePrixListe(ctk.CTkFrame):
                                ORDER BY dateregistre DESC) AS rn
                     FROM tb_prix WHERE deleted = 0
                 ) p ON u.idunite = p.idunite AND p.rn = 1
+                LEFT JOIN (
+                    SELECT idunite,
+                           MIN(prix) AS prix_min,
+                           MAX(prix) AS prix_max,
+                           AVG(prix) AS prix_moy
+                    FROM tb_prix
+                    WHERE deleted = 0
+                    GROUP BY idunite
+                ) st ON u.idunite = st.idunite
                 WHERE a.deleted = 0
             """
             params = []
@@ -389,21 +652,34 @@ class PagePrixListe(ctk.CTkFrame):
                 code_db = row[0] or ""
                 nom     = row[1] or ""
                 unite   = row[2] or ""
-                prix    = row[3] if row[3] is not None else 0
-                idunite = row[4]
+                prix     = row[3] if row[3] is not None else 0
+                idunite  = row[4]
+                prix_min = row[5]
+                prix_max = row[6]
+                prix_moy = row[7]
 
-                prix_fmt  = self._fmt_prix(prix)
-                is_zero   = (float(prix) == 0) if prix else True
+                prix_fmt = self._fmt_prix(prix)
+                is_zero  = (float(prix) == 0) if prix else True
 
                 if is_zero:
                     tag = "even_zero" if idx % 2 == 0 else "odd_zero"
                 else:
                     tag = "even" if idx % 2 == 0 else "odd"
 
-                item_id = self.tree.insert(
-                    "", "end",
-                    values=(code_db, nom, unite, prix_fmt),
-                    tags=(tag,))
+                if self._afficher_variation:
+                    min_v = prix_min if prix_min is not None else 0
+                    max_v = prix_max if prix_max is not None else 0
+                    moy_v = prix_moy if prix_moy is not None else 0
+                    values = (
+                        code_db, nom, unite,
+                        self._fmt_minmax(min_v, max_v),
+                        self._fmt_prix(moy_v),
+                        prix_fmt,
+                    )
+                else:
+                    values = (code_db, nom, unite, "", "", prix_fmt)
+
+                item_id = self.tree.insert("", "end", values=values, tags=(tag,))
                 self.code_mapping[item_id] = (code_db, idunite)
 
             except Exception:
@@ -413,6 +689,8 @@ class PagePrixListe(ctk.CTkFrame):
             self._lbl_count.configure(text=f"{len(rows)} article(s)")
         except Exception:
             pass
+
+        self._planifier_ajustement_colonnes()
 
     # ── Filtres ───────────────────────────────────────────────────────────────
     def _on_search(self, event=None):

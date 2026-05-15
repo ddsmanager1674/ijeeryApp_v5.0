@@ -45,5 +45,11 @@
     "SidebarHamburgerParUtilisateur": {
       "0": true
     }
+  },
+  "PrixArticle": {
+    "_comment": "Préférences personnelles Prix Article (par id utilisateur tb_users.iduser).",
+    "AfficherVariationPrixParUtilisateur": {
+      "26": true
+    }
   }
 }
