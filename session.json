@@ -5,10 +5,6 @@
     "fonction_name": "Administration",
     "menus": [
         [
-            "Absence",
-            "PageAbsence"
-        ],
-        [
             "Ajout Banque",
             "PageBanqueNv"
         ],
@@ -77,32 +73,12 @@
             "PageClient"
         ],
         [
-            "Decaissement",
-            "PageDecaissement"
-        ],
-        [
-            "DecaissementBq",
-            "PageDecaissementBq"
-        ],
-        [
-            "Encaissement",
-            "PageEncaissement"
-        ],
-        [
-            "EncaissementBq",
-            "PageEncaissementBq"
-        ],
-        [
             "Etat de Salaire",
             "PageSalaireEtatSB"
         ],
         [
             "Evenements",
             "PageEvenement"
-        ],
-        [
-            "Facturation",
-            "PageFacturation"
         ],
         [
             "Facture Liste",
@@ -115,18 +91,6 @@
         [
             "Fournisseur",
             "PageFournisseur"
-        ],
-        [
-            "Fournisseur Dettes",
-            "PageFrsDette"
-        ],
-        [
-            "Gérer Personnels",
-            "PagePersonnelCRUD"
-        ],
-        [
-            "Init DB",
-            "DBInitializerApp"
         ],
         [
             "Inventaire du Jour",
@@ -185,14 +149,6 @@
             "PageGestionPeremption"
         ],
         [
-            "Présence",
-            "PagePresence"
-        ],
-        [
-            "Présence Personnel",
-            "PagePresencePersonnel"
-        ],
-        [
             "Prix d'article",
             "PagePrixListe"
         ],
@@ -221,10 +177,6 @@
             "PageStockLivraison"
         ],
         [
-            "Suivi Commande",
-            "PageSuiviCommande"
-        ],
-        [
             "Suivi de présence",
             "PageSuiviPresence"
         ],
@@ -247,10 +199,6 @@
         [
             "Utilisateurs",
             "PageUsers"
-        ],
-        [
-            "Ventes",
-            "PageVente"
         ],
         [
             "Ventes par Dépôt",

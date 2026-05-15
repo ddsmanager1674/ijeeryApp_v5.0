@@ -339,10 +339,27 @@ class page_listeArticle(customtkinter.CTkFrame):
     # LOGIQUE MÉTIER — inchangée
     # ====================================================================
 
+    def _connection_alive(self, conn):
+        if conn is None or getattr(conn, "closed", True):
+            return False
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return True
+        except psycopg2.Error:
+            return False
+
     def connect_db(self):
-        if self.db_conn:
+        if self._connection_alive(self.db_conn):
             return self.db_conn
-        conn = None
+
+        if self.db_conn:
+            try:
+                self.db_conn.close()
+            except Exception:
+                pass
+            self.db_conn = None
+
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
@@ -354,6 +371,9 @@ class page_listeArticle(customtkinter.CTkFrame):
                 database=db_config['database'],
                 port=db_config['port']
             )
+            self.db_conn = conn
+            if hasattr(self._logger, "conn"):
+                self._logger.conn = conn
             return conn
         except FileNotFoundError:
             messagebox.showerror("Erreur de configuration",
@@ -370,9 +390,6 @@ class page_listeArticle(customtkinter.CTkFrame):
         return None
 
     def fetch_articles_from_db(self):
-        conn = self.connect_db()
-        if conn is None:
-            return []
         SQL_QUERY = """
         SELECT
             T2."idarticle",
@@ -390,18 +407,25 @@ class page_listeArticle(customtkinter.CTkFrame):
             tb_categoriearticle AS T3 ON T2.idca = T3.idca
         ORDER BY T2."designation" ASC, T1."codearticle" ASC;
         """
-        data = []
-        try:
-            with conn.cursor() as cur:
-                cur.execute(SQL_QUERY)
-                data = cur.fetchall()
-        except psycopg2.Error as err:
-            messagebox.showerror("Erreur SQL",
-                                 f"Erreur lors de l'exécution de la requête : {err}")
-        finally:
-            if conn and conn != self.db_conn:
-                conn.close()
-        return data
+        for attempt in range(2):
+            conn = self.connect_db()
+            if conn is None:
+                return []
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(SQL_QUERY)
+                    return cur.fetchall()
+            except psycopg2.Error as err:
+                if attempt == 0:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    self.db_conn = None
+                    continue
+                messagebox.showerror("Erreur SQL",
+                                     f"Erreur lors de l'exécution de la requête : {err}")
+        return []
 
     def _get_photos_folder(self):
         try:

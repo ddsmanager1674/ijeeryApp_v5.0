@@ -225,6 +225,23 @@ class PageSauvegarde(ctk.CTkFrame):
             if 'PGPASSWORD' in os.environ:
                 del os.environ['PGPASSWORD']
 
+    def _invalidate_app_db_connection(self):
+        """Après restauration, reconnecter la fenêtre principale (connexions coupées)."""
+        app = self.winfo_toplevel()
+        if not hasattr(app, "db_manager"):
+            return
+        old = getattr(app, "db_conn", None)
+        if old:
+            try:
+                old.close()
+            except Exception:
+                pass
+        ensure = getattr(app.db_manager, "ensure_connection", None)
+        if callable(ensure):
+            app.db_conn = ensure(None)
+        else:
+            app.db_conn = app.db_manager.get_connection()
+
     def terminate_all_db_connections(self, dbname_to_terminate):
         conn_sys = None
         try:
@@ -312,6 +329,7 @@ class PageSauvegarde(ctk.CTkFrame):
                 if process.returncode == 0:
                     self.progress_bar.set(1.0)
                     self.lbl_progression.configure(text="Terminé.")
+                    self._invalidate_app_db_connection()
                     messagebox.showinfo("Succès", "Restauration terminée avec succès.")
                     try:
                         self._logger.log(

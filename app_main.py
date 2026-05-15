@@ -126,6 +126,20 @@ class DatabaseManager:
             print(f"[DB] ❌ {e}")
             return None
 
+    def ensure_connection(self, conn=None):
+        """Retourne une connexion active ; reconnecte si elle est fermée ou invalide."""
+        if conn is not None and not getattr(conn, "closed", True):
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                return conn
+            except psycopg2.Error:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        return self.get_connection()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DÉFINITION DES MENUS (séparation données / UI)
@@ -1062,6 +1076,9 @@ class App(ctk.CTk):
         if cls is None:
             self._show_not_authorized(f"Module introuvable : {module_path}.{class_name}")
             return
+
+        # ── Connexion DB à jour (évite « server closed the connection ») ─────
+        self.db_conn = self.db_manager.ensure_connection(self.db_conn)
 
         # ── Instanciation avec les bons arguments ────────────────────────────
         try:
