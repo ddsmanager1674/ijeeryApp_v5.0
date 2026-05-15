@@ -18,20 +18,28 @@ try:
         fmt_datetime_livraison,
         formater_nombre,
         generer_pdf_bl,
+        get_transporteur_defaut_id,
+        get_transporteur_pour_bl_auto,
         ligne_panier_key,
         sql_pending_articles,
         sql_pending_factures,
+        transporteur_nom_par_id,
     )
+    from pages.window_parametres_livraison import ParametresLivraisonWindow
 except ImportError:
     from livraison_common import (
         LivraisonDB,
         fmt_datetime_livraison,
         formater_nombre,
         generer_pdf_bl,
+        get_transporteur_defaut_id,
+        get_transporteur_pour_bl_auto,
         ligne_panier_key,
         sql_pending_articles,
         sql_pending_factures,
+        transporteur_nom_par_id,
     )
+    from window_parametres_livraison import ParametresLivraisonWindow
 
 
 class PageBonDeLivraison(ctk.CTkFrame):
@@ -80,6 +88,18 @@ class PageBonDeLivraison(ctk.CTkFrame):
         tb = styled.frame(header, color="transparent")
         tb.grid(row=0, column=0, sticky="w")
         styled.label_heading(tb, text="Bon de Livraison", size=18).pack(anchor="w")
+
+        family = Fonts._family if getattr(Fonts, "_loaded", False) else "Segoe UI"
+        self.lbl_parametres = ctk.CTkLabel(
+            tb,
+            text="⚙  Paramètres",
+            font=ctk.CTkFont(family=family, size=11, underline=True),
+            text_color=Colors.PRIMARY,
+            cursor="hand2",
+        )
+        self.lbl_parametres.pack(anchor="w", pady=(2, 0))
+        self.lbl_parametres.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
+
         styled.label_muted(
             tb,
             text="Créez un BL, puis ajoutez des lignes au panier → enregistrement (trace seule, sans impact stock)",
@@ -151,6 +171,28 @@ class PageBonDeLivraison(ctk.CTkFrame):
         except tk.TclError:
             pass
 
+    def _ouvrir_parametres(self):
+        if self.user_id is None:
+            messagebox.showerror("Erreur", "Utilisateur non connecté.")
+            return
+        ParametresLivraisonWindow(
+            self,
+            id_user=self.user_id,
+            on_saved=lambda: self._charger_tout(conserver_recherche=True),
+        )
+
+    def _appliquer_transporteur_defaut(self):
+        """Pré-sélectionne le transporteur défini dans les paramètres."""
+        tid = get_transporteur_defaut_id()
+        nom = transporteur_nom_par_id(self._transporteurs, tid)
+        vals = list(self.combo_trans.cget("values") or [])
+        if nom in vals:
+            self.combo_trans.set(nom)
+        elif nom != "— Aucun —":
+            self.combo_trans.set("— Aucun —")
+        else:
+            self.combo_trans.set("— Aucun —")
+
     def _set_mode_creation_bl(self, actif: bool) -> None:
         """Affiche les actions d'ajout au panier uniquement en mode création BL."""
         self._mode_creation_bl = actif
@@ -170,6 +212,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self._rafraichir_panier_ui()
         self.ent_desc.delete(0, "end")
         self.combo_trans.set("— Aucun —")
+        self._appliquer_transporteur_defaut()
         self._afficher_panier_ratio()
         self._set_mode_creation_bl(True)
 
@@ -229,7 +272,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self.ent_filtre.bind("<KeyRelease>", self._on_search_key)
 
         cols_init = (
-            "date", "facture", "client", "lignes", "reste_tot",
+            "date", "facture", "client", "magasin", "lignes", "reste_tot",
         )
         style_back = self._register_tree_style("BonLivBack")
         self.tree_back = ttk.Treeview(
@@ -398,6 +441,17 @@ class PageBonDeLivraison(ctk.CTkFrame):
                 return
             try:
                 cur = conn.cursor()
+                if aussi_transporteurs and self.user_id:
+                    try:
+                        LivraisonDB.run_livraison_auto_clients(
+                            cur,
+                            int(self.user_id),
+                            idtransporteur_defaut=get_transporteur_pour_bl_auto(),
+                        )
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+
                 sql_a, params_a = sql_pending_articles(terme)
                 cur.execute(sql_a, params_a)
                 art = cur.fetchall()
@@ -420,7 +474,10 @@ class PageBonDeLivraison(ctk.CTkFrame):
                         self._transporteurs = transporteurs
                         noms = ["— Aucun —"] + [t[1] for t in self._transporteurs]
                         self.combo_trans.configure(values=noms)
-                        self.combo_trans.set("— Aucun —")
+                        if not self._mode_creation_bl:
+                            self.combo_trans.set("— Aucun —")
+                        else:
+                            self._appliquer_transporteur_defaut()
                     if bl_ref:
                         self._bl_preview.set(bl_ref)
                     n = len(art) if self._vue == "article" else len(fac)
@@ -479,23 +536,24 @@ class PageBonDeLivraison(ctk.CTkFrame):
                 ))
                 self._iid_to_row[iid] = row
         else:
-            cols = ("date", "facture", "client", "lignes", "reste_tot")
+            cols = ("date", "facture", "client", "magasin", "lignes", "reste_tot")
             self.tree_back.configure(columns=cols)
             for c, t, w in [
                 ("date", "Date et Heure", 130),
                 ("facture", "Facture", 120),
-                ("client", "Client", 200),
+                ("client", "Client", 160),
+                ("magasin", "Magasin", 120),
                 ("lignes", "Lignes", 60),
                 ("reste_tot", "Reste total", 90),
             ]:
                 self.tree_back.heading(c, text=t)
-                anc = "center" if c not in ("client", "facture") else "w"
+                anc = "center" if c not in ("client", "facture", "magasin") else "w"
                 self.tree_back.column(c, width=w, anchor=anc)
             for row in self._backlog_fact:
-                ref, nom, _idc, dt, nb, reste = row
+                ref, nom, _idc, dt, magasins, nb, reste = row
                 dt_s = fmt_datetime_livraison(dt)
                 iid = self.tree_back.insert("", "end", values=(
-                    dt_s, ref, nom, nb, formater_nombre(reste),
+                    dt_s, ref, nom, magasins or "—", nb, formater_nombre(reste),
                 ))
                 self._iid_to_row[iid] = row
 

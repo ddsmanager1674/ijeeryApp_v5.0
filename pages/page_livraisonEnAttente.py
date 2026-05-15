@@ -301,7 +301,7 @@ class PageLivraisonEnAttente(ctk.CTkFrame):
         """
         Pour tous les magasins dont la désignation est 'A' :
         insère automatiquement dans tb_livraisoncli une ligne de livraison
-        complète (qtlivrecli = reste) pour toute facture VALIDEE ou EN_ATTENTE
+        complète (qtlivrecli = reste) pour toute facture VALIDEE
         qui n'a pas encore été entièrement livrée.
         """
         conn = self.connect_db()
@@ -332,7 +332,7 @@ class PageLivraisonEnAttente(ctk.CTkFrame):
                         AND lv_sum.idunite   = vd.idunite
                         AND lv_sum.idmag     = vd.idmag
                 WHERE v.deleted = 0
-                  AND v.statut  IN ('VALIDEE', 'EN_ATTENTE')
+                  AND v.statut = 'VALIDEE'
                   AND UPPER(TRIM(m.designationmag)) = 'A'
                   AND (vd.qtvente - COALESCE(lv_sum.total_livre, 0)) > 0
             """)
@@ -579,7 +579,7 @@ class PageLivraisonEnAttente(ctk.CTkFrame):
                          AND lv_sum.idmag     = vd.idmag
                 WHERE a.deleted = 0
                   AND v.deleted = 0
-                  AND v.statut  IN ('VALIDEE', 'EN_ATTENTE')
+                  AND v.statut = 'VALIDEE'
                   AND (vd.qtvente - COALESCE(lv_sum.total_livre, 0)) > 0
                 ORDER BY v.refvente DESC, u.codearticle, m.designationmag
             """

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -57,12 +58,13 @@ SQL_PENDING_ARTICLES = f"""
     INNER JOIN tb_ventedetail vd ON vd.idvente = v.id
     INNER JOIN tb_article a ON vd.idarticle = a.idarticle AND a.deleted = 0
     INNER JOIN tb_unite u ON vd.idarticle = u.idarticle AND vd.idunite = u.idunite
-    INNER JOIN tb_magasin m ON vd.idmag = m.idmag
+    INNER JOIN tb_magasin m ON vd.idmag = m.idmag AND COALESCE(m.deleted, 0) = 0
     INNER JOIN tb_client c ON v.idclient = c.idclient
     {SQL_LIVRE_SUM}
     WHERE v.deleted = 0
-      AND v.statut IN ('VALIDEE', 'EN_ATTENTE')
+      AND v.statut = 'VALIDEE'
       AND (vd.qtvente - COALESCE(lv_sum.total_livre, 0)) > 0.0001
+      AND COALESCE(m.livraison_auto_client, 0) = 0
       {SQL_FILTER_SANS_AVOIR}
     ORDER BY v.dateregistre DESC, v.refvente, u.codearticle
 """
@@ -73,16 +75,22 @@ SQL_PENDING_FACTURES = f"""
         c.nomcli,
         v.idclient,
         MIN(v.dateregistre) AS dateregistre,
-        COUNT(*) AS nb_lignes,
+        COALESCE(
+            STRING_AGG(DISTINCT m.designationmag, ', ' ORDER BY m.designationmag),
+            ''
+        ) AS magasins,
+        COUNT(*)::int AS nb_lignes,
         SUM(vd.qtvente - COALESCE(lv_sum.total_livre, 0)) AS reste_total
     FROM tb_vente v
     INNER JOIN tb_ventedetail vd ON vd.idvente = v.id
     INNER JOIN tb_article a ON vd.idarticle = a.idarticle AND a.deleted = 0
+    INNER JOIN tb_magasin m ON vd.idmag = m.idmag AND COALESCE(m.deleted, 0) = 0
     INNER JOIN tb_client c ON v.idclient = c.idclient
     {SQL_LIVRE_SUM}
     WHERE v.deleted = 0
-      AND v.statut IN ('VALIDEE', 'EN_ATTENTE')
+      AND v.statut = 'VALIDEE'
       AND (vd.qtvente - COALESCE(lv_sum.total_livre, 0)) > 0.0001
+      AND COALESCE(m.livraison_auto_client, 0) = 0
       {SQL_FILTER_SANS_AVOIR}
     GROUP BY v.refvente, c.nomcli, v.idclient
     ORDER BY MIN(v.dateregistre) DESC NULLS LAST, v.refvente DESC
@@ -96,6 +104,63 @@ def fmt_datetime_livraison(val) -> str:
     if hasattr(val, "strftime"):
         return val.strftime("%d/%m/%Y %H:%M")
     return str(val)
+
+
+def _lire_param_livraison_db() -> Dict[str, Any]:
+    """Paramètres globaux livraison (tb_param_livraison_client, ligne id=1)."""
+    _default = {"idtransporteur_defaut": None, "transporteur_bl_auto": False}
+    conn = LivraisonDB.get_conn()
+    if not conn:
+        return _default
+    try:
+        cur = conn.cursor()
+        return LivraisonDB.fetch_param_livraison_client(cur)
+    except Exception:
+        return _default
+    finally:
+        LivraisonDB.release_conn(conn)
+
+
+def get_transporteur_defaut_id() -> Optional[int]:
+    """Transporteur par défaut BL manuel (base de données)."""
+    tid = _lire_param_livraison_db().get("idtransporteur_defaut")
+    if tid is None:
+        return None
+    try:
+        return int(tid)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_transporteur_bl_auto_enabled() -> bool:
+    """Si vrai, les BL-AUTO reprennent le transporteur par défaut."""
+    return bool(_lire_param_livraison_db().get("transporteur_bl_auto"))
+
+
+def get_transporteur_pour_bl_auto() -> Optional[int]:
+    """Transporteur des BL-AUTO : défaut seulement si « Transporteur BL-auto » actif en base."""
+    if not is_transporteur_bl_auto_enabled():
+        return None
+    return get_transporteur_defaut_id()
+
+
+def transporteur_pour_bl_auto_depuis_param(param: Dict[str, Any]) -> Optional[int]:
+    """Calcule le transporteur BL-AUTO à partir d'un dict param déjà chargé."""
+    if not param.get("transporteur_bl_auto"):
+        return None
+    tid = param.get("idtransporteur_defaut")
+    return int(tid) if tid is not None else None
+
+
+def transporteur_nom_par_id(
+    transporteurs: List[Tuple[int, str]], idtransporteur: Optional[int],
+) -> str:
+    if not idtransporteur:
+        return "— Aucun —"
+    for tid, nom in transporteurs:
+        if tid == idtransporteur:
+            return nom
+    return "— Aucun —"
 
 
 def sql_pending_articles(search_term: str = "") -> tuple:
@@ -413,6 +478,62 @@ class LivraisonDB:
         return f"{year}-BL-{count:05d}"
 
     @classmethod
+    def _param_livraison_table_exists(cls, cur) -> bool:
+        cur.execute("""
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = 'tb_param_livraison_client'
+            LIMIT 1
+        """)
+        return cur.fetchone() is not None
+
+    @classmethod
+    def fetch_param_livraison_client(cls, cur) -> Dict[str, Any]:
+        """Ligne unique id=1 : transporteur défaut + flag BL-auto."""
+        _default: Dict[str, Any] = {
+            "idtransporteur_defaut": None,
+            "transporteur_bl_auto": False,
+        }
+        if not cls._param_livraison_table_exists(cur):
+            return _default
+        cur.execute("""
+            SELECT idtransporteur_defaut, COALESCE(transporteur_bl_auto, 0)
+            FROM tb_param_livraison_client
+            WHERE id = 1
+        """)
+        row = cur.fetchone()
+        if not row:
+            return _default
+        return {
+            "idtransporteur_defaut": row[0],
+            "transporteur_bl_auto": bool(row[1]),
+        }
+
+    @classmethod
+    def save_param_livraison_client(
+        cls,
+        cur,
+        idtransporteur_defaut: Optional[int],
+        transporteur_bl_auto: bool,
+    ) -> None:
+        if not cls._param_livraison_table_exists(cur):
+            raise RuntimeError(
+                "Table tb_param_livraison_client absente — "
+                "exécutez sql/script_de_mis_a_jour.sql"
+            )
+        cur.execute(
+            """
+            INSERT INTO tb_param_livraison_client
+                (id, idtransporteur_defaut, transporteur_bl_auto)
+            VALUES (1, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                idtransporteur_defaut = EXCLUDED.idtransporteur_defaut,
+                transporteur_bl_auto = EXCLUDED.transporteur_bl_auto
+            """,
+            (idtransporteur_defaut, 1 if transporteur_bl_auto else 0),
+        )
+
+    @classmethod
     def fetch_transporteurs(cls, cur) -> List[Tuple[int, str]]:
         cur.execute("""
             SELECT idtransporteur, nom
@@ -421,6 +542,159 @@ class LivraisonDB:
             ORDER BY nom
         """)
         return cur.fetchall()
+
+    @classmethod
+    def _magasin_auto_column_exists(cls, cur) -> bool:
+        cur.execute("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'tb_magasin'
+              AND column_name = 'livraison_auto_client'
+            LIMIT 1
+        """)
+        return cur.fetchone() is not None
+
+    @classmethod
+    def fetch_magasins_livraison_auto(cls, cur) -> List[Tuple[int, str, bool]]:
+        """Liste (idmag, designationmag, livraison_auto_active)."""
+        if not cls._magasin_auto_column_exists(cur):
+            cur.execute("""
+                SELECT idmag, designationmag
+                FROM tb_magasin
+                WHERE COALESCE(deleted, 0) = 0
+                ORDER BY designationmag
+            """)
+            return [(r[0], r[1] or "", False) for r in cur.fetchall()]
+        cur.execute("""
+            SELECT idmag, designationmag,
+                   COALESCE(livraison_auto_client, 0) AS auto_on
+            FROM tb_magasin
+            WHERE COALESCE(deleted, 0) = 0
+            ORDER BY designationmag
+        """)
+        return [(r[0], r[1] or "", bool(r[2])) for r in cur.fetchall()]
+
+    @classmethod
+    def set_magasin_livraison_auto(cls, cur, idmag: int, actif: bool) -> None:
+        if not cls._magasin_auto_column_exists(cur):
+            raise RuntimeError(
+                "Colonne tb_magasin.livraison_auto_client absente — "
+                "exécutez sql/script_de_mis_a_jour.sql"
+            )
+        cur.execute(
+            "UPDATE tb_magasin SET livraison_auto_client = %s WHERE idmag = %s",
+            (1 if actif else 0, idmag),
+        )
+
+    @classmethod
+    def generate_bl_ref_auto(cls, cur) -> str:
+        year = datetime.now().year
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT reflivcli) FROM tb_livraisoncli
+            WHERE reflivcli ILIKE %s
+            """,
+            (f"{year}-BL-AUTO-%",),
+        )
+        count = (cur.fetchone()[0] or 0) + 1
+        return f"{year}-BL-AUTO-{count:05d}"
+
+    @classmethod
+    def run_livraison_auto_clients(
+        cls,
+        cur,
+        id_user: int,
+        idtransporteur_defaut: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Crée un BL-AUTO par facture pour les lignes des magasins en livraison auto.
+        Retourne {bl_count, line_count, refs}.
+        """
+        if not cls._magasin_auto_column_exists(cur):
+            return {"bl_count": 0, "line_count": 0, "refs": []}
+
+        sql_lignes = f"""
+            SELECT
+                v.refvente,
+                v.idclient,
+                vd.idmag,
+                vd.idarticle,
+                vd.idunite,
+                vd.qtvente,
+                COALESCE(lv_sum.total_livre, 0) AS total_livre
+            FROM tb_vente v
+            INNER JOIN tb_ventedetail vd ON vd.idvente = v.id
+            INNER JOIN tb_magasin m ON vd.idmag = m.idmag
+                AND COALESCE(m.deleted, 0) = 0
+                AND COALESCE(m.livraison_auto_client, 0) = 1
+            {SQL_LIVRE_SUM}
+            WHERE v.deleted = 0
+              AND v.statut = 'VALIDEE'
+              AND (vd.qtvente - COALESCE(lv_sum.total_livre, 0)) > 0.0001
+              {SQL_FILTER_SANS_AVOIR}
+            ORDER BY v.refvente, vd.idmag, vd.idarticle
+        """
+        cur.execute(sql_lignes)
+        rows = cur.fetchall()
+        if not rows:
+            return {"bl_count": 0, "line_count": 0, "refs": []}
+
+        par_facture: Dict[str, List[tuple]] = defaultdict(list)
+        idclient_par_facture: Dict[str, int] = {}
+        for row in rows:
+            refvente, idclient, idmag, idarticle, idunite, qtvente, total_livre = row
+            par_facture[refvente].append(row)
+            idclient_par_facture[refvente] = idclient
+
+        cls.table_columns(cur)
+        cols = cls._extra_cols or set()
+        has_trans = "idtransporteur" in cols
+        has_desc = "description_livraison" in cols
+        now = datetime.now()
+        id_trans = idtransporteur_defaut
+        desc_auto = "Livraison automatique (magasin paramétré)"
+
+        base_cols = [
+            "reflivcli", "refvente", "idmag", "idarticle", "idunite",
+            "qtvente", "qtlivrecli", "dateregistre", "iduser", "idclient",
+        ]
+        if has_trans:
+            base_cols.append("idtransporteur")
+        if has_desc:
+            base_cols.append("description_livraison")
+        placeholders = ", ".join(["%s"] * len(base_cols))
+        sql_ins = (
+            f"INSERT INTO tb_livraisoncli ({', '.join(base_cols)}) "
+            f"VALUES ({placeholders})"
+        )
+
+        refs_bl: List[str] = []
+        line_count = 0
+
+        for refvente, lignes in par_facture.items():
+            refliv = cls.generate_bl_ref_auto(cur)
+            refs_bl.append(refliv)
+            idclient = idclient_par_facture[refvente]
+            for _ref, _idc, idmag, idarticle, idunite, qtvente, total_livre in lignes:
+                qte = float(qtvente or 0) - float(total_livre or 0)
+                if qte <= 0.0001:
+                    continue
+                row_vals: List[Any] = [
+                    refliv, refvente, idmag, idarticle, idunite,
+                    qte, qte, now, id_user, idclient,
+                ]
+                if has_trans:
+                    row_vals.append(id_trans)
+                if has_desc:
+                    row_vals.append(desc_auto)
+                cur.execute(sql_ins, row_vals)
+                line_count += 1
+
+        return {
+            "bl_count": len(refs_bl),
+            "line_count": line_count,
+            "refs": refs_bl,
+        }
 
     @classmethod
     def insert_bl(

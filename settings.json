@@ -25,5 +25,7 @@
   "Changement_OpenA5": 1,
   "Credit_Acceptation_OpenA5": 1,
   "Credit_Temporaire_OpenA5": 1,
-  "Facture_Paiement_OpenTicket80Pdf": 1
+  "Facture_Paiement_OpenTicket80Pdf": 1,
+  "Livraison_TransporteurDefautId": 1,
+  "Livraison_TransporteurBlAuto": 0
 }

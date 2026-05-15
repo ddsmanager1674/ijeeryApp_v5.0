@@ -384,4 +384,40 @@ COMMENT ON COLUMN public.tb_livraisoncli.idtransporteur IS
 COMMENT ON COLUMN public.tb_livraisoncli.description_livraison IS
     'Note libre BL (n° voiture, tournée, etc.).';
 
+-- ── Paramètres globaux livraison client (Bon de livraison) ─────────────────
+CREATE TABLE IF NOT EXISTS public.tb_param_livraison_client (
+    id smallint NOT NULL DEFAULT 1,
+    idtransporteur_defaut integer,
+    transporteur_bl_auto smallint NOT NULL DEFAULT 0,
+    CONSTRAINT tb_param_livraison_client_pkey PRIMARY KEY (id),
+    CONSTRAINT tb_param_livraison_client_singleton CHECK (id = 1)
+);
+
+INSERT INTO public.tb_param_livraison_client (id, idtransporteur_defaut, transporteur_bl_auto)
+VALUES (1, NULL, 0)
+ON CONFLICT (id) DO NOTHING;
+
+COMMENT ON TABLE public.tb_param_livraison_client IS
+    'Paramètres globaux Bon de livraison (ligne unique id=1).';
+
+COMMENT ON COLUMN public.tb_param_livraison_client.idtransporteur_defaut IS
+    'Transporteur pré-sélectionné pour les BL manuels (tb_transporteur).';
+
+COMMENT ON COLUMN public.tb_param_livraison_client.transporteur_bl_auto IS
+    '1 = reporter idtransporteur_defaut sur les BL-AUTO ; 0 = BL-AUTO sans transporteur.';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'tb_param_livraison_client_idtransporteur_fkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_param_livraison_client
+            ADD CONSTRAINT tb_param_livraison_client_idtransporteur_fkey
+            FOREIGN KEY (idtransporteur_defaut)
+            REFERENCES public.tb_transporteur(idtransporteur)
+            ON UPDATE CASCADE ON DELETE SET NULL;
+    END IF;
+END $$;
+
 COMMIT;
