@@ -72,6 +72,191 @@ def _f(size=11, weight="normal"):
         size=size, weight=weight)
 
 
+def _load_societe_info(cursor):
+    """Charge tb_infosociete pour l'impression PDF."""
+    cursor.execute(
+        "SELECT nomsociete, adressesociete, contactsociete, villesociete, "
+        "nifsociete, statsociete, cifsociete, ambleme FROM tb_infosociete LIMIT 1"
+    )
+    row = cursor.fetchone()
+    if not row:
+        return {
+            "nomsociete": "SOCIÉTÉ", "adressesociete": "N/A",
+            "contactsociete": "N/A", "villesociete": "N/A",
+            "nifsociete": "N/A", "statsociete": "N/A",
+            "cifsociete": "N/A", "ambleme": "",
+        }
+    return {
+        "nomsociete": row[0] or "SOCIÉTÉ",
+        "adressesociete": row[1] or "N/A",
+        "contactsociete": row[2] or "N/A",
+        "villesociete": row[3] or "N/A",
+        "nifsociete": row[4] or "N/A",
+        "statsociete": row[5] or "N/A",
+        "cifsociete": row[6] or "N/A",
+        "ambleme": row[7] or "",
+    }
+
+
+def _get_data_avoir_print(cursor, idavoir, societe_info):
+    """Données complètes d'un avoir pour impression (même structure que page_avoir)."""
+    cursor.execute(
+        """
+        SELECT a.refavoir, a.dateregistre, a.dateavoir, a.observation, a.mtavoir,
+               u.nomuser, u.prenomuser,
+               c.nomcli, c.adressecli, c.contactcli
+        FROM tb_avoir a
+        INNER JOIN tb_users u ON a.iduser = u.iduser
+        LEFT JOIN tb_client c ON a.idclient = c.idclient
+        WHERE a.id = %s AND a.deleted = 0
+        """,
+        (idavoir,),
+    )
+    avoir_result = cursor.fetchone()
+    if not avoir_result:
+        return None
+
+    dateavoir_str = (
+        avoir_result[2].strftime("%d/%m/%Y")
+        if avoir_result[2] else datetime.now().strftime("%d/%m/%Y")
+    )
+    data = {
+        "societe": societe_info,
+        "avoir": {
+            "refavoir": avoir_result[0],
+            "dateregistre": avoir_result[1].strftime("%d/%m/%Y"),
+            "dateavoir": dateavoir_str,
+            "observation": avoir_result[3] or "",
+            "mtavoir": avoir_result[4] or 0.0,
+            "refvente_associe": "",
+            "magasin_vente": "",
+        },
+        "utilisateur": {
+            "nomuser": avoir_result[5],
+            "prenomuser": avoir_result[6],
+        },
+        "client": {
+            "nomcli": avoir_result[7] or "Client Inconnu",
+            "adressecli": avoir_result[8] or "N/A",
+            "contactcli": avoir_result[9] or "N/A",
+        },
+        "details": [],
+    }
+
+    refvente_associe = None
+    for sql in (
+        "SELECT refvente FROM tb_pmtavoir WHERE refavoir=%s AND deleted=0 "
+        "ORDER BY id DESC LIMIT 1",
+        "SELECT refvente FROM tb_pmtfacture WHERE refavoir=%s "
+        "ORDER BY id DESC LIMIT 1",
+    ):
+        try:
+            cursor.execute(sql, (data["avoir"]["refavoir"],))
+            row = cursor.fetchone()
+            if row and row[0]:
+                refvente_associe = row[0]
+                data["avoir"]["refvente_associe"] = refvente_associe
+                break
+        except Exception:
+            pass
+
+    cursor.execute(
+        """
+        SELECT u.codearticle, a.designation, u.designationunite,
+               ad.qtavoir, ad.prixunit,
+               ad.qtavoir * ad.prixunit AS montant_total,
+               m.designationmag,
+               COALESCE((
+                   SELECT vd.prixunit FROM tb_vente v
+                   INNER JOIN tb_ventedetail vd ON vd.idvente = v.id
+                   WHERE v.refvente = %s
+                     AND vd.idarticle = ad.idarticle
+                     AND vd.idunite = ad.idunite
+                     AND vd.idmag = ad.idmag
+                   ORDER BY ABS((vd.prixunit - COALESCE(vd.remise, 0)) - ad.prixunit),
+                            vd.id DESC
+                   LIMIT 1
+               ), ad.prixunit) AS pu_ttc_brut
+        FROM tb_avoirdetail ad
+        INNER JOIN tb_article a ON ad.idarticle = a.idarticle
+        INNER JOIN tb_unite u ON ad.idunite = u.idunite
+        INNER JOIN tb_magasin m ON ad.idmag = m.idmag
+        WHERE ad.idavoir = %s AND ad.deleted = 0
+        ORDER BY a.designation
+        """,
+        (refvente_associe, idavoir),
+    )
+    data["details"] = cursor.fetchall()
+    magasins = [r[6] for r in data["details"] if len(r) > 6 and r[6]]
+    if magasins:
+        data["avoir"]["magasin_vente"] = magasins[0]
+    return data
+
+
+def _generate_pdf_a5_avoir_duplicata(data, filename, duplicata=True):
+    """PDF A5 avoir — même modèle que page_avoir, mention DUPLICATA optionnelle."""
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.units import mm
+
+    from pages.pdf_modele_facture_a5 import (
+        generer_pdf_a5_modele_ventedepot,
+        html_entete_droite_avoir,
+        formater_nombre_pdf_defaut,
+    )
+    from pages.page_venteParMsin import nombre_en_lettres_fr
+
+    avoir = data.get("avoir") or {}
+    util = data.get("utilisateur") or {}
+    user_name = f"{util.get('prenomuser') or ''} {util.get('nomuser') or ''}".strip()
+    mag = str(avoir.get("magasin_vente") or "")
+    da = avoir.get("dateavoir")
+    if isinstance(da, datetime):
+        date_effet = da.strftime("%d/%m/%Y %H:%M")
+    else:
+        date_effet = str(da or "")
+    date_txt = f"{avoir.get('dateregistre', '') or ''} · Effet: {date_effet}".strip()
+
+    html_r = html_entete_droite_avoir(
+        str(avoir.get("refavoir", "N/A")),
+        str(avoir.get("refvente_associe") or "N/A"),
+        date_txt,
+        mag,
+        (data.get("client") or {}).get("nomcli", "Client"),
+        user_name,
+    )
+
+    overlay = None
+    footer_extra = ()
+    if duplicata:
+        def overlay_duplicata(c, width, height):
+            c.saveState()
+            c.setFont("Helvetica-Bold", 12)
+            c.setFillColor(rl_colors.HexColor("#D32F2F"))
+            c.drawCentredString(width / 2, height - 43.5 * mm, "DUPLICATA")
+            c.restoreState()
+
+        overlay = overlay_duplicata
+        footer_extra = ("<i>CECI EST UN DUPLICATA DE L'AVOIR</i>",)
+
+    dname = os.path.dirname(os.path.abspath(filename))
+    if dname:
+        os.makedirs(dname, exist_ok=True)
+
+    generer_pdf_a5_modele_ventedepot(
+        filename,
+        societe=data.get("societe") or {},
+        utilisateur=util,
+        client=data.get("client") or {},
+        magasin_nom=mag,
+        html_right_header=html_r,
+        details=data.get("details") or [],
+        nombre_en_lettres_fr=nombre_en_lettres_fr,
+        formater_nombre_pdf=formater_nombre_pdf_defaut,
+        overlay_apres_entete=overlay,
+        paragraphes_footer_supplement=footer_extra,
+    )
+
+
 # ====================================================================
 # PageDetailFacture
 # ====================================================================
@@ -80,9 +265,11 @@ class PageDetailFacture(ctk.CTkToplevel):
     """Fenêtre affichant les articles d'une facture spécifique"""
 
     def __init__(self, master, idvente, refvente,
-                 statut="EN_ATTENTE", parent_page=None):
+                 statut="EN_ATTENTE", parent_page=None, mode_avoir=False):
         super().__init__(master)
-        self.title(f"Détails Facture : {refvente}")
+        self.mode_avoir = mode_avoir
+        titre_doc = "Avoir" if mode_avoir else "Facture"
+        self.title(f"Détails {titre_doc} : {refvente}")
         self.geometry("860x560")
         if _T:
             Theme.apply_toplevel(self)
@@ -104,7 +291,7 @@ class PageDetailFacture(ctk.CTkToplevel):
         hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
         hdr.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(
-            hdr, text=f"Détails Facture — {refvente}",
+            hdr, text=f"Détails {titre_doc} — {refvente}",
             font=_f(16, "bold"), text_color="#FFFFFF"
         ).pack(side="left", padx=16, pady=10)
 
@@ -113,6 +300,7 @@ class PageDetailFacture(ctk.CTkToplevel):
             "VALIDEE":    (C.SUCCESS_DARK, "#FFFFFF"),
             "EN_ATTENTE": (C.WARNING,      "#FFFFFF"),
             "ANNULE":     (C.DANGER,       "#FFFFFF"),
+            "AVOIR":      (C.PREMIUM_DARK, "#FFFFFF"),
         }
         bg_s, fg_s = badge_colors.get(statut, (C.TEXT_MUTED, "#FFFFFF"))
         ctk.CTkLabel(
@@ -187,16 +375,17 @@ class PageDetailFacture(ctk.CTkToplevel):
         right = ctk.CTkFrame(footer, fg_color="transparent")
         right.pack(side="right", padx=16, pady=12)
 
-        if self.statut == "VALIDEE":
+        if self.statut == "VALIDEE" or self.mode_avoir:
+            lbl_dup = "🖨️  Réimprimer Avoir (Duplicata)" if self.mode_avoir else "🖨️  Réimprimer (Duplicata)"
             ctk.CTkButton(
-                right, text="🖨️  Réimprimer (Duplicata)",
+                right, text=lbl_dup,
                 command=self.reimprimer_duplicata,
                 fg_color=C.PRIMARY, hover_color=C.PRIMARY_HOVER,
-                text_color="#FFFFFF", height=32, width=210,
+                text_color="#FFFFFF", height=32, width=230 if self.mode_avoir else 210,
                 font=_f(10, "bold")
             ).pack(pady=(0, 4))
 
-        if self.statut == "EN_ATTENTE":
+        if self.statut == "EN_ATTENTE" and not self.mode_avoir:
             ctk.CTkButton(
                 right, text="❌  Annuler Facture",
                 command=self.annuler_facture,
@@ -239,23 +428,42 @@ class PageDetailFacture(ctk.CTkToplevel):
             conn = psycopg2.connect(**config['database'])
             cursor = conn.cursor()
 
-            sql_vente = "SELECT v.totmtvente FROM tb_vente v WHERE v.id = %s"
-            cursor.execute(sql_vente, (idvente,))
+            if self.mode_avoir:
+                cursor.execute(
+                    "SELECT a.mtavoir FROM tb_avoir a WHERE a.id = %s AND a.deleted = 0",
+                    (idvente,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT v.totmtvente FROM tb_vente v WHERE v.id = %s",
+                    (idvente,),
+                )
             result = cursor.fetchone()
             if result:
                 self.montant_total = float(result[0]) if result[0] else 0
                 self.lbl_montant.configure(
                     text=f"{self.formater_montant(self.montant_total)} Ar")
 
-            sql = """
-                SELECT u.codearticle, a.designation, vd.qtvente, vd.prixunit,
-                       COALESCE(vd.remise, 0) AS remise,
-                       (vd.qtvente * (COALESCE(vd.prixunit, 0) - COALESCE(vd.remise, 0))) AS total
-                FROM tb_ventedetail vd
-                INNER JOIN tb_unite u ON vd.idunite = u.idunite
-                INNER JOIN tb_article a ON vd.idarticle = a.idarticle
-                WHERE vd.idvente = %s
-            """
+            if self.mode_avoir:
+                sql = """
+                    SELECT u.codearticle, a.designation, ad.qtavoir, ad.prixunit,
+                           0 AS remise,
+                           (ad.qtavoir * COALESCE(ad.prixunit, 0)) AS total
+                    FROM tb_avoirdetail ad
+                    INNER JOIN tb_unite u ON ad.idunite = u.idunite
+                    INNER JOIN tb_article a ON ad.idarticle = a.idarticle
+                    WHERE ad.idavoir = %s AND ad.deleted = 0
+                """
+            else:
+                sql = """
+                    SELECT u.codearticle, a.designation, vd.qtvente, vd.prixunit,
+                           COALESCE(vd.remise, 0) AS remise,
+                           (vd.qtvente * (COALESCE(vd.prixunit, 0) - COALESCE(vd.remise, 0))) AS total
+                    FROM tb_ventedetail vd
+                    INNER JOIN tb_unite u ON vd.idunite = u.idunite
+                    INNER JOIN tb_article a ON vd.idarticle = a.idarticle
+                    WHERE vd.idvente = %s
+                """
             cursor.execute(sql, (idvente,))
             for item in self.tree.get_children():
                 self.tree.delete(item)
@@ -288,7 +496,10 @@ class PageDetailFacture(ctk.CTkToplevel):
                                  f"Erreur lors du chargement des détails : {e}")
 
     def reimprimer_duplicata(self):
-        """Génère un duplicata de la facture"""
+        """Génère un duplicata de la facture ou de l'avoir"""
+        if self.mode_avoir:
+            self._reimprimer_duplicata_avoir()
+            return
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
@@ -402,6 +613,74 @@ class PageDetailFacture(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Erreur",
                                  f"Erreur lors de la génération du duplicata : {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def _reimprimer_duplicata_avoir(self):
+        """Duplicata PDF A5 — même modèle que l'impression avoir (page_avoir)."""
+        try:
+            with open(get_config_path('config.json')) as f:
+                config = json.load(f)
+            conn = psycopg2.connect(**config['database'])
+            cursor = conn.cursor()
+
+            societe_info = _load_societe_info(cursor)
+            data = _get_data_avoir_print(cursor, self.idvente, societe_info)
+            conn.close()
+
+            if not data:
+                messagebox.showerror(
+                    "Erreur",
+                    "Impossible de récupérer les données de l'avoir",
+                    parent=self,
+                )
+                return
+
+            refavoir = data["avoir"]["refavoir"]
+            safe_ref = str(refavoir).replace("/", "-").replace("\\", "-")
+            basename = (
+                f"DUPLICATA_Avoir_{safe_ref}_"
+                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            )
+            filename, is_temp = build_impression_output_path(
+                basename, temp_prefix="ijeery_duplicata_avoir_"
+            )
+
+            _generate_pdf_a5_avoir_duplicata(data, filename, duplicata=True)
+            extra = (
+                "\n\n(Fichier temporaire — non enregistré dans le dossier configuré.)"
+                if is_temp else ""
+            )
+            messagebox.showinfo(
+                parent=self,
+                title="Succès",
+                message=f"Duplicata avoir généré avec succès !\n{filename}{extra}",
+            )
+
+            if os.path.exists(filename):
+                os.startfile(filename)
+
+            try:
+                if self._logger:
+                    self._logger.log(
+                        action="Impression duplicata avoir",
+                        element=refavoir,
+                        details=(
+                            f"Duplicata généré, fichier={os.path.basename(filename)}"
+                        ),
+                        value=filename,
+                    )
+            except Exception:
+                pass
+
+            self.destroy()
+
+        except Exception as e:
+            messagebox.showerror(
+                "Erreur",
+                f"Erreur lors de la génération du duplicata avoir : {str(e)}",
+                parent=self,
+            )
             import traceback
             traceback.print_exc()
 
@@ -576,7 +855,7 @@ class PageListeFacture(ctk.CTkFrame):
         ctk.CTkLabel(inner, text="Statut :", font=_f(10),
                      text_color=C.TEXT_SECONDARY).pack(side="left", padx=(0, 2))
         self.combo_statut = ctk.CTkComboBox(
-            inner, values=["Tout", "VALIDEE", "EN_ATTENTE", "ANNULE"],
+            inner, values=["Tout", "VALIDEE", "EN_ATTENTE", "ANNULE", "AVOIR"],
             state="readonly", width=120, height=30,
             fg_color=C.BG_INPUT, border_color=C.BORDER,
             button_color=C.PRIMARY, font=_f(10))
@@ -769,37 +1048,79 @@ class PageListeFacture(ctk.CTkFrame):
 
         try:
             cursor = conn.cursor()
-            sql = """
-                SELECT v.dateregistre, v.refvente,
-                       COALESCE(m.designationmag, ''),
-                       COALESCE(c.nomcli, 'Client Divers'),
-                       v.totmtvente, v.statut, u.username, v.id
-                FROM tb_vente v
-                LEFT JOIN tb_client c  ON v.idclient = c.idclient
-                LEFT JOIN tb_users u   ON v.iduser   = u.iduser
-                LEFT JOIN tb_magasin m ON v.idmag    = m.idmag
-                WHERE (
-                    v.refvente ILIKE %s
-                    OR c.nomcli ILIKE %s
-                    OR CAST(COALESCE(v.totmtvente, 0) AS TEXT) ILIKE %s
-                    OR CAST(COALESCE(v.totmtvente, 0) AS TEXT) ILIKE %s
-                    OR (%s IS NOT NULL AND COALESCE(v.totmtvente, 0) = %s)
-                )
-                AND v.dateregistre::date BETWEEN %s AND %s
-            """
+            filtre_avoir = statut_filtre == "AVOIR"
+
+            if filtre_avoir:
+                sql = """
+                    SELECT a.dateregistre, a.refavoir,
+                           COALESCE((
+                               SELECT m.designationmag
+                               FROM tb_avoirdetail ad
+                               INNER JOIN tb_magasin m ON ad.idmag = m.idmag
+                               WHERE ad.idavoir = a.id AND ad.deleted = 0
+                               ORDER BY ad.id
+                               LIMIT 1
+                           ), ''),
+                           COALESCE(c.nomcli, 'Client Divers'),
+                           a.mtavoir, 'AVOIR', u.username, a.id
+                    FROM tb_avoir a
+                    LEFT JOIN tb_client c ON a.idclient = c.idclient
+                    LEFT JOIN tb_users u ON a.iduser = u.iduser
+                    WHERE a.deleted = 0
+                    AND (
+                        a.refavoir ILIKE %s
+                        OR c.nomcli ILIKE %s
+                        OR CAST(COALESCE(a.mtavoir, 0) AS TEXT) ILIKE %s
+                        OR CAST(COALESCE(a.mtavoir, 0) AS TEXT) ILIKE %s
+                        OR (%s IS NOT NULL AND COALESCE(a.mtavoir, 0) = %s)
+                    )
+                    AND a.dateregistre::date BETWEEN %s AND %s
+                """
+            else:
+                sql = """
+                    SELECT v.dateregistre, v.refvente,
+                           COALESCE(m.designationmag, ''),
+                           COALESCE(c.nomcli, 'Client Divers'),
+                           v.totmtvente, v.statut, u.username, v.id
+                    FROM tb_vente v
+                    LEFT JOIN tb_client c  ON v.idclient = c.idclient
+                    LEFT JOIN tb_users u   ON v.iduser   = u.iduser
+                    LEFT JOIN tb_magasin m ON v.idmag    = m.idmag
+                    WHERE (
+                        v.refvente ILIKE %s
+                        OR c.nomcli ILIKE %s
+                        OR CAST(COALESCE(v.totmtvente, 0) AS TEXT) ILIKE %s
+                        OR CAST(COALESCE(v.totmtvente, 0) AS TEXT) ILIKE %s
+                        OR (%s IS NOT NULL AND COALESCE(v.totmtvente, 0) = %s)
+                    )
+                    AND v.dateregistre::date BETWEEN %s AND %s
+                """
             params = [
                 f"%{val}%", f"%{val}%",
                 f"%{val}%", f"%{val.replace(',', '.')}%",
                 val_num, val_num,
                 d1, d2,
             ]
-            if statut_filtre != "Tout":
+            if not filtre_avoir and statut_filtre != "Tout":
                 sql += " AND v.statut = %s"
                 params.append(statut_filtre)
             if magasin_filtre_nom != "Tout" and magasin_filtre_id:
-                sql += " AND v.idmag = %s"
+                if filtre_avoir:
+                    sql += """
+                        AND EXISTS (
+                            SELECT 1 FROM tb_avoirdetail ad
+                            WHERE ad.idavoir = a.id
+                              AND ad.idmag = %s
+                              AND ad.deleted = 0
+                        )
+                    """
+                else:
+                    sql += " AND v.idmag = %s"
                 params.append(magasin_filtre_id)
-            sql += " ORDER BY v.dateregistre DESC, v.id DESC"
+            if filtre_avoir:
+                sql += " ORDER BY a.dateregistre DESC, a.id DESC"
+            else:
+                sql += " ORDER BY v.dateregistre DESC, v.id DESC"
 
             cursor.execute(sql, params)
             rows = cursor.fetchall()
@@ -812,9 +1133,10 @@ class PageListeFacture(ctk.CTkFrame):
                     r[0].strftime("%d/%m/%Y %H:%M:%S"),
                     r[1], r[2], r[3], mt_format, r[5], r[6]
                 ), tags=(tag,))
-                total += float(r[4])
+                total += float(r[4] or 0)
 
-            self.lbl_count.configure(text=f"Factures : {len(rows)}")
+            libelle = "Avoirs" if filtre_avoir else "Factures"
+            self.lbl_count.configure(text=f"{libelle} : {len(rows)}")
             self.lbl_total_mt.configure(
                 text=f"Total : {self.formater_montant(total)} Ar")
         finally:
@@ -827,7 +1149,11 @@ class PageListeFacture(ctk.CTkFrame):
         values      = self.tree.item(selected_item)['values']
         ref_facture = values[1]
         statut      = values[5]
-        PageDetailFacture(self, selected_item, ref_facture, statut, parent_page=self)
+        mode_avoir  = statut == "AVOIR" or self.combo_statut.get() == "AVOIR"
+        PageDetailFacture(
+            self, selected_item, ref_facture, statut,
+            parent_page=self, mode_avoir=mode_avoir,
+        )
 
     def exporter_excel(self):
         lignes = [self.tree.item(item)['values']
