@@ -38,7 +38,7 @@ class PageAutorisation(ctk.CTkFrame):
                 "Article Liste", "Client", "Fournisseur", "Magasin",
                 "Ventes par Dépôt", "Liste Facture", "Stock Article",
                 "Inventaire du Jour", "Stock Alerte", "Péremption d'article",
-                "Stock Livraison", "Livraison Client", "Mouvement d'article",
+                "Historiques livraison", "Bon de Livraison", "Mouvement d'article",
                 "Mouvement Stock", "Liste mouvements",
                 "Prix d'article", "Prix de revient", "Marge Commerciale",
             ),

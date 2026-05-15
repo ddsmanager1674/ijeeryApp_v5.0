@@ -371,4 +371,17 @@ COMMENT ON COLUMN public.tb_save_history.taille_mo IS
 COMMENT ON COLUMN public.tb_save_history.utilisateur IS
     'Utilisateur ayant lancé la sauvegarde.';
 
+-- ── Livraisons client : transporteur + description sur BL ───────────────────
+ALTER TABLE public.tb_livraisoncli
+    ADD COLUMN IF NOT EXISTS idtransporteur integer;
+
+ALTER TABLE public.tb_livraisoncli
+    ADD COLUMN IF NOT EXISTS description_livraison character varying(250);
+
+COMMENT ON COLUMN public.tb_livraisoncli.idtransporteur IS
+    'Transporteur optionnel (tb_transporteur). Même valeur pour toutes les lignes d''un reflivcli.';
+
+COMMENT ON COLUMN public.tb_livraisoncli.description_livraison IS
+    'Note libre BL (n° voiture, tournée, etc.).';
+
 COMMIT;

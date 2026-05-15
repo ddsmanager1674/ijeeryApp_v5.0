@@ -188,8 +188,8 @@ MENU_STRUCTURE = [
             ("📦  Inventaire du Jour",  "Inventaire du Jour",    "pages.page_inventaireJour",   "PageInventaireJour",  None),
             ("⚠️  Stock Alerte",        "Stock Alerte",          "pages.page_StockAlerte",      "PageStockAlerte",     None),
             ("🛡️  Péremption Article",  "Péremption d'article",  "pages.page_peremption",       "PageGestionPeremption", None),
-            ("🚚  Stock Livraison",     "Stock Livraison",       "pages.page_StockLivraison",   "PageStockLivraison",  None),
-            ("🚚  Livraison Client",    "Livraison Client",      "pages.page_LivraisonClient",  "PageLivraisonClient", "vente"),
+            ("📜  Historiques livraison", "Historiques livraison", "pages.page_HistoriqueLivraison", "PageHistoriqueLivraison", None),
+            ("🚚  Bon de Livraison",      "Bon de Livraison",      "pages.page_BonDeLivraison",      "PageBonDeLivraison",      "vente"),
             ("🔄  Mouvement Article",   "Mouvement d'article",   "pages.page_articleMouvement", "PageArticleMouvement", None),
             ("📊  Mouvement Stock",     "Mouvement Stock",       "pages.page_infoMouvement",    "PageInfoMouvementStock", "iduser"),
             ("📋  Liste Mouvements",    "Liste mouvements",      "pages.page_listeMouvement",   "PageListeMouvement",  None),
@@ -454,6 +454,16 @@ class Sidebar(ctk.CTkFrame):
         # bloc parent DATABASE.
         if "Fonction" in self._authorized:
             self._authorized.setdefault("BLOC: BASE DE DONNÉES", True)
+        # Compatibilité anciens libellés → nouveaux menus livraison
+        for new_menu, anciens in (
+            ("Historiques livraison", ("Stock Livraison", "Livraison Client")),
+            ("Bon de Livraison", ("Livraison Client", "Stock Livraison")),
+        ):
+            if new_menu not in self._authorized:
+                for old in anciens:
+                    if self._authorized.get(old):
+                        self._authorized[new_menu] = True
+                        break
         self._is_open       = True
         self._accordions: list[MenuAccordion] = []
 
@@ -1226,9 +1236,10 @@ def _dummy_session() -> dict:
         "TABLEAU DE BORD", "CHAT INTERNE",
         "Article Liste", "Client", "Fournisseur", "Magasin",
         "Ventes par Dépôt", "Liste Facture",
-        "Stock Article", "Stock Alerte", "Péremption d'article", "Stock Livraison",
+        "Stock Article", "Stock Alerte", "Péremption d'article",
+        "Historiques livraison", "Bon de Livraison",
         "Mouvement d'article", "Mouvement Stock", "Liste mouvements",
-        "Prix d'article", "Prix de revient", "Livraison Client",
+        "Prix d'article", "Prix de revient",
         "Liste Personnel", "Suivi de présence", "Avance 15e", "Avance Spéciale",
         "Nouveau SB", "Etat de Salaire", "Salaire Horaire",
         "Taux Horaire", "Paiement Salaire",

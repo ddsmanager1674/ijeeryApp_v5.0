@@ -149,7 +149,8 @@ class EtatPDFMouvements:
     
     def _build_pdf_a5(self, output_path, titre_entete, reference, date_operation, 
                       magasin, operateur, table_data, description, 
-                      responsable_1="Responsable 1", responsable_2="Responsable 2"):
+                      responsable_1="Responsable 1", responsable_2="Responsable 2",
+                      duplicata=False, footer_supplement=None):
         """
         Construit et génère un PDF au format A5 Landscape selon le modèle redesigné.
         
@@ -164,6 +165,8 @@ class EtatPDFMouvements:
             description: Description de l'opération
             responsable_1: Fonction du 1er responsable
             responsable_2: Fonction du 2e responsable
+            duplicata: Si True, affiche la mention DUPLICATA sur le PDF
+            footer_supplement: Texte HTML optionnel sous la description (ex. mention duplicata)
         """
         doc = SimpleDocTemplate(
             output_path,
@@ -437,6 +440,20 @@ class EtatPDFMouvements:
                 )
             )
             elements.append(desc_line)
+
+        if footer_supplement:
+            elements.append(Paragraph(
+                footer_supplement,
+                ParagraphStyle(
+                    'FooterSupplement',
+                    parent=styles['Normal'],
+                    fontSize=9,
+                    alignment=TA_CENTER,
+                    textColor=colors.HexColor("#D32F2F"),
+                    spaceBefore=2,
+                    spaceAfter=4,
+                ),
+            ))
         
         # ========== 5. SIGNATURES EN BAS ==========
         # Deux textes à gauche (stacked) et un à droite
@@ -475,9 +492,22 @@ class EtatPDFMouvements:
         
         elements.append(sig_container)
         
+        def _page_overlay(canvas, _doc):
+            if not duplicata:
+                return
+            canvas.saveState()
+            canvas.setFont("Helvetica-Bold", 12)
+            canvas.setFillColor(colors.HexColor("#D32F2F"))
+            w, h = landscape(A5)
+            canvas.drawCentredString(w / 2, h - 43.5 * mm, "DUPLICATA")
+            canvas.restoreState()
+
         # Générer le PDF
         try:
-            doc.build(elements)
+            if duplicata:
+                doc.build(elements, onFirstPage=_page_overlay, onLaterPages=_page_overlay)
+            else:
+                doc.build(elements)
             print(f"✅ PDF généré avec succès: {output_path}")
             
             # Ouverture automatique (selon settings)
