@@ -7,7 +7,10 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import os
 import subprocess
 from datetime import datetime
+import json
+import psycopg2
 from settings_utils import open_file_if_enabled, is_global_print_enabled
+from resource_utils import get_config_path
 
 
 class EtatCreditTemporaire:
@@ -63,8 +66,28 @@ class EtatCreditTemporaire:
         styles = getSampleStyleSheet()
         page_width_usable = self.PAGE_WIDTH - 2 * self.MARGIN
 
+        default_verse = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+        ambleme = default_verse
+        conn = None
+        try:
+            config_path = get_config_path("config.json")
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            db = config["database"]
+            conn = psycopg2.connect(**db, connect_timeout=5)
+            cur = conn.cursor()
+            cur.execute("SELECT ambleme FROM tb_infosociete LIMIT 1")
+            row = cur.fetchone()
+            if row and (row[0] or "").strip():
+                ambleme = row[0]
+        except Exception:
+            pass
+        finally:
+            if conn:
+                conn.close()
+
         verse_title = Paragraph(
-            "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
+            ambleme,
             ParagraphStyle(
                 "MainTitle",
                 parent=styles["Normal"],

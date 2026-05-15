@@ -658,6 +658,7 @@ class PageChangementArticle(ctk.CTkFrame):
             'villesociete': '', 'contactsociete': 'Contact: Non Configuré',
             'nifsociete': 'NIF: Non Configuré', 'statsociete': 'STAT: Non Configurée',
             'cifsociete': 'CIF: Non Configuré',
+            'ambleme': "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
         }
         conn = self.connect_db()
         if not conn:
@@ -666,7 +667,7 @@ class PageChangementArticle(ctk.CTkFrame):
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT nomsociete, villesociete, adressesociete, contactsociete, "
-                "nifsociete, statsociete, cifsociete FROM tb_infosociete LIMIT 1"
+                "nifsociete, statsociete, cifsociete, ambleme FROM tb_infosociete LIMIT 1"
             )
             row = cursor.fetchone()
             if row:
@@ -678,6 +679,7 @@ class PageChangementArticle(ctk.CTkFrame):
                     'nifsociete':     row[4] or 'NIF: Non Configuré',
                     'statsociete':    row[5] or 'STAT: Non Configurée',
                     'cifsociete':     row[6] or 'CIF: Non Configuré',
+                    'ambleme':        row[7] or "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
                 }
         except Exception as e:
             print(f"Erreur infos société : {e}")
@@ -1290,8 +1292,10 @@ class PageChangementArticle(ctk.CTkFrame):
         pw       = self.PAGE_WIDTH - 2 * self.MARGIN   # page usable width
 
         # ── 1. Titre principal ────────────────────────────────────────────────
+        default_verse = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+        societe = self._get_societe_info()
         main_title = Paragraph(
-            "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao",
+            societe.get("ambleme") or default_verse,
             ParagraphStyle('MainTitle', parent=styles['Normal'],
                            fontSize=10, textColor=colors.black,
                            alignment=TA_CENTER, fontName='Helvetica-Bold'),
@@ -1308,7 +1312,6 @@ class PageChangementArticle(ctk.CTkFrame):
         elements.append(title_table)
 
         # ── 2. En-tête : Société + Opération ─────────────────────────────────
-        societe       = self._get_societe_info()
         nomsociete    = societe.get('nomsociete', 'N/A')
         adressesociete= societe.get('adressesociete') or 'Adresse Non Configurée'
         villesociete  = societe.get('villesociete') or ''

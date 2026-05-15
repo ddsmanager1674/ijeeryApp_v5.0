@@ -123,7 +123,7 @@ def generer_pdf_a5_modele_ventedepot(
     sp = ParagraphStyle("sp", fontSize=9, leading=11, parent=styles["Normal"])
 
     def draw_verset():
-        verse = (
+        verse = soc.get("ambleme") or (
             "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
         )
         c.setLineWidth(1)

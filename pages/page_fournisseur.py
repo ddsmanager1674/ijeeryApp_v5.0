@@ -1448,6 +1448,16 @@ class PageFournisseur(ctk.CTkFrame):
         open_setting_default: int = 0,
     ):
         try:
+            default_verse = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+            ambleme = default_verse
+            try:
+                self.cursor.execute("SELECT ambleme FROM tb_infosociete LIMIT 1")
+                row_soc = self.cursor.fetchone()
+                if row_soc and (row_soc[0] or "").strip():
+                    ambleme = row_soc[0]
+            except Exception:
+                pass
+
             frs_adresse = "-"; frs_contact = "-"
             try:
                 self.cursor.execute(
@@ -1578,7 +1588,7 @@ class PageFournisseur(ctk.CTkFrame):
             color_header = colors.HexColor("#7d3c98")
 
             verse_title = Paragraph(
-                "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
+                ambleme,
                 ParagraphStyle("VerseFrs", parent=styles["Normal"], fontSize=10,
                                textColor=colors.black, alignment=TA_CENTER,
                                fontName="Helvetica-Bold", spaceAfter=3))

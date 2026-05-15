@@ -105,7 +105,8 @@ class EtatPDFMouvements:
                 'contactsociete': 'Contact: Non Configuré',
                 'nifsociete': 'NIF: Non Configuré',
                 'statsociete': 'STAT: Non Configurée',
-                'cifsociete': 'CIF: Non Configuré'
+                'cifsociete': 'CIF: Non Configuré',
+                'ambleme': "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
             }
         
         try:
@@ -113,7 +114,7 @@ class EtatPDFMouvements:
             cur.execute("""
                 SELECT 
                     nomsociete, villesociete, adressesociete, contactsociete,
-                    nifsociete, statsociete, cifsociete
+                    nifsociete, statsociete, cifsociete, ambleme
                 FROM tb_infosociete LIMIT 1
             """)
             row = cur.fetchone()
@@ -125,7 +126,8 @@ class EtatPDFMouvements:
                     'contactsociete': row[3] or 'Contact: Non Configuré',
                     'nifsociete': row[4] or 'NIF: Non Configuré',
                     'statsociete': row[5] or 'STAT: Non Configurée',
-                    'cifsociete': row[6] or 'CIF: Non Configuré'
+                    'cifsociete': row[6] or 'CIF: Non Configuré',
+                    'ambleme': row[7] or "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
                 }
         except Exception as e:
             print(f"Erreur lors de la récupération des infos société: {e}")
@@ -137,7 +139,8 @@ class EtatPDFMouvements:
             'contactsociete': 'Contact: Non Configuré',
             'nifsociete': 'NIF: Non Configuré',
             'statsociete': 'STAT: Non Configurée',
-            'cifsociete': 'CIF: Non Configuré'
+            'cifsociete': 'CIF: Non Configuré',
+            'ambleme': "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
         }
     
     # ========================================================
@@ -176,8 +179,10 @@ class EtatPDFMouvements:
         page_width_usable = self.PAGE_WIDTH - 2*self.MARGIN
         
         # ========== 1. TITRE PRINCIPAL AVEC TEXTE SACRÉ ==========
+        societe = self._get_societe_info()
+        default_verse = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
         main_title = Paragraph(
-            "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
+            societe.get("ambleme") or default_verse,
             ParagraphStyle(
                 'MainTitle',
                 parent=styles['Normal'],
@@ -203,7 +208,6 @@ class EtatPDFMouvements:
         #elements.append(Spacer(1, 3*mm))
         
         # ========== 2. SECTION EN-TÊTE: 1/3 SOCIÉTÉ + 2/3 OPÉRATION ==========
-        societe = self._get_societe_info()
         
         # Adapter les clés de données si nécessaire (comme dans page_venteParMsin.py)
         nomsociete = societe.get('nomsociete', 'N/A')

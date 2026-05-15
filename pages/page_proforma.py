@@ -1546,7 +1546,7 @@ class PageCommandeCli(ctk.CTkFrame):
         width, height = A5
 
         # ✅ 1. EN-TÊTE AVEC VERSET — compact sur 1 ligne
-        verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+        verset = data.get("societe", {}).get("ambleme") or "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
         c.setLineWidth(1)
         verset_h = 5 * mm
         verset_y = height - 11 * mm
@@ -1738,7 +1738,10 @@ class PageCommandeCli(ctk.CTkFrame):
             cursor = conn.cursor()
             
             # Récupération des infos de la société
-            cursor.execute("SELECT nomsociete, adressesociete, contactsociete, nifsociete, statsociete FROM tb_infosociete LIMIT 1")
+            cursor.execute(
+                "SELECT nomsociete, adressesociete, contactsociete, nifsociete, statsociete, ambleme "
+                "FROM tb_infosociete LIMIT 1"
+            )
             row_societe = cursor.fetchone()
             societe_info = {
                 'nomsociete': row_societe[0] if row_societe else 'N/A',
@@ -1746,6 +1749,7 @@ class PageCommandeCli(ctk.CTkFrame):
                 'contactsociete': row_societe[2] if row_societe else 'N/A',
                 'nifsociete': row_societe[3] if row_societe else 'N/A',
                 'statsociete': row_societe[4] if row_societe else 'N/A',
+                'ambleme': row_societe[5] if row_societe else '',
             }
 
             # Récupération des infos client

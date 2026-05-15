@@ -2491,7 +2491,7 @@ class PageVenteParMsin(ctk.CTkFrame):
         sp = ParagraphStyle('sp', fontSize=9, leading=11, parent=styles['Normal'])
 
         def draw_verset():
-            verse = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+            verse = data.get("societe", {}).get("ambleme") or "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
             c.setLineWidth(1); c.rect(MARGIN, height-13*mm, width-2*MARGIN, 8*mm)
             c.setFont("Helvetica-Bold", 9)
             c.drawCentredString(width/2, height-10.5*mm, verse)

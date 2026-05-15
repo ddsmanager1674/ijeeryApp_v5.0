@@ -1348,8 +1348,26 @@ class PagePmtFacture(ctk.CTkToplevel):
             styles   = getSampleStyleSheet()
             color_header = colors.HexColor("#034787")
 
+            default_verse = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+            ambleme = default_verse
+            conn_soc = None
+            try:
+                conn_soc = self.connect_db()
+                if conn_soc:
+                    cur_soc = conn_soc.cursor()
+                    cur_soc.execute("SELECT ambleme FROM tb_infosociete LIMIT 1")
+                    row_soc = cur_soc.fetchone()
+                    if row_soc and (row_soc[0] or "").strip():
+                        ambleme = row_soc[0]
+                    cur_soc.close()
+            except Exception:
+                pass
+            finally:
+                if conn_soc:
+                    conn_soc.close()
+
             verse_title = Paragraph(
-                "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
+                ambleme,
                 ParagraphStyle("MainTitleCredit", parent=styles["Normal"],
                                fontSize=10, textColor=colors.black,
                                alignment=TA_CENTER, fontName="Helvetica-Bold", spaceAfter=3),

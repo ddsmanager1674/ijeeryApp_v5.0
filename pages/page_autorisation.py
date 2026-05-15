@@ -67,7 +67,7 @@ class PageAutorisation(ctk.CTkFrame):
             "BLOC: BASE DE DONNÉES",
             (
                 "Autorisation", "Evenements", "Sauvegarde", "Fonction", "Utilisateurs",
-                "Menu", "Base Liste", "Autorisation Admin", "Init DB",
+                "Paramètres", "Menu", "Base Liste", "Autorisation Admin", "Init DB",
             ),
         ),
     )

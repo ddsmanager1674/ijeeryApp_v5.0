@@ -1941,6 +1941,16 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         open_setting_default: int = 0,
     ):
         try:
+            default_verse = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+            ambleme = default_verse
+            try:
+                self.cursor.execute("SELECT ambleme FROM tb_infosociete LIMIT 1")
+                row_soc = self.cursor.fetchone()
+                if row_soc and (row_soc[0] or "").strip():
+                    ambleme = row_soc[0]
+            except Exception:
+                pass
+
             client_adresse = "-"
             client_contact = "-"
             try:
@@ -2073,7 +2083,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             color_header = colors.HexColor("#034787")
 
             verse_title = Paragraph(
-                "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3",
+                ambleme,
                 ParagraphStyle("MainTitleCredit", parent=styles["Normal"], fontSize=10,
                                textColor=colors.black, alignment=TA_CENTER,
                                fontName="Helvetica-Bold", spaceAfter=3))

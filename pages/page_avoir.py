@@ -1068,6 +1068,7 @@ class PageAvoir(ctk.CTkFrame):
             'nomsociete': 'SOCIÉTÉ', 'adressesociete': 'N/A',
             'contactsociete': 'N/A', 'villesociete': 'N/A',
             'nifsociete': 'N/A', 'statsociete': 'N/A', 'cifsociete': 'N/A',
+            'ambleme': '',
         }
         conn = self.connect_db()
         if not conn:
@@ -1079,7 +1080,7 @@ class PageAvoir(ctk.CTkFrame):
             cursor.execute(
                 """
                 SELECT nomsociete, adressesociete, contactsociete, villesociete,
-                       nifsociete, statsociete, cifsociete
+                       nifsociete, statsociete, cifsociete, ambleme
                 FROM tb_infosociete LIMIT 1
                 """
             )
@@ -1093,6 +1094,7 @@ class PageAvoir(ctk.CTkFrame):
                 'nifsociete':     result[4] or 'N/A',
                 'statsociete':    result[5] or 'N/A',
                 'cifsociete':     result[6] or 'N/A',
+                'ambleme':        result[7] or '',
             } if result else _default
 
         except Exception as e:

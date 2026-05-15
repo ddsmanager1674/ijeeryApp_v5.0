@@ -889,7 +889,7 @@ class PageVente(ctk.CTkFrame):
         if not conn: return
         try:
             cursor = conn.cursor()
-            cursor.execute("SELECT nomsociete, adressesociete, villesociete, contactsociete, nifsociete, statsociete, cifsociete FROM tb_infosociete LIMIT 1")
+            cursor.execute("SELECT nomsociete, adressesociete, villesociete, contactsociete, nifsociete, statsociete, cifsociete, ambleme FROM tb_infosociete LIMIT 1")
             info = cursor.fetchone()
             if info:
                 self.infos_societe = {
@@ -899,7 +899,8 @@ class PageVente(ctk.CTkFrame):
                     'contactsociete': info[3],
                     'nifsociete': info[4],
                     'statsociete': info[5],
-                    'cifsociete': info[6]
+                    'cifsociete': info[6],
+                    'ambleme': info[7] or "",
                 }
         except Exception as e:
             messagebox.showwarning("Avertissement", f"Impossible de charger les infos société pour l'impression: {str(e)}")
@@ -1910,7 +1911,7 @@ class PageVente(ctk.CTkFrame):
         width, height = A5
 
         # ✅ 1. CADRE DU VERSET (Haut de page) — compact sur 1 ligne
-        verset = "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
+        verset = data.get("societe", {}).get("ambleme") or "Ankino amin'ny Jehovah ny asanao dia ho lavorary izay kasainao. Ohabolana 16:3"
         c.setLineWidth(1)
         verset_h = 5 * mm
         verset_y = height - 11 * mm

@@ -328,7 +328,8 @@ class PageDetailFacture(ctk.CTkToplevel):
             details_rows = cursor.fetchall()
 
             cursor.execute(
-                "SELECT nomsociete, adressesociete, contactsociete, nifsociete, statsociete FROM tb_infosociete LIMIT 1")
+                "SELECT nomsociete, adressesociete, contactsociete, nifsociete, statsociete, ambleme FROM tb_infosociete LIMIT 1"
+            )
             societe_result = cursor.fetchone()
             conn.close()
 
@@ -338,6 +339,7 @@ class PageDetailFacture(ctk.CTkToplevel):
                 'contactsociete': societe_result[2] if societe_result else 'N/A',
                 'nifsociete':     societe_result[3] if societe_result else 'N/A',
                 'statsociete':    societe_result[4] if societe_result else 'N/A',
+                'ambleme':        societe_result[5] if societe_result else '',
             }
 
             data = {
