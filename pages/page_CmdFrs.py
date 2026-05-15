@@ -1260,16 +1260,87 @@ class PageCommandeFrs(ctk.CTkFrame):
 
         def valider():
             sel = tree.selection()
-            if not sel: messagebox.showwarning("Attention", "Sélectionnez une commande."); return
-            idcom = tree.item(sel[0])['values'][0]
+            if not sel:
+                messagebox.showwarning("Attention", "Sélectionnez une commande.", parent=fen)
+                return
+            idcom = tree.item(sel[0])["values"][0]
             fen.destroy()
             self.charger_commande(idcom)
 
-        tree.bind('<Double-Button-1>', lambda e: valider())
+        def supprimer_commande():
+            sel = tree.selection()
+            if not sel:
+                messagebox.showwarning(
+                    "Attention",
+                    "Sélectionnez une commande à supprimer.",
+                    parent=fen,
+                )
+                return
+            vals = tree.item(sel[0])["values"]
+            idcom = vals[0]
+            refcom = vals[1] if len(vals) > 1 else str(idcom)
+            if not messagebox.askyesno(
+                "Confirmer la suppression",
+                f"Supprimer la commande {refcom} ?\n\n"
+                "Elle ne sera plus visible dans cette liste ni dans le "
+                "chargement de commande du bon de réception.",
+                parent=fen,
+            ):
+                return
+            conn = self.connect_db()
+            if not conn:
+                return
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE tb_commande
+                    SET deleted = 1, datemodif = %s
+                    WHERE idcom = %s AND COALESCE(deleted, 0) = 0
+                    """,
+                    (datetime.now(), idcom),
+                )
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    messagebox.showerror(
+                        "Erreur",
+                        "Commande introuvable ou déjà supprimée.",
+                        parent=fen,
+                    )
+                    return
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                messagebox.showerror("Erreur", f"Suppression : {e}", parent=fen)
+                return
+            finally:
+                if "cur" in locals():
+                    cur.close()
+                conn.close()
+
+            if getattr(self, "idcom_charge", None) == idcom:
+                self.nouvelle_commande()
+            charger(entry_s.get().strip())
+            messagebox.showinfo(
+                "Succès",
+                f"Commande {refcom} supprimée.",
+                parent=fen,
+            )
+
+        tree.bind("<Double-Button-1>", lambda e: valider())
         bf = ctk.CTkFrame(main, fg_color="transparent")
         bf.pack(fill="x")
-        styled.button_danger(bf, text="Annuler", icon="❌", width=110, height=36, command=fen.destroy).pack(side="left", padx=4)
-        styled.button_success(bf, text="Charger", icon="📂", width=130, height=36, command=valider).pack(side="right", padx=4)
+        styled.button_danger(
+            bf,
+            text="Supprimer cette commande",
+            icon="🗑",
+            width=200,
+            height=36,
+            command=supprimer_commande,
+        ).pack(side="left", padx=4)
+        styled.button_success(
+            bf, text="Charger", icon="📂", width=130, height=36, command=valider,
+        ).pack(side="right", padx=4)
         charger()
 
     def charger_commande(self, idcom):
