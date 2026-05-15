@@ -27,5 +27,14 @@
   "Credit_Temporaire_OpenA5": 1,
   "Facture_Paiement_OpenTicket80Pdf": 1,
   "Livraison_TransporteurDefautId": 1,
-  "Livraison_TransporteurBlAuto": 0
+  "Livraison_TransporteurBlAuto": 0,
+  "MouvementStock": {
+    "_comment": "Préférences personnelles du menu Mouvement de stock (par id utilisateur tb_users.iduser).",
+    "MenuDefautParUtilisateur": {
+      "26": "Changements"
+    },
+    "SidebarHamburgerParUtilisateur": {
+      "26": true
+    }
+  }
 }

@@ -1,3 +1,4 @@
+import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox, ttk
 import psycopg2
@@ -6,7 +7,7 @@ import os
 import sys
 import subprocess
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
 from settings_utils import open_file_if_enabled
@@ -1546,7 +1547,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         super().__init__(parent, fg_color=Colors.BG_PAGE, corner_radius=0, **kwargs)
 
         self.iduser = iduser
-        self._sidebar_collapsed = True
+        self._sidebar_collapsed = self._lire_sidebar_hamburger_defaut()
         self._current_menu_label: Optional[str] = None
 
         ctk.set_appearance_mode("light")
@@ -1567,9 +1568,10 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         self.menu_buttons: Dict[str, ctk.CTkButton] = {}
 
         self.create_sidebar()
+        self._appliquer_etat_sidebar()
         self.create_content_area()
 
-        self.show_page(self._MENU_ITEMS[0][1])
+        self.show_page(self._menu_defaut_au_demarrage())
     
     def connect_db(self):
         """Connexion à la base de données PostgreSQL"""
@@ -1611,6 +1613,59 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         if self._sidebar_collapsed:
             return icon
         return f"{icon}  {label}"
+
+    def _libelles_menus_visibles(self) -> List[str]:
+        """
+        Libellés des sous-menus affichés dans la sidebar.
+        (Point d'extension pour les autorisations utilisateur à venir.)
+        """
+        visibles: List[str] = []
+        for _icon, label, _cls in self._MENU_ITEMS:
+            btn = self.menu_buttons.get(label)
+            if btn is None:
+                continue
+            try:
+                if not btn.winfo_ismapped():
+                    continue
+            except tk.TclError:
+                pass
+            visibles.append(label)
+        if not visibles:
+            visibles = [label for _icon, label, _cls in self._MENU_ITEMS]
+        return visibles
+
+    def _menu_defaut_au_demarrage(self) -> str:
+        try:
+            from pages.mouvement_stock_config import resoudre_menu_defaut
+        except ImportError:
+            from mouvement_stock_config import resoudre_menu_defaut
+        visibles = self._libelles_menus_visibles()
+        fallback = self._MENU_ITEMS[0][1] if self._MENU_ITEMS else ""
+        return resoudre_menu_defaut(self.iduser, visibles, fallback=fallback)
+
+    def _lire_sidebar_hamburger_defaut(self) -> bool:
+        try:
+            from pages.mouvement_stock_config import get_sidebar_hamburger_defaut
+        except ImportError:
+            from mouvement_stock_config import get_sidebar_hamburger_defaut
+        return get_sidebar_hamburger_defaut(self.iduser, default=True)
+
+    def _appliquer_etat_sidebar(self) -> None:
+        """Applique largeur et libellés selon _sidebar_collapsed."""
+        try:
+            self.sidebar.configure(width=self._sidebar_width())
+        except tk.TclError:
+            return
+        padx_btn = 4 if self._sidebar_collapsed else 10
+        for icon, label, _cls in self._MENU_ITEMS:
+            btn = self.menu_buttons.get(label)
+            if not btn:
+                continue
+            btn.configure(
+                text=self._menu_button_text(icon, label),
+                anchor="center" if self._sidebar_collapsed else "w",
+            )
+            btn.grid_configure(padx=padx_btn)
 
     def _toggle_sidebar(self):
         self._sidebar_collapsed = not self._sidebar_collapsed
@@ -1749,15 +1804,31 @@ class PageInfoMouvementStock(ctk.CTkFrame):
                 f"Fichier des paramètres d'impression et options :\n{path}",
             )
 
+    def _on_configuration_saved(self):
+        collapsed = self._lire_sidebar_hamburger_defaut()
+        if collapsed != self._sidebar_collapsed:
+            self._sidebar_collapsed = collapsed
+            self._appliquer_etat_sidebar()
+        label = self._menu_defaut_au_demarrage()
+        if label:
+            self.show_page(label)
+
     def _ouvrir_configuration(self):
-        path = get_config_path("config.json")
         try:
-            os.startfile(path)
-        except Exception:
-            messagebox.showinfo(
-                "Configuration",
-                f"Fichier de configuration de l'application :\n{path}",
+            from pages.window_configuration_mouvement_stock import (
+                ConfigurationMouvementStockWindow,
             )
+        except ImportError:
+            from window_configuration_mouvement_stock import (
+                ConfigurationMouvementStockWindow,
+            )
+        ConfigurationMouvementStockWindow(
+            self,
+            id_user=self.iduser,
+            menus_visibles=self._libelles_menus_visibles(),
+            menu_actuel=self._current_menu_label,
+            on_saved=self._on_configuration_saved,
+        )
 
     def create_content_area(self):
         """Zone principale : en-tête fixe + contenu des mouvements."""
