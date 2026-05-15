@@ -270,9 +270,13 @@ class PageBanque(ctk.CTkFrame):
 
         self.actions = styled.frame(self.frame_bottom, color="transparent")
         self.actions.grid(row=0, column=1, sticky="e")
-        self.btn_open_encaissement = styled.button_success(self.actions, text="+ Encaissement", width=180, command=self.open_page_encaissement)
+        self.btn_open_encaissement = styled.button_success(
+            self.actions, text="+ Encaissement", width=180, command=self.open_page_encaissement
+        )
         self.btn_open_encaissement.pack(side="left", padx=(0, 8))
-        self.btn_open_decaissement = styled.button_danger(self.actions, text="- Décaissement", width=180, command=self.open_page_decaissement)
+        self.btn_open_decaissement = styled.button_danger(
+            self.actions, text="- Décaissement", width=180, command=self.open_page_decaissement
+        )
         self.btn_open_decaissement.pack(side="left")
 
         # Charger les données initiales

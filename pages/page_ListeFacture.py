@@ -290,7 +290,6 @@ class PageDetailFacture(ctk.CTkToplevel):
     def reimprimer_duplicata(self):
         """Génère un duplicata de la facture"""
         try:
-            from pages.page_vente import PageVente
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
             conn = psycopg2.connect(**config['database'])
@@ -370,16 +369,13 @@ class PageDetailFacture(ctk.CTkToplevel):
                 ]
             }
 
-            page_vente = PageVente.__new__(PageVente)
-            page_vente.infos_societe = societe_info
-
             safe_ref = refvente.replace("/", "-").replace("\\", "-")
             basename = f"DUPLICATA_Facture_{safe_ref}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             filename, is_temp = build_impression_output_path(
                 basename, temp_prefix="ijeery_duplicata_"
             )
 
-            self.generate_pdf_a5_duplicata(data, filename, page_vente)
+            self.generate_pdf_a5_duplicata(data, filename)
             extra = "\n\n(Fichier temporaire — non enregistré dans le dossier configuré.)" if is_temp else ""
             messagebox.showinfo(
                 parent=self,
@@ -451,7 +447,7 @@ class PageDetailFacture(ctk.CTkToplevel):
                 if 'conn' in locals():
                     conn.close()
 
-    def generate_pdf_a5_duplicata(self, data, filename, page_vente):
+    def generate_pdf_a5_duplicata(self, data, filename):
         """
         Duplicata A5 : même modèle visuel que la facture « ventes par dépôt »,
         avec mention DUPLICATA et pied de page complémentaire.
@@ -462,7 +458,9 @@ class PageDetailFacture(ctk.CTkToplevel):
         from pages.pdf_modele_facture_a5 import (
             generer_pdf_a5_modele_ventedepot,
             html_entete_droite_facture,
+            formater_nombre_pdf_defaut,
         )
+        from pages.page_venteParMsin import nombre_en_lettres_fr
 
         dname = os.path.dirname(os.path.abspath(filename))
         if dname:
@@ -492,9 +490,6 @@ class PageDetailFacture(ctk.CTkToplevel):
             c.drawCentredString(width / 2, height - 43.5 * mm, "DUPLICATA")
             c.restoreState()
 
-        fmt_pdf = getattr(page_vente, "formater_nombre_pdf", None)
-        from pages.page_vente import nombre_en_lettres_fr as _nef
-
         generer_pdf_a5_modele_ventedepot(
             filename,
             societe=data.get("societe") or {},
@@ -503,8 +498,8 @@ class PageDetailFacture(ctk.CTkToplevel):
             magasin_nom=str(mag_label),
             html_right_header=html_r,
             details=data.get("details") or [],
-            nombre_en_lettres_fr=_nef,
-            formater_nombre_pdf=fmt_pdf,
+            nombre_en_lettres_fr=nombre_en_lettres_fr,
+            formater_nombre_pdf=formater_nombre_pdf_defaut,
             overlay_apres_entete=overlay_duplicata,
             paragraphes_footer_supplement=("<i>CECI EST UN DUPLICATA DE LA FACTURE</i>",),
         )

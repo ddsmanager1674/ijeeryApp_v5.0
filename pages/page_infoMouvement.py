@@ -29,7 +29,6 @@ from pages.page_livrFrs import PageBonReception
 from pages.page_entree import PageEntree
 from pages.page_transfert import PageTransfert
 from pages.page_sortie import PageSortie
-from pages.page_SuiviCommande import PageSuiviCommande
 from pages.page_transporteur import PageTransporteur
 from pages.page_infosCharges import PageInfosCharges
 
@@ -1700,8 +1699,6 @@ class PageInfoMouvementStock(ctk.CTkFrame):
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 elif page_class == PageSortie:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
-                elif page_class == PageSuiviCommande:
-                    self.pages[menu_name] = page_class(self.content_frame) # Pas d'iduser ici
                 elif page_class == PageChangementArticle:
                     self.pages[menu_name] = page_class(self.content_frame, self.iduser)
                 elif page_class == PageTransporteur:

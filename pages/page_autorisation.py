@@ -35,11 +35,11 @@ class PageAutorisation(ctk.CTkFrame):
             "COMMERCIALE",
             "BLOC: COMMERCIALE",
             (
-                "Article Liste", "Client", "Fournisseur", "Magasin", "Ventes",
-                "Ventes par Dépôt", "Facturation", "Liste Facture", "Stock Article",
+                "Article Liste", "Client", "Fournisseur", "Magasin",
+                "Ventes par Dépôt", "Liste Facture", "Stock Article",
                 "Inventaire du Jour", "Stock Alerte", "Péremption d'article",
                 "Stock Livraison", "Livraison Client", "Mouvement d'article",
-                "Mouvement Stock", "Liste mouvements", "Suivi Commande",
+                "Mouvement Stock", "Liste mouvements",
                 "Prix d'article", "Prix de revient", "Marge Commerciale",
             ),
         ),
@@ -47,8 +47,7 @@ class PageAutorisation(ctk.CTkFrame):
             "PERSONNEL",
             "BLOC: PERSONNEL",
             (
-                "Liste Personnel", "Suivi de présence", "Gérer Personnels",
-                "Présence Personnel", "Absence", "Présence", "Avance 15e",
+                "Liste Personnel", "Suivi de présence", "Avance 15e",
                 "Avance Spéciale", "Nouveau SB", "Etat de Salaire",
                 "Salaire Horaire", "Taux Horaire", "Paiement Salaire",
             ),
@@ -57,9 +56,8 @@ class PageAutorisation(ctk.CTkFrame):
             "TRÉSORERIE",
             "BLOC: TRÉSORERIE",
             (
-                "Caisse", "Facture Liste", "Fournisseur Dettes", "Banque",
+                "Caisse", "Facture Liste", "Banque",
                 "Ajout Banque", "Transfert Banque", "Transfert Caisse",
-                "Decaissement", "DecaissementBq", "Encaissement", "EncaissementBq",
             ),
         ),
         MenuGroup(
@@ -67,7 +65,7 @@ class PageAutorisation(ctk.CTkFrame):
             "BLOC: BASE DE DONNÉES",
             (
                 "Autorisation", "Evenements", "Sauvegarde", "Fonction", "Utilisateurs",
-                "Paramètres", "Menu", "Base Liste", "Autorisation Admin", "Init DB",
+                "Paramètres", "Menu", "Base Liste", "Autorisation Admin",
             ),
         ),
     )
