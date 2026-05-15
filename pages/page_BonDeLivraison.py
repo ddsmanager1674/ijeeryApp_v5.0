@@ -15,6 +15,7 @@ from app_theme import Colors, Fonts, Layout, styled
 try:
     from pages.livraison_common import (
         LivraisonDB,
+        fmt_datetime_livraison,
         formater_nombre,
         generer_pdf_bl,
         ligne_panier_key,
@@ -24,6 +25,7 @@ try:
 except ImportError:
     from livraison_common import (
         LivraisonDB,
+        fmt_datetime_livraison,
         formater_nombre,
         generer_pdf_bl,
         ligne_panier_key,
@@ -45,7 +47,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
             ).pack(padx=20, pady=20)
             return
 
-        self._vue = "article"  # article | facture
+        self._vue = "facture"  # article | facture (défaut : vue facture)
         self._panier: Dict[tuple, Dict[str, Any]] = {}
         self._backlog_art: List[tuple] = []
         self._backlog_fact: List[tuple] = {}
@@ -53,6 +55,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self._transporteurs: List[tuple] = []
         self._bl_preview = ctk.StringVar(value="—")
         self._panier_visible = False
+        self._mode_creation_bl = False
         self._search_after_id: Optional[str] = None
         self._search_job: Optional[int] = 0
         self._search_term = ""
@@ -79,7 +82,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
         styled.label_heading(tb, text="Bon de Livraison", size=18).pack(anchor="w")
         styled.label_muted(
             tb,
-            text="Sélectionnez les lignes à livrer → panier → enregistrement (trace seule, sans impact stock)",
+            text="Créez un BL, puis ajoutez des lignes au panier → enregistrement (trace seule, sans impact stock)",
             size=11,
         ).pack(anchor="w", pady=(2, 0))
 
@@ -148,6 +151,19 @@ class PageBonDeLivraison(ctk.CTkFrame):
         except tk.TclError:
             pass
 
+    def _set_mode_creation_bl(self, actif: bool) -> None:
+        """Affiche les actions d'ajout au panier uniquement en mode création BL."""
+        self._mode_creation_bl = actif
+        if actif:
+            self._footer_ajout.grid()
+        else:
+            self._footer_ajout.grid_remove()
+
+    def _on_backlog_double_click(self, _event=None):
+        if not self._mode_creation_bl:
+            return
+        self._ajouter_selection()
+
     def _creer_bl(self):
         """Nouveau BL : panier vide, panneau panier ouvert, prochain numéro BL."""
         self._panier.clear()
@@ -155,6 +171,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self.ent_desc.delete(0, "end")
         self.combo_trans.set("— Aucun —")
         self._afficher_panier_ratio()
+        self._set_mode_creation_bl(True)
 
         def worker():
             conn = LivraisonDB.get_conn()
@@ -188,11 +205,11 @@ class PageBonDeLivraison(ctk.CTkFrame):
         parent.grid_columnconfigure(0, weight=1)
         left = styled.card(parent)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-        left.grid_rowconfigure(2, weight=1)
+        left.grid_rowconfigure(1, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
         bar = styled.frame(left, color="transparent")
-        bar.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
+        bar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 6))
         bar.grid_columnconfigure(1, weight=1)
 
         self.seg_vue = ctk.CTkSegmentedButton(
@@ -203,7 +220,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
             height=32,
         )
         self.seg_vue.grid(row=0, column=0, sticky="w")
-        self.seg_vue.set("Vue article")
+        self.seg_vue.set("Vue facture")
 
         self.ent_filtre = styled.entry(
             bar, placeholder="Rechercher (code, article, client, facture, magasin)…", height=Layout.INPUT_H,
@@ -211,22 +228,8 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self.ent_filtre.grid(row=0, column=1, sticky="ew", padx=8)
         self.ent_filtre.bind("<KeyRelease>", self._on_search_key)
 
-        btn_row = styled.frame(left, color="transparent")
-        btn_row.grid(row=1, column=0, sticky="ew", padx=12, pady=6)
-
-        styled.button_primary(
-            btn_row, text="→ Ajouter au panier", width=160, height=Layout.BTN_H,
-            command=self._ajouter_selection,
-        ).pack(side="left", padx=(0, 6))
-        styled.button_secondary(
-            btn_row, text="Double-clic = ajout rapide", width=0, height=Layout.BTN_H,
-            state="disabled",
-        ).pack(side="left")
-        self.lbl_search_stat = styled.label_muted(btn_row, text="", size=10)
-        self.lbl_search_stat.pack(side="right", padx=(8, 0))
-
         cols_init = (
-            "code", "designation", "unite", "magasin", "client", "facture", "reste", "date",
+            "date", "facture", "client", "lignes", "reste_tot",
         )
         style_back = self._register_tree_style("BonLivBack")
         self.tree_back = ttk.Treeview(
@@ -237,11 +240,31 @@ class PageBonDeLivraison(ctk.CTkFrame):
             height=16,
             style=style_back,
         )
-        self.tree_back.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.tree_back.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 4))
         sy = ttk.Scrollbar(left, orient="vertical", command=self.tree_back.yview)
         self.tree_back.configure(yscrollcommand=sy.set)
-        sy.grid(row=2, column=1, sticky="ns", pady=(0, 10))
-        self.tree_back.bind("<Double-1>", lambda e: self._ajouter_selection())
+        sy.grid(row=1, column=1, sticky="ns", pady=(0, 4))
+        self.tree_back.bind("<Double-1>", self._on_backlog_double_click)
+
+        footer_back = styled.frame(left, color="transparent")
+        footer_back.grid(row=2, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 10))
+        footer_back.grid_columnconfigure(0, weight=1)
+
+        self.lbl_search_stat = styled.label_muted(footer_back, text="", size=10)
+        self.lbl_search_stat.grid(row=0, column=0, sticky="w")
+
+        self._footer_ajout = styled.frame(footer_back, color="transparent")
+        self._footer_ajout.grid(row=0, column=1, sticky="e")
+
+        styled.button_primary(
+            self._footer_ajout, text="→ Ajouter au panier", width=160, height=Layout.BTN_H,
+            command=self._ajouter_selection,
+        ).pack(side="right", padx=(6, 0))
+        styled.button_secondary(
+            self._footer_ajout, text="Double-clic = ajout rapide", width=0, height=Layout.BTN_H,
+            state="disabled",
+        ).pack(side="right")
+        self._footer_ajout.grid_remove()
 
     def _build_panier(self, parent):
         parent.grid_rowconfigure(0, weight=1)
@@ -274,12 +297,13 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self.ent_desc = styled.entry(meta, placeholder="Optionnel", height=Layout.INPUT_H)
         self.ent_desc.grid(row=1, column=1, sticky="ew")
 
-        cols = ("facture", "article", "unite", "mag", "reste", "qt_liv")
+        cols = ("date", "facture", "article", "unite", "mag", "reste", "qt_liv")
         style_cart = self._register_tree_style("BonLivCart")
         self.tree_cart = ttk.Treeview(
             right, columns=cols, show="headings", height=12, style=style_cart,
         )
         for c, t, w, stretch in [
+            ("date", "Date et Heure", 118, False),
             ("facture", "Facture", 72, False),
             ("article", "Article", 100, True),
             ("unite", "Unité", 52, False),
@@ -429,11 +453,12 @@ class PageBonDeLivraison(ctk.CTkFrame):
 
         if self._vue == "article":
             cols = (
-                "code", "designation", "unite", "magasin", "client",
-                "facture", "reste", "date",
+                "date", "code", "designation", "unite", "magasin", "client",
+                "facture", "reste",
             )
             self.tree_back.configure(columns=cols)
             for c, t, w in [
+                ("date", "Date et Heure", 130),
                 ("code", "Code", 85),
                 ("designation", "Désignation", 160),
                 ("unite", "Unité", 70),
@@ -441,35 +466,36 @@ class PageBonDeLivraison(ctk.CTkFrame):
                 ("client", "Client", 120),
                 ("facture", "Facture", 100),
                 ("reste", "Reste", 65),
-                ("date", "Date vente", 90),
             ]:
                 self.tree_back.heading(c, text=t)
-                self.tree_back.column(c, width=w, anchor="center" if c == "reste" else "w")
+                anc = "center" if c == "reste" else "w"
+                self.tree_back.column(c, width=w, anchor=anc)
             for row in self._backlog_art:
-                dt = row[12]
-                dt_s = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else ""
+                dt_s = fmt_datetime_livraison(row[12])
                 iid = self.tree_back.insert("", "end", values=(
+                    dt_s,
                     row[0], row[1], row[2], row[3], row[4], row[5],
-                    formater_nombre(row[11]), dt_s,
+                    formater_nombre(row[11]),
                 ))
                 self._iid_to_row[iid] = row
         else:
-            cols = ("facture", "client", "date", "lignes", "reste_tot")
+            cols = ("date", "facture", "client", "lignes", "reste_tot")
             self.tree_back.configure(columns=cols)
             for c, t, w in [
+                ("date", "Date et Heure", 130),
                 ("facture", "Facture", 120),
                 ("client", "Client", 200),
-                ("date", "Date", 100),
                 ("lignes", "Lignes", 60),
                 ("reste_tot", "Reste total", 90),
             ]:
                 self.tree_back.heading(c, text=t)
-                self.tree_back.column(c, width=w, anchor="center" if c != "client" else "w")
+                anc = "center" if c not in ("client", "facture") else "w"
+                self.tree_back.column(c, width=w, anchor=anc)
             for row in self._backlog_fact:
                 ref, nom, _idc, dt, nb, reste = row
-                dt_s = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else ""
+                dt_s = fmt_datetime_livraison(dt)
                 iid = self.tree_back.insert("", "end", values=(
-                    ref, nom, dt_s, nb, formater_nombre(reste),
+                    dt_s, ref, nom, nb, formater_nombre(reste),
                 ))
                 self._iid_to_row[iid] = row
 
@@ -490,6 +516,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
             "qtvente": float(row[10]),
             "reste": float(row[11]),
             "qtlivrer": float(row[11]),
+            "dateregistre": row[12],
         }
 
     def _ajouter_au_panier(self, items: List[Dict[str, Any]]) -> None:
@@ -526,6 +553,13 @@ class PageBonDeLivraison(ctk.CTkFrame):
             messagebox.showinfo("Panier", "Ligne(s) déjà présente(s) dans le panier.")
 
     def _ajouter_selection(self):
+        if not self._mode_creation_bl:
+            messagebox.showinfo(
+                "Créer un BL",
+                "Cliquez sur « Créer un BL » pour commencer un bon de livraison "
+                "et ajouter des lignes au panier.",
+            )
+            return
         sel = self.tree_back.selection()
         if not sel:
             messagebox.showinfo("Sélection", "Sélectionnez au moins une ligne (Ctrl+clic pour multi).")
@@ -558,6 +592,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self.lbl_client_panier.configure(text=f"Client : {first.get('nomcli', '—')}")
         for it in self._panier.values():
             self.tree_cart.insert("", "end", values=(
+                fmt_datetime_livraison(it.get("dateregistre")),
                 it["refvente"],
                 f"{it['code']} — {it['designation'][:30]}",
                 it["unite"],
@@ -689,6 +724,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
             self.ent_desc.delete(0, "end")
             self.combo_trans.set("— Aucun —")
             self._masquer_panier()
+            self._set_mode_creation_bl(False)
             self._charger_tout(conserver_recherche=True)
             self._refresh_bl_preview_async()
         except Exception as e:

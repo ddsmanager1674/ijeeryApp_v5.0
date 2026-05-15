@@ -64,7 +64,7 @@ SQL_PENDING_ARTICLES = f"""
       AND v.statut IN ('VALIDEE', 'EN_ATTENTE')
       AND (vd.qtvente - COALESCE(lv_sum.total_livre, 0)) > 0.0001
       {SQL_FILTER_SANS_AVOIR}
-    ORDER BY c.nomcli, v.refvente, u.codearticle
+    ORDER BY v.dateregistre DESC, v.refvente, u.codearticle
 """
 
 SQL_PENDING_FACTURES = f"""
@@ -85,8 +85,17 @@ SQL_PENDING_FACTURES = f"""
       AND (vd.qtvente - COALESCE(lv_sum.total_livre, 0)) > 0.0001
       {SQL_FILTER_SANS_AVOIR}
     GROUP BY v.refvente, c.nomcli, v.idclient
-    ORDER BY MIN(v.dateregistre) DESC, v.refvente
+    ORDER BY MIN(v.dateregistre) DESC NULLS LAST, v.refvente DESC
 """
+
+
+def fmt_datetime_livraison(val) -> str:
+    """Affichage date/heure mouvement : dd/MM/yyyy HH:mm."""
+    if val is None:
+        return "—"
+    if hasattr(val, "strftime"):
+        return val.strftime("%d/%m/%Y %H:%M")
+    return str(val)
 
 
 def sql_pending_articles(search_term: str = "") -> tuple:
@@ -263,7 +272,7 @@ def sql_detail_bl() -> str:
     LEFT JOIN tb_magasin m ON m.idmag = l.idmag
     LEFT JOIN tb_users us ON us.iduser = l.iduser
     WHERE TRIM(l.reflivcli) = TRIM(%s)
-    ORDER BY l.refvente NULLS LAST, a.designation, l.idlivcli
+    ORDER BY l.dateregistre DESC, l.refvente NULLS LAST, a.designation, l.idlivcli
     """
 
 

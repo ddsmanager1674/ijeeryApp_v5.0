@@ -97,14 +97,14 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
         table_card.grid_rowconfigure(0, weight=1)
         table_card.grid_columnconfigure(0, weight=1)
 
-        cols = ("bl", "date", "client", "factures", "lignes", "qte", "transporteur", "utilisateur", "tag")
+        cols = ("date", "bl", "client", "factures", "lignes", "qte", "transporteur", "utilisateur", "tag")
         tree_style = self._register_tree_style()
         self.tree = ttk.Treeview(
             table_card, columns=cols, show="headings", height=18, style=tree_style,
         )
         heads = [
+            ("date", "Date et Heure", 130),
             ("bl", "N° BL", 120),
-            ("date", "Date", 120),
             ("client", "Client", 150),
             ("factures", "Facture(s)", 160),
             ("lignes", "Lignes", 55),
@@ -220,8 +220,8 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
                     tag = "Avoir après liv." if has_avoir_apres else "—"
                     tags = ("avoir",) if has_avoir_apres else ()
                     iid = self.tree.insert("", "end", values=(
-                        refliv,
                         dt_s,
+                        refliv,
                         nomcli or "",
                         factures or "",
                         nb,
@@ -284,7 +284,8 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
             return
         iid = iid or sel[0]
         meta = self._rows_cache.get(iid, {})
-        refliv = (meta.get("refliv") or self.tree.item(iid, "values")[0] or "").strip()
+        vals = self.tree.item(iid, "values")
+        refliv = (meta.get("refliv") or (vals[1] if len(vals) > 1 else vals[0]) or "").strip()
         if not refliv:
             return
 
@@ -381,10 +382,11 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
 
         box = styled.card(dlg)
         box.pack(fill="both", expand=True, padx=16, pady=(0, 8))
-        cols = ("facture", "code", "designation", "unite", "mag", "qt_v", "qt_l", "tag_avoir")
+        cols = ("date", "facture", "code", "designation", "unite", "mag", "qt_v", "qt_l", "tag_avoir")
         tr_style = self._register_tree_style()
         tr = ttk.Treeview(box, columns=cols, show="headings", style=tr_style)
         for c, t, w in [
+            ("date", "Date et Heure", 130),
             ("facture", "Facture", 100),
             ("code", "Code", 85),
             ("designation", "Désignation", 200),
@@ -399,11 +401,12 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
 
         for r in lignes:
             (
-                _id, refv, _dt, code, des, unite, mag, qtv, qtl, _usr, avoir_apres_liv,
+                _id, refv, dt_ligne, code, des, unite, mag, qtv, qtl, _usr, avoir_apres_liv,
             ) = r
             tags = ("avoir",) if bool(avoir_apres_liv) else ()
             tag_ligne = "Avoir après liv." if bool(avoir_apres_liv) else "—"
             tr.insert("", "end", values=(
+                _fmt_dt(dt_ligne),
                 refv or "—",
                 code or "",
                 des or "",
