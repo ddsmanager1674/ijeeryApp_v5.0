@@ -5,6 +5,7 @@ import threading
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 from datetime import datetime
+from typing import List, Optional
 
 from app_theme import Colors, Fonts, Layout, styled
 
@@ -42,7 +43,15 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
         self._rows_cache = {}
         self.iduser = iduser or 0
         if session_data and not self.iduser:
-            self.iduser = session_data.get("iduser") or session_data.get("id_user") or 0
+            self.iduser = (
+                session_data.get("iduser")
+                or session_data.get("id_user")
+                or session_data.get("user_id")
+                or 0
+            )
+        self._magasins: List[tuple] = []
+        self._filtre_idmag: Optional[int] = None
+        self._magasin_init_done = False
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
         LivraisonDB.init_pool()
@@ -72,23 +81,40 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
         filt.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 10))
         filt.grid_columnconfigure(1, weight=1)
 
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        styled.label_muted(filt, text="Magasin", size=11).grid(
+            row=0, column=0, sticky="w", padx=(14, 6), pady=(12, 2),
+        )
+        self.combo_magasin = styled.combobox(
+            filt,
+            values=["Tous"],
+            width=160,
+            height=Layout.INPUT_H,
+            command=self._on_magasin_change,
+        )
+        self.combo_magasin.grid(row=1, column=0, sticky="w", padx=(14, 8), pady=(0, 12))
+        self.combo_magasin.set("Tous")
+
         styled.label_muted(filt, text="Recherche (BL, client, facture, transporteur)", size=11).grid(
-            row=0, column=0, columnspan=2, sticky="w", padx=(14, 6), pady=(12, 2)
+            row=0, column=1, sticky="w", padx=(0, 6), pady=(12, 2),
         )
         self.ent_search = styled.entry(filt, placeholder="Texte libre…", height=Layout.INPUT_H)
-        self.ent_search.grid(row=1, column=0, columnspan=2, sticky="ew", padx=(14, 8), pady=(0, 12))
+        self.ent_search.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(0, 12))
         self.ent_search.bind("<KeyRelease>", lambda e: self._appliquer_filtre_local())
 
         styled.label_muted(filt, text="Du", size=11).grid(row=0, column=2, padx=6, pady=(12, 2))
         self.ent_du = styled.entry(filt, placeholder="AAAA-MM-JJ", width=110, height=Layout.INPUT_H)
         self.ent_du.grid(row=1, column=2, padx=6, pady=(0, 12))
+        self.ent_du.insert(0, today)
 
         styled.label_muted(filt, text="Au", size=11).grid(row=0, column=3, padx=6, pady=(12, 2))
         self.ent_au = styled.entry(filt, placeholder="AAAA-MM-JJ", width=110, height=Layout.INPUT_H)
         self.ent_au.grid(row=1, column=3, padx=6, pady=(0, 12))
+        self.ent_au.insert(0, today)
 
         styled.button_primary(
-            filt, text="Filtrer dates", width=110, height=Layout.INPUT_H,
+            filt, text="Appliquer", width=110, height=Layout.INPUT_H,
             command=self.charger_donnees,
         ).grid(row=1, column=4, padx=8, pady=(0, 12))
 
@@ -161,6 +187,23 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
         )
         return name
 
+    def _on_magasin_change(self, _value: str = ""):
+        sel = self.combo_magasin.get()
+        if sel == "Tous":
+            self._filtre_idmag = None
+        else:
+            self._filtre_idmag = next(
+                (mid for mid, nom in self._magasins if nom == sel),
+                None,
+            )
+        self._magasin_init_done = True
+        self.charger_donnees()
+
+    def _idmag_pour_requete(self, idmag_user: Optional[int]) -> Optional[int]:
+        if self._magasin_init_done:
+            return self._filtre_idmag
+        return idmag_user
+
     def charger_donnees(self):
         where_parts = []
         params = []
@@ -183,7 +226,6 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
                 messagebox.showwarning("Date", "Date « Au » invalide (AAAA-MM-JJ).")
                 return
 
-        where_sql = " ".join(where_parts)
         self.lbl_count.configure(text="Chargement…")
 
         def worker():
@@ -194,8 +236,41 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
             try:
                 cur = conn.cursor()
                 LivraisonDB.table_columns(cur)
-                sql = sql_historique_bl(where_sql)
-                cur.execute(sql, params)
+
+                magasins: Optional[List[tuple]] = None
+                idmag_user: Optional[int] = None
+                cur.execute(
+                    """
+                    SELECT idmag, designationmag
+                    FROM tb_magasin
+                    WHERE COALESCE(deleted, 0) = 0
+                    ORDER BY designationmag
+                    """,
+                )
+                magasins = cur.fetchall()
+                if self.iduser:
+                    cur.execute(
+                        """
+                        SELECT idmag FROM tb_users
+                        WHERE iduser = %s AND COALESCE(deleted, 0) = 0
+                        LIMIT 1
+                        """,
+                        (int(self.iduser),),
+                    )
+                    row_u = cur.fetchone()
+                    if row_u and row_u[0] is not None:
+                        idmag_user = int(row_u[0])
+
+                idmag_actif = self._idmag_pour_requete(idmag_user)
+                where_mag = list(where_parts)
+                params_mag = list(params)
+                if idmag_actif is not None:
+                    where_mag.append("AND l.idmag = %s")
+                    params_mag.append(idmag_actif)
+                where_sql_mag = " ".join(where_mag)
+
+                sql = sql_historique_bl(where_sql_mag)
+                cur.execute(sql, params_mag)
                 rows = cur.fetchall()
             except Exception as e:
                 err = str(e)
@@ -208,6 +283,26 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
             def apply():
                 if not self.winfo_exists():
                     return
+                if magasins is not None:
+                    self._magasins = magasins
+                    noms = ["Tous"] + [m[1] for m in magasins]
+                    self.combo_magasin.configure(values=noms)
+                    if not self._magasin_init_done:
+                        self._magasin_init_done = True
+                        if idmag_user is not None:
+                            nom_def = next(
+                                (n for i, n in magasins if i == idmag_user),
+                                None,
+                            )
+                            if nom_def:
+                                self.combo_magasin.set(nom_def)
+                                self._filtre_idmag = idmag_user
+                            else:
+                                self.combo_magasin.set("Tous")
+                                self._filtre_idmag = None
+                        else:
+                            self.combo_magasin.set("Tous")
+                            self._filtre_idmag = None
                 for i in self.tree.get_children():
                     self.tree.delete(i)
                 self._rows_cache.clear()
@@ -235,7 +330,13 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
                         "descr": descr or "",
                         "client": nomcli or "",
                     }
-                self.lbl_count.configure(text=f"{len(rows)} BL")
+                hint = f"{len(rows)} BL"
+                mag_sel = self.combo_magasin.get()
+                if mag_sel and mag_sel != "Tous":
+                    hint += f" — {mag_sel}"
+                if du or au:
+                    hint += f" ({du or '…'} → {au or '…'})"
+                self.lbl_count.configure(text=hint)
                 self._appliquer_filtre_local()
 
             self.after(0, apply)
