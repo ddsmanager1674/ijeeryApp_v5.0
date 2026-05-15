@@ -67,6 +67,9 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self._search_after_id: Optional[str] = None
         self._search_job: Optional[int] = 0
         self._search_term = ""
+        self._magasins: List[tuple] = []
+        self._filtre_idmag: Optional[int] = None
+        self._magasin_init_done = False
 
         LivraisonDB.init_pool()
         self.grid_columnconfigure(0, weight=1)
@@ -253,7 +256,7 @@ class PageBonDeLivraison(ctk.CTkFrame):
 
         bar = styled.frame(left, color="transparent")
         bar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 6))
-        bar.grid_columnconfigure(1, weight=1)
+        bar.grid_columnconfigure(2, weight=1)
 
         self.seg_vue = ctk.CTkSegmentedButton(
             bar,
@@ -265,10 +268,23 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self.seg_vue.grid(row=0, column=0, sticky="w")
         self.seg_vue.set("Vue facture")
 
+        mag_filtre = styled.frame(bar, color="transparent")
+        mag_filtre.grid(row=0, column=1, sticky="w", padx=(10, 8))
+        styled.label_muted(mag_filtre, text="Magasin", size=10).pack(anchor="w")
+        self.combo_magasin = styled.combobox(
+            mag_filtre,
+            values=["Tous"],
+            width=160,
+            height=Layout.INPUT_H,
+            command=self._on_magasin_change,
+        )
+        self.combo_magasin.pack(anchor="w")
+        self.combo_magasin.set("Tous")
+
         self.ent_filtre = styled.entry(
             bar, placeholder="Rechercher (code, article, client, facture, magasin)…", height=Layout.INPUT_H,
         )
-        self.ent_filtre.grid(row=0, column=1, sticky="ew", padx=8)
+        self.ent_filtre.grid(row=0, column=2, sticky="ew", padx=(0, 0))
         self.ent_filtre.bind("<KeyRelease>", self._on_search_key)
 
         cols_init = (
@@ -429,6 +445,25 @@ class PageBonDeLivraison(ctk.CTkFrame):
             return
         self._lancer_recherche_db(terme, aussi_transporteurs=False)
 
+    def _on_magasin_change(self, _value: str = ""):
+        sel = self.combo_magasin.get()
+        if sel == "Tous":
+            self._filtre_idmag = None
+        else:
+            self._filtre_idmag = next(
+                (mid for mid, nom in self._magasins if nom == sel),
+                None,
+            )
+        self._magasin_init_done = True
+        self._search_term = ""  # force rechargement même si le texte de recherche est inchangé
+        self._lancer_recherche_db(self.ent_filtre.get().strip(), aussi_transporteurs=False)
+
+    def _idmag_pour_requete(self, idmag_user: Optional[int]) -> Optional[int]:
+        """Magasin actif : sélection utilisateur, ou magasin tb_users.idmag au premier chargement."""
+        if self._magasin_init_done:
+            return self._filtre_idmag
+        return idmag_user
+
     def _lancer_recherche_db(self, terme: str, aussi_transporteurs: bool = False):
         job = self._search_job + 1
         self._search_job = job
@@ -452,10 +487,36 @@ class PageBonDeLivraison(ctk.CTkFrame):
                     except Exception:
                         conn.rollback()
 
-                sql_a, params_a = sql_pending_articles(terme)
+                magasins: Optional[List[tuple]] = None
+                idmag_user: Optional[int] = None
+                if self.user_id:
+                    cur.execute(
+                        """
+                        SELECT idmag FROM tb_users
+                        WHERE iduser = %s AND COALESCE(deleted, 0) = 0
+                        LIMIT 1
+                        """,
+                        (int(self.user_id),),
+                    )
+                    row_u = cur.fetchone()
+                    if row_u and row_u[0] is not None:
+                        idmag_user = int(row_u[0])
+                if aussi_transporteurs:
+                    cur.execute(
+                        """
+                        SELECT idmag, designationmag
+                        FROM tb_magasin
+                        WHERE COALESCE(deleted, 0) = 0
+                        ORDER BY designationmag
+                        """,
+                    )
+                    magasins = cur.fetchall()
+
+                idmag_filtre = self._idmag_pour_requete(idmag_user)
+                sql_a, params_a = sql_pending_articles(terme, idmag_filtre)
                 cur.execute(sql_a, params_a)
                 art = cur.fetchall()
-                sql_f, params_f = sql_pending_factures(terme)
+                sql_f, params_f = sql_pending_factures(terme, idmag_filtre)
                 cur.execute(sql_f, params_f)
                 fac = cur.fetchall()
                 transporteurs = None
@@ -467,6 +528,26 @@ class PageBonDeLivraison(ctk.CTkFrame):
                 def apply():
                     if not self.winfo_exists() or job != self._search_job:
                         return
+                    if magasins is not None:
+                        self._magasins = magasins
+                        noms = ["Tous"] + [m[1] for m in magasins]
+                        self.combo_magasin.configure(values=noms)
+                        if not self._magasin_init_done:
+                            self._magasin_init_done = True
+                            if idmag_user is not None:
+                                nom_def = next(
+                                    (n for i, n in magasins if i == idmag_user),
+                                    None,
+                                )
+                                if nom_def:
+                                    self.combo_magasin.set(nom_def)
+                                    self._filtre_idmag = idmag_user
+                                else:
+                                    self.combo_magasin.set("Tous")
+                                    self._filtre_idmag = None
+                            else:
+                                self.combo_magasin.set("Tous")
+                                self._filtre_idmag = None
                     self._search_term = terme
                     self._backlog_art = art
                     self._backlog_fact = fac
@@ -481,7 +562,12 @@ class PageBonDeLivraison(ctk.CTkFrame):
                     if bl_ref:
                         self._bl_preview.set(bl_ref)
                     n = len(art) if self._vue == "article" else len(fac)
-                    hint = f"{n} ligne(s)" + (f" — « {terme} »" if terme else "")
+                    hint = f"{n} ligne(s)"
+                    mag_sel = self.combo_magasin.get()
+                    if mag_sel and mag_sel != "Tous":
+                        hint += f" — {mag_sel}"
+                    if terme:
+                        hint += f" — « {terme} »"
                     self.lbl_search_stat.configure(text=hint)
                     self._peupler_backlog()
 
@@ -498,9 +584,13 @@ class PageBonDeLivraison(ctk.CTkFrame):
         self._vue = "facture" if "facture" in value.lower() else "article"
         n = len(self._backlog_fact) if self._vue == "facture" else len(self._backlog_art)
         terme = self._search_term
-        self.lbl_search_stat.configure(
-            text=f"{n} ligne(s)" + (f" — « {terme} »" if terme else ""),
-        )
+        hint = f"{n} ligne(s)"
+        mag_sel = self.combo_magasin.get()
+        if mag_sel and mag_sel != "Tous":
+            hint += f" — {mag_sel}"
+        if terme:
+            hint += f" — « {terme} »"
+        self.lbl_search_stat.configure(text=hint)
         self._peupler_backlog()
 
     def _peupler_backlog(self):

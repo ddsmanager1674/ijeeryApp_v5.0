@@ -163,13 +163,20 @@ def transporteur_nom_par_id(
     return "— Aucun —"
 
 
-def sql_pending_articles(search_term: str = "") -> tuple:
-    """Retourne (sql, params) avec filtre ILIKE optionnel (recherche serveur)."""
+def sql_pending_articles(
+    search_term: str = "",
+    idmag: Optional[int] = None,
+) -> tuple:
+    """Retourne (sql, params) avec filtres magasin et ILIKE optionnels."""
     term = (search_term or "").strip()
-    if not term:
-        return SQL_PENDING_ARTICLES, []
-    pat = f"%{term}%"
-    filt = """
+    params: List[Any] = []
+    filt = ""
+    if idmag is not None:
+        filt += "\n      AND vd.idmag = %s"
+        params.append(int(idmag))
+    if term:
+        pat = f"%{term}%"
+        filt += """
       AND (
         u.codearticle ILIKE %s
         OR a.designation ILIKE %s
@@ -178,25 +185,38 @@ def sql_pending_articles(search_term: str = "") -> tuple:
         OR c.nomcli ILIKE %s
         OR v.refvente ILIKE %s
       )"""
+        params.extend([pat] * 6)
+    if not filt:
+        return SQL_PENDING_ARTICLES, []
     idx = SQL_PENDING_ARTICLES.rfind("ORDER BY")
     sql = SQL_PENDING_ARTICLES[:idx] + filt + "\n    " + SQL_PENDING_ARTICLES[idx:]
-    return sql, [pat] * 6
+    return sql, params
 
 
-def sql_pending_factures(search_term: str = "") -> tuple:
-    """Retourne (sql, params) avec filtre ILIKE optionnel sur facture / client."""
+def sql_pending_factures(
+    search_term: str = "",
+    idmag: Optional[int] = None,
+) -> tuple:
+    """Retourne (sql, params) avec filtres magasin et ILIKE optionnels."""
     term = (search_term or "").strip()
-    if not term:
-        return SQL_PENDING_FACTURES, []
-    pat = f"%{term}%"
-    filt = """
+    params: List[Any] = []
+    filt = ""
+    if idmag is not None:
+        filt += "\n      AND vd.idmag = %s"
+        params.append(int(idmag))
+    if term:
+        pat = f"%{term}%"
+        filt += """
       AND (
         v.refvente ILIKE %s
         OR c.nomcli ILIKE %s
       )"""
+        params.extend([pat, pat])
+    if not filt:
+        return SQL_PENDING_FACTURES, []
     idx = SQL_PENDING_FACTURES.rfind("GROUP BY")
     sql = SQL_PENDING_FACTURES[:idx] + filt + "\n    " + SQL_PENDING_FACTURES[idx:]
-    return sql, [pat, pat]
+    return sql, params
 
 
 def sql_expr_avoir_apres_livraison(refvente_sql: str = "l.refvente", dt_liv_sql: str = "l.dateregistre") -> str:
