@@ -261,6 +261,8 @@ class UserSettingsWindow(ctk.CTkToplevel):
         ]
         self._print_keys_ticket80 = [
             ("Vente - Ticket 80mm (texte) - Ouverture auto", "Vente_ImpressionTicket", 0),
+            ("Personnel - Avance 15e - Ticket 80mm (PDF)", "Avance15e_ImpressionTicket80", 0),
+            ("Personnel - Avance spéciale - Ticket 80mm (PDF)", "AvanceSpecial_ImpressionTicket80", 0),
             ("Avoir - Ticket 80mm", "Avoir_ImpressionTicket", 0),
             ("Client à payer - Ticket 80mm", "ClientAPayer_ImpressionTicket", 1),
             ("Facture - Paiement (Ticket 80mm PDF) - Ouverture auto", "Facture_Paiement_OpenTicket80Pdf", 1),

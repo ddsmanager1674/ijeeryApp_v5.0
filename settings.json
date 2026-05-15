@@ -26,6 +26,8 @@
   "Credit_Acceptation_OpenA5": 1,
   "Credit_Temporaire_OpenA5": 1,
   "Facture_Paiement_OpenTicket80Pdf": 1,
+  "Avance15e_ImpressionTicket80": 1,
+  "AvanceSpecial_ImpressionTicket80": 1,
   "Livraison_TransporteurDefautId": 1,
   "Livraison_TransporteurBlAuto": 0,
   "MouvementStock": {

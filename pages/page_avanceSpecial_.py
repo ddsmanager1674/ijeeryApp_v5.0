@@ -18,12 +18,16 @@ except Exception:  # tkcalendar non installé → fallback sur Entry texte
 # Thème UI iJeery
 from app_theme import Colors, Fonts, Theme, styled, Layout
 
-
-# Ensure the parent directory is in the Python path for absolute imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+
+try:
+    from ticket_caisse_personnel import try_imprimer_ticket_avance
+except ImportError:
+    def try_imprimer_ticket_avance(*_a, **_kw):
+        return False
 
     
 def charger_personnels(cursor):
@@ -656,6 +660,22 @@ class FenetreAvanceSpec(ctk.CTkFrame):
             """, (reference, observation, personnel_id, montant_val, nb_remboursement_val, date_actuelle, 2, self.iduser))
 
             self.conn.commit()
+
+            try:
+                try_imprimer_ticket_avance(
+                    self.cursor,
+                    "special",
+                    reference=reference,
+                    date_pmt=date_actuelle,
+                    nom_personnel=nom,
+                    prenom_personnel=prenom,
+                    montant=montant_val,
+                    observation=observation,
+                    iduser=self.iduser,
+                    nb_remboursement=nb_remboursement_val,
+                )
+            except Exception as exc:
+                print(f"Ticket avance spéciale : {exc}")
 
             messagebox.showinfo("Succès", "Avance enregistrée.")
             self.charger_avances()
