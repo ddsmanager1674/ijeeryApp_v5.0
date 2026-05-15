@@ -16,6 +16,7 @@
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
+import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox, ttk, filedialog
 import psycopg2
@@ -23,8 +24,9 @@ import json
 import pandas as pd
 import os
 from datetime import datetime
+from typing import List, Optional, Tuple
 from resource_utils import get_config_path, safe_file_read
-from app_theme import Colors, Fonts
+from app_theme import Colors, Fonts, Layout, styled
 
 try:
     from EtatsPDF_Mouvements import EtatPDFMouvements
@@ -45,6 +47,15 @@ TYPES_MOUVEMENT = {
     "changement":  {"label": "🔁  Changement d'Article", "icon": "🔁"},
 }
 
+TITRES_MOUVEMENT = {
+    "entree": "Entrées d'Articles",
+    "entree_stock": "Entrées Stock (BE)",
+    "sortie": "Sorties d'Articles",
+    "transfert": "Transferts d'Articles",
+    "consommation": "Consommation Interne",
+    "changement": "Changement d'Articles",
+}
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE PRINCIPALE
@@ -56,127 +67,273 @@ class PageListeMouvement(ctk.CTkFrame):
     Thème iJeery — cohérent avec page_facture_liste.py, page_sortie.py, etc.
     """
 
+    _SIDEBAR_W_EXPANDED = 200
+    _SIDEBAR_W_COLLAPSED = 56
+
     def __init__(self, master, iduser=None):
         super().__init__(master, fg_color=Colors.BG_PAGE)
 
-        self.iduser                = iduser
-        self.type_mouvement_actif  = "entree"
-        self.data_df               = pd.DataFrame()
-        self._nav_buttons          = {}   # {key: CTkButton}
+        self.iduser = iduser
+        self.type_mouvement_actif = "entree"
+        self.data_df = pd.DataFrame()
+        self._nav_buttons: dict = {}
+        self._sidebar_collapsed = self._lire_sidebar_hamburger_defaut()
 
-        # Grille principale : row 0 bandeau titre, row 1 corps
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self._configure_shell_grid()
 
-        self._build_title_band()
-        self._build_body()
-
-        # Chargement initial
-        self._select_type("entree")
+        self._build_sidebar()
+        self._build_main_column()
+        self._appliquer_etat_sidebar()
+        self._select_type(self._menu_defaut_au_demarrage())
 
     # ══════════════════════════════════════════════════════════════════════════
     # SECTION 1 — CONSTRUCTION UI
     # ══════════════════════════════════════════════════════════════════════════
 
-    def _build_title_band(self):
-        """Bandeau titre MIDNIGHT pleine largeur (row 0)."""
-        band = ctk.CTkFrame(self, fg_color=Colors.MIDNIGHT, corner_radius=0, height=48)
-        band.grid(row=0, column=0, sticky="ew")
-        band.grid_propagate(False)
-        band.grid_columnconfigure(1, weight=1)
+    @staticmethod
+    def _fmt_datetime_mouvement(val) -> str:
+        """Affichage date/heure mouvement : dd/MM/yyyy HH:mm."""
+        if val is None:
+            return "—"
+        try:
+            if pd.isna(val):
+                return "—"
+        except (TypeError, ValueError):
+            pass
+        if hasattr(val, "strftime"):
+            return val.strftime("%d/%m/%Y %H:%M")
+        s = str(val).strip()
+        return s if s else "—"
 
-        # Icône + Titre dynamique
-        ctk.CTkLabel(
-            band,
-            text="📋",
-            font=Fonts.heading(18),
-            text_color=Colors.TEXT_ON_DARK,
-        ).grid(row=0, column=0, padx=(16, 6), pady=12)
+    def _cles_menus_visibles(self) -> List[str]:
+        """Clés des types visibles (extension future : autorisations)."""
+        cles: List[str] = []
+        for key in TYPES_MOUVEMENT:
+            btn = self._nav_buttons.get(key)
+            if btn is None:
+                continue
+            try:
+                if not btn.winfo_ismapped():
+                    continue
+            except tk.TclError:
+                pass
+            cles.append(key)
+        return cles or list(TYPES_MOUVEMENT.keys())
 
-        self.lbl_titre = ctk.CTkLabel(
-            band,
-            text="Listes des Mouvements — Entrées",
-            font=Fonts.heading(15),
-            text_color=Colors.TEXT_ON_DARK,
-            anchor="w",
+    def _menus_visibles_pour_config(self) -> List[Tuple[str, str]]:
+        return [(k, TYPES_MOUVEMENT[k]["label"]) for k in self._cles_menus_visibles()]
+
+    def _lire_sidebar_hamburger_defaut(self) -> bool:
+        try:
+            from pages.liste_mouvements_config import get_sidebar_hamburger_defaut_liste
+        except ImportError:
+            from liste_mouvements_config import get_sidebar_hamburger_defaut_liste
+        return get_sidebar_hamburger_defaut_liste(self.iduser, default=True)
+
+    def _menu_defaut_au_demarrage(self) -> str:
+        try:
+            from pages.liste_mouvements_config import resoudre_menu_defaut_liste
+        except ImportError:
+            from liste_mouvements_config import resoudre_menu_defaut_liste
+        cles = list(TYPES_MOUVEMENT.keys())
+        return resoudre_menu_defaut_liste(self.iduser, cles, fallback="entree")
+
+    def _sidebar_width(self) -> int:
+        return (
+            self._SIDEBAR_W_COLLAPSED
+            if self._sidebar_collapsed
+            else self._SIDEBAR_W_EXPANDED
         )
-        self.lbl_titre.grid(row=0, column=1, sticky="w")
 
-    def _build_body(self):
-        """Corps principal : nav gauche + contenu droit (row 1)."""
-        body = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE, corner_radius=0)
-        body.grid(row=1, column=0, sticky="nsew", padx=12, pady=12)
-        body.grid_rowconfigure(0, weight=1)
-        body.grid_columnconfigure(1, weight=1)
+    def _nav_button_text(self, key: str) -> str:
+        info = TYPES_MOUVEMENT[key]
+        if self._sidebar_collapsed:
+            return info["icon"]
+        return info["label"]
 
-        self._build_nav(body)       # Col 0
-        self._build_content(body)   # Col 1
+    def _toggle_sidebar(self):
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        self._appliquer_etat_sidebar()
 
-    def _build_nav(self, parent):
-        """
-        Panneau de navigation gauche — 5 boutons types de mouvements.
-        Style : fond BG_CARD, bouton actif SUCCESS_DARK, inactif MIDNIGHT.
-        """
-        nav = ctk.CTkFrame(
-            parent,
-            fg_color=Colors.BG_CARD,
-            corner_radius=10,
-            border_width=1,
-            border_color=Colors.BORDER,
-            width=190,
+    def _configure_shell_grid(self):
+        """Colonne 0 = sidebar (taille fixe), colonne 1 = contenu (étirable)."""
+        self.grid_columnconfigure(0, weight=0, minsize=self._sidebar_width())
+        self.grid_columnconfigure(1, weight=1)
+
+    def _appliquer_etat_sidebar(self):
+        w = self._sidebar_width()
+        try:
+            self.grid_columnconfigure(0, minsize=w)
+            self.sidebar.configure(width=w)
+        except tk.TclError:
+            return
+        padx_btn = 4 if self._sidebar_collapsed else 10
+        for key, btn in self._nav_buttons.items():
+            btn.configure(
+                text=self._nav_button_text(key),
+                anchor="center" if self._sidebar_collapsed else "w",
+            )
+            btn.grid_configure(padx=padx_btn)
+        try:
+            self.update_idletasks()
+        except tk.TclError:
+            pass
+
+    def _build_sidebar(self):
+        """Sidebar rétractable (mode hamburger — icônes par défaut)."""
+        self.sidebar = ctk.CTkFrame(
+            self,
+            width=self._sidebar_width(),
+            corner_radius=0,
+            fg_color=Colors.PRIMARY,
         )
-        nav.grid(row=0, column=0, sticky="ns", padx=(0, 10))
-        nav.grid_propagate(False)
-        nav.grid_columnconfigure(0, weight=1)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_propagate(False)
+        self.sidebar.grid_columnconfigure(0, weight=1)
 
-        # Titre de la nav
-        ctk.CTkLabel(
-            nav,
-            text="Types de Mouvements",
-            font=Fonts.bold(11),
-            text_color=Colors.TEXT_SECONDARY,
-            anchor="center",
-        ).grid(row=0, column=0, padx=10, pady=(14, 6), sticky="ew")
+        ctk.CTkButton(
+            self.sidebar,
+            text="☰",
+            width=40,
+            height=40,
+            fg_color="transparent",
+            hover_color=Colors.PRIMARY_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            font=ctk.CTkFont(size=18),
+            corner_radius=8,
+            command=self._toggle_sidebar,
+        ).grid(row=0, column=0, padx=6, pady=(12, 8), sticky="ew")
 
-        # Séparateur
-        ctk.CTkFrame(nav, fg_color=Colors.BORDER, height=1, corner_radius=0).grid(
-            row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
-
-        # Boutons
-        for idx, (key, info) in enumerate(TYPES_MOUVEMENT.items()):
+        for idx, (key, info) in enumerate(TYPES_MOUVEMENT.items(), start=1):
             btn = ctk.CTkButton(
-                nav,
-                text=info["label"],
+                self.sidebar,
+                text=self._nav_button_text(key),
                 font=Fonts.bold(11),
-                fg_color=Colors.MIDNIGHT,
-                hover_color=Colors.MIDNIGHT_LIGHT,
+                fg_color="transparent",
+                hover_color=Colors.PRIMARY_HOVER,
                 text_color=Colors.TEXT_ON_DARK,
-                anchor="w",
+                anchor="center" if self._sidebar_collapsed else "w",
                 corner_radius=8,
                 height=40,
                 command=lambda k=key: self._select_type(k),
             )
-            btn.grid(row=idx + 2, column=0, padx=10, pady=3, sticky="ew")
+            padx = 4 if self._sidebar_collapsed else 10
+            btn.grid(row=idx, column=0, padx=padx, pady=4, sticky="ew")
             self._nav_buttons[key] = btn
 
-        # Remplissage vertical
-        nav.grid_rowconfigure(len(TYPES_MOUVEMENT) + 2, weight=1)
+        self.sidebar.grid_rowconfigure(len(TYPES_MOUVEMENT) + 1, weight=1)
+
+    def _build_main_column(self):
+        self.right_panel = ctk.CTkFrame(self, fg_color=Colors.BG_PAGE, corner_radius=0)
+        self.right_panel.grid(row=0, column=1, sticky="nsew")
+        self.right_panel.grid_rowconfigure(1, weight=1)
+        self.right_panel.grid_columnconfigure(0, weight=1)
+
+        self._create_main_header()
+
+        self.content_host = ctk.CTkFrame(
+            self.right_panel, fg_color=Colors.BG_PAGE, corner_radius=0,
+        )
+        self.content_host.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.content_host.grid_rowconfigure(1, weight=1)
+        self.content_host.grid_columnconfigure(0, weight=1)
+        self._build_content(self.content_host)
+
+    def _create_main_header(self):
+        hdr = ctk.CTkFrame(
+            self.right_panel,
+            fg_color=Colors.MIDNIGHT,
+            corner_radius=0,
+            height=48,
+        )
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.grid_propagate(False)
+        hdr.grid_columnconfigure(0, weight=1)
+
+        bar = ctk.CTkFrame(hdr, fg_color="transparent", corner_radius=0)
+        bar.grid(row=0, column=0, sticky="ew", padx=16, pady=(10, 10))
+        bar.grid_columnconfigure(0, weight=1)
+
+        self.lbl_main_title = ctk.CTkLabel(
+            bar,
+            text="Liste mouvements",
+            font=Fonts.bold(15),
+            text_color=Colors.TEXT_ON_DARK,
+            anchor="w",
+        )
+        self.lbl_main_title.grid(row=0, column=0, sticky="w")
+
+        links = ctk.CTkFrame(bar, fg_color="transparent", corner_radius=0)
+        links.grid(row=0, column=1, sticky="ne", padx=(12, 0))
+
+        family = Fonts._family if getattr(Fonts, "_loaded", False) else "Segoe UI"
+        link_font = ctk.CTkFont(family=family, size=11, underline=True)
+
+        lbl_param = ctk.CTkLabel(
+            links,
+            text="⚙  Paramètres",
+            font=link_font,
+            text_color=Colors.PRIMARY_LIGHT,
+            cursor="hand2",
+        )
+        lbl_param.pack(side="left", padx=(0, 14))
+        lbl_param.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
+
+        lbl_conf = ctk.CTkLabel(
+            links,
+            text="🔧  Configuration",
+            font=link_font,
+            text_color=Colors.INFO_LIGHT,
+            cursor="hand2",
+        )
+        lbl_conf.pack(side="left")
+        lbl_conf.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
+
+    def _ouvrir_parametres(self):
+        path = get_config_path("settings.json")
+        try:
+            os.startfile(path)
+        except Exception:
+            messagebox.showinfo(
+                "Paramètres",
+                f"Fichier des paramètres (impression, options globales) :\n{path}",
+            )
+
+    def _on_configuration_saved(self):
+        collapsed = self._lire_sidebar_hamburger_defaut()
+        if collapsed != self._sidebar_collapsed:
+            self._sidebar_collapsed = collapsed
+            self._appliquer_etat_sidebar()
+        cle = self._menu_defaut_au_demarrage()
+        if cle in TYPES_MOUVEMENT:
+            self._select_type(cle)
+
+    def _ouvrir_configuration(self):
+        try:
+            from pages.window_configuration_liste_mouvements import (
+                ConfigurationListeMouvementsWindow,
+            )
+        except ImportError:
+            from window_configuration_liste_mouvements import (
+                ConfigurationListeMouvementsWindow,
+            )
+        ConfigurationListeMouvementsWindow(
+            self,
+            id_user=self.iduser,
+            menus_visibles=self._menus_visibles_pour_config(),
+            menu_actif=self.type_mouvement_actif,
+            on_saved=self._on_configuration_saved,
+        )
 
     def _build_content(self, parent):
-        """Zone de contenu droite : barre de recherche + treeview + footer."""
-        content = ctk.CTkFrame(parent, fg_color=Colors.BG_PAGE, corner_radius=0)
-        content.grid(row=0, column=1, sticky="nsew")
-        content.grid_rowconfigure(1, weight=1)
-        content.grid_columnconfigure(0, weight=1)
+        """Zone de contenu : barre de recherche + treeview + footer (pleine largeur)."""
+        parent.grid_rowconfigure(1, weight=1)
+        parent.grid_columnconfigure(0, weight=1)
 
-        # ── Barre recherche + export ──────────────────────────────────────────
-        self._build_search_bar(content)   # row 0
-
-        # ── Treeview ──────────────────────────────────────────────────────────
-        self._build_treeview(content)     # row 1
-
-        # ── Footer statistiques ───────────────────────────────────────────────
-        self._build_footer(content)       # row 2
+        self._build_search_bar(parent)
+        self._build_treeview(parent)
+        self._build_footer(parent)
 
     def _build_search_bar(self, parent):
         """Barre horizontale : recherche + boutons Chercher / Réinitialiser / Export."""
@@ -190,6 +347,7 @@ class PageListeMouvement(ctk.CTkFrame):
         )
         bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         bar.grid_propagate(False)
+        bar.grid_columnconfigure(0, weight=0)
         bar.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
@@ -363,25 +521,14 @@ class PageListeMouvement(ctk.CTkFrame):
         """
         self.type_mouvement_actif = key
 
-        # Mettre à jour les boutons
         for k, btn in self._nav_buttons.items():
             if k == key:
-                btn.configure(fg_color=Colors.SUCCESS_DARK, hover_color=Colors.SUCCESS)
+                btn.configure(fg_color=Colors.PRIMARY_HOVER, hover_color=Colors.PRIMARY_HOVER)
             else:
-                btn.configure(fg_color=Colors.MIDNIGHT, hover_color=Colors.MIDNIGHT_LIGHT)
+                btn.configure(fg_color="transparent", hover_color=Colors.PRIMARY_HOVER)
 
-        # Mettre à jour le titre
-        icons = {
-            "entree": "Entrées d'Articles",
-            "entree_stock": "Entrées Stock (BE)",
-            "sortie": "Sorties d'Articles",
-            "transfert": "Transferts d'Articles",
-            "consommation": "Consommation Interne",
-            "changement": "Changement d'Articles",
-        }
-        self.lbl_titre.configure(
-            text=f"Listes des Mouvements — {icons.get(key, key)}"
-        )
+        titre = TITRES_MOUVEMENT.get(key, key)
+        self.lbl_main_title.configure(text=f"Liste mouvements - {titre}")
 
         # Réinitialiser la recherche et recharger
         self.search_entry.delete(0, "end")
@@ -433,7 +580,7 @@ class PageListeMouvement(ctk.CTkFrame):
             # ──────────────────────────────────────────────────────────────────
             "entree": """
                 SELECT
-                    c.datecom::DATE as "Date",
+                    c.datecom as "Date",
                     c.refcom as "Référence",
                     COALESCE(
                         STRING_AGG(DISTINCT fcd.nomfrs, ', ')
@@ -492,7 +639,7 @@ class PageListeMouvement(ctk.CTkFrame):
             """,
             "entree_stock": """
                 SELECT
-                    e.dateregistre::DATE as "Date",
+                    e.dateregistre as "Date",
                     e.refentree as "Référence",
                     COUNT(DISTINCT ed.idarticle) as "Nombre d'articles",
                     COALESCE(
@@ -512,7 +659,7 @@ class PageListeMouvement(ctk.CTkFrame):
             """,
             "sortie": """
                 SELECT
-                    s.dateregistre::DATE as "Date",
+                    s.dateregistre as "Date",
                     s.refsortie as "Référence",
                     COUNT(DISTINCT sd.idarticle) as "Nombre d'articles",
                     COALESCE(
@@ -531,7 +678,7 @@ class PageListeMouvement(ctk.CTkFrame):
             """,
             "transfert": """
                 SELECT
-                    t.dateregistre::DATE as "Date",
+                    t.dateregistre as "Date",
                     t.reftransfert as "Référence",
                     COUNT(DISTINCT td.idarticle) as "Nombre d'articles",
                     COALESCE(
@@ -551,7 +698,7 @@ class PageListeMouvement(ctk.CTkFrame):
             """,
             "consommation": """
                 SELECT
-                    ci.dateregistre::DATE as "Date",
+                    ci.dateregistre as "Date",
                     ci.refconsommation as "Référence",
                     COUNT(DISTINCT cid.idarticle) as "Nombre d'articles",
                     COALESCE(
@@ -571,7 +718,7 @@ class PageListeMouvement(ctk.CTkFrame):
             """,
             "changement": """
                 SELECT
-                    ch.datechg::DATE as "Date",
+                    ch.datechg as "Date",
                     ch.refchg as "Référence",
                     COALESCE(ch.note, 'N/A') as "Description",
                     CONCAT(COALESCE(u.prenomuser,''), ' ', COALESCE(u.nomuser,'')) as "Utilisateur"
@@ -601,7 +748,9 @@ class PageListeMouvement(ctk.CTkFrame):
             # Largeur adaptée par type de colonne
             if col in ("Montant Total", "Articles", "Nombre d'articles"):
                 self.tree.column(col, width=110, anchor="e",   minwidth=80)
-            elif col in ("Date", "Statut"):
+            elif col == "Date":
+                self.tree.column(col, width=130, anchor="center", minwidth=115)
+            elif col == "Statut":
                 self.tree.column(col, width=105, anchor="center", minwidth=80)
             elif col == "Référence":
                 self.tree.column(col, width=130, anchor="center", minwidth=90)
@@ -614,7 +763,16 @@ class PageListeMouvement(ctk.CTkFrame):
 
         for idx, row in df.iterrows():
             tag = "row_white" if idx % 2 == 0 else "row_alt"
-            self.tree.insert("", "end", values=tuple(row), tags=(tag,))
+            vals = []
+            for col in cols:
+                v = row[col]
+                if col == "Date":
+                    vals.append(self._fmt_datetime_mouvement(v))
+                elif pd.isna(v):
+                    vals.append("")
+                else:
+                    vals.append(v)
+            self.tree.insert("", "end", values=tuple(vals), tags=(tag,))
 
     def clear_tree(self):
         """Vide le treeview."""
@@ -685,7 +843,10 @@ class PageListeMouvement(ctk.CTkFrame):
             desktop  = os.path.join(os.path.expanduser("~"), "Desktop")
             path     = os.path.join(desktop if os.path.isdir(desktop) else ".", filename)
 
-            self.data_df.to_excel(path, index=False, sheet_name="Mouvements")
+            export_df = self.data_df.copy()
+            if "Date" in export_df.columns:
+                export_df["Date"] = export_df["Date"].apply(self._fmt_datetime_mouvement)
+            export_df.to_excel(path, index=False, sheet_name="Mouvements")
             messagebox.showinfo("Export Excel", f"Fichier exporté :\n{path}")
             try:
                 from log_utils import AppLogger
@@ -797,7 +958,11 @@ class PageListeMouvement(ctk.CTkFrame):
 
         for idx, r in enumerate(rows):
             tag = "row_white" if idx % 2 == 0 else "row_alt"
-            tree.insert("", "end", values=r, tags=(tag,))
+            vals = list(r)
+            for i, col in enumerate(columns):
+                if "date" in col.lower() or col == "Date":
+                    vals[i] = self._fmt_datetime_mouvement(vals[i])
+            tree.insert("", "end", values=tuple(vals), tags=(tag,))
 
         # Barre d'actions
         actions = ctk.CTkFrame(win, fg_color=Colors.BG_CARD, corner_radius=0, height=52)

@@ -36,5 +36,14 @@
     "SidebarHamburgerParUtilisateur": {
       "26": true
     }
+  },
+  "ListeMouvements": {
+    "_comment": "Préférences personnelles Liste mouvements (par id utilisateur). MenuDefaut : clé entree, sortie, transfert, entree_stock, consommation, changement.",
+    "MenuDefautParUtilisateur": {
+      "0": "changement"
+    },
+    "SidebarHamburgerParUtilisateur": {
+      "0": true
+    }
   }
 }

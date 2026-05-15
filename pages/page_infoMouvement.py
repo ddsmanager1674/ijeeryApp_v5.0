@@ -1561,7 +1561,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             )
 
         self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
+        self._configure_shell_grid()
 
         self.pages: Dict[str, Any] = {}
         self.current_page = None
@@ -1650,10 +1650,17 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             from mouvement_stock_config import get_sidebar_hamburger_defaut
         return get_sidebar_hamburger_defaut(self.iduser, default=True)
 
+    def _configure_shell_grid(self):
+        """Colonne 0 = sidebar (taille fixe), colonne 1 = contenu (étirable)."""
+        self.grid_columnconfigure(0, weight=0, minsize=self._sidebar_width())
+        self.grid_columnconfigure(1, weight=1)
+
     def _appliquer_etat_sidebar(self) -> None:
-        """Applique largeur et libellés selon _sidebar_collapsed."""
+        """Applique largeur sidebar ; le contenu occupe tout l'espace restant."""
+        w = self._sidebar_width()
         try:
-            self.sidebar.configure(width=self._sidebar_width())
+            self.grid_columnconfigure(0, minsize=w)
+            self.sidebar.configure(width=w)
         except tk.TclError:
             return
         padx_btn = 4 if self._sidebar_collapsed else 10
@@ -1666,19 +1673,14 @@ class PageInfoMouvementStock(ctk.CTkFrame):
                 anchor="center" if self._sidebar_collapsed else "w",
             )
             btn.grid_configure(padx=padx_btn)
+        try:
+            self.update_idletasks()
+        except tk.TclError:
+            pass
 
     def _toggle_sidebar(self):
         self._sidebar_collapsed = not self._sidebar_collapsed
-        w = self._sidebar_width()
-        self.sidebar.configure(width=w)
-        padx_btn = 4 if self._sidebar_collapsed else 10
-        for icon, label, _cls in self._MENU_ITEMS:
-            btn = self.menu_buttons[label]
-            btn.configure(
-                text=self._menu_button_text(icon, label),
-                anchor="center" if self._sidebar_collapsed else "w",
-            )
-            btn.grid_configure(padx=padx_btn)
+        self._appliquer_etat_sidebar()
 
     def create_sidebar(self):
         """Menu latéral rétractable (mode hamburger — icônes seules par défaut)."""
@@ -1845,6 +1847,8 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             fg_color=Colors.BG_PAGE,
         )
         self.content_frame.grid(row=1, column=0, sticky="nsew")
+        self.content_frame.grid_rowconfigure(0, weight=1)
+        self.content_frame.grid_columnconfigure(0, weight=1)
 
         self.initial_label = ctk.CTkLabel(
             self.content_frame,
@@ -1891,7 +1895,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         )
 
         if self.current_page:
-            self.current_page.pack_forget()
+            self.current_page.grid_remove()
 
         if menu_label not in self.pages:
             try:
@@ -1904,7 +1908,12 @@ class PageInfoMouvementStock(ctk.CTkFrame):
                 return
 
         self.current_page = self.pages[menu_label]
-        self.current_page.pack(fill="both", expand=True)
+        self.current_page.grid(row=0, column=0, sticky="nsew")
+        try:
+            self.current_page.grid_rowconfigure(0, weight=1)
+            self.current_page.grid_columnconfigure(0, weight=1)
+        except (tk.TclError, AttributeError):
+            pass
         self.content_frame.update_idletasks()
 
         for btn_label, btn in self.menu_buttons.items():
