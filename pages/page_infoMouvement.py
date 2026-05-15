@@ -1721,7 +1721,25 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         self.lbl_configuration.pack(side="left")
         self.lbl_configuration.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
 
+    def _on_param_commande_saved(self):
+        page = self.pages.get("Bon de commande")
+        if page is not None and hasattr(page, "appliquer_fournisseur_defaut_param"):
+            page.appliquer_fournisseur_defaut_param()
+
     def _ouvrir_parametres(self):
+        if self._current_menu_label == "Bon de commande":
+            try:
+                from pages.window_parametres_commande_frs import (
+                    ParametresCommandeFrsWindow,
+                )
+            except ImportError:
+                from window_parametres_commande_frs import ParametresCommandeFrsWindow
+            ParametresCommandeFrsWindow(
+                self,
+                id_user=self.iduser,
+                on_saved=self._on_param_commande_saved,
+            )
+            return
         path = get_config_path("settings.json")
         try:
             os.startfile(path)

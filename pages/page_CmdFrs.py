@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox
 import psycopg2
 import json
 from datetime import datetime
+from typing import Optional
 from html import escape
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
@@ -1016,29 +1017,88 @@ class PageCommandeFrs(ctk.CTkFrame):
     # ─────────────────────────────────────────────────────────────────────────
     # Fournisseurs
     # ─────────────────────────────────────────────────────────────────────────
-    def charger_fournisseurs(self):
+    def _appliquer_fournisseur_entree(
+        self,
+        idfrs,
+        nomfrs: Optional[str] = None,
+    ) -> None:
+        """Met à jour le champ fournisseur et les métadonnées associées."""
+        if not idfrs:
+            return
+        info = getattr(self, "fournisseurs", {}).get(idfrs, {})
+        nom = (nomfrs or info.get("nom") or "").strip()
+        self.fournisseur_id = idfrs
+        self.fournisseur_contact = info.get("contact", "") or ""
+        self.fournisseur_adresse = info.get("adresse", "") or ""
+        self.entry_fournisseur.configure(state="normal")
+        self.entry_fournisseur.delete(0, "end")
+        self.entry_fournisseur.insert(0, nom)
+        self.entry_fournisseur.configure(state="readonly")
+
+    def _fournisseur_premier_ligne_commande(self, commande, details):
+        """Premier fournisseur présent dans les lignes de la commande chargée."""
+        for d in details:
+            idfrs_d, nomfrs_d = d[10], d[11]
+            if idfrs_d:
+                return int(idfrs_d), (nomfrs_d or "").strip()
+        if commande[3]:
+            return int(commande[3]), (commande[4] or "").strip()
+        return None, None
+
+    def appliquer_fournisseur_defaut_param(self) -> None:
+        """Applique le fournisseur par défaut enregistré en base (nouveau BC)."""
+        if self.mode_modification and self.idcom_charge:
+            return
+        try:
+            from pages.commande_frs_common import CommandeFrsDB
+        except ImportError:
+            from commande_frs_common import CommandeFrsDB
+
         conn = self.connect_db()
-        if not conn: return
+        if not conn:
+            return
         try:
             cur = conn.cursor()
-            cur.execute("SELECT idfrs, nomfrs, contactfrs, adressefrs FROM tb_fournisseur WHERE deleted=0 ORDER BY nomfrs")
+            param = CommandeFrsDB.fetch_param_commande_frs(cur)
+            id_def = param.get("idfrs_defaut")
+            if id_def and id_def in getattr(self, "fournisseurs", {}):
+                self._appliquer_fournisseur_entree(id_def)
+        except Exception:
+            pass
+        finally:
+            if "cur" in locals():
+                cur.close()
+            if conn:
+                conn.close()
+
+    def charger_fournisseurs(self):
+        conn = self.connect_db()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT idfrs, nomfrs, contactfrs, adressefrs "
+                "FROM tb_fournisseur WHERE deleted=0 ORDER BY nomfrs",
+            )
             self.fournisseurs = {}
             rows = cur.fetchall()
             for row in rows:
-                self.fournisseurs[row[0]] = {'nom': row[1], 'contact': row[2] or '', 'adresse': row[3] or ''}
-            if rows:
-                self.entry_fournisseur.configure(state="normal")
-                self.entry_fournisseur.delete(0, "end")
-                self.entry_fournisseur.insert(0, rows[0][1])
-                self.entry_fournisseur.configure(state="readonly")
-                self.fournisseur_id = rows[0][0]
-                self.fournisseur_contact = rows[0][2] or ''
-                self.fournisseur_adresse = rows[0][3] or ''
+                self.fournisseurs[row[0]] = {
+                    "nom": row[1],
+                    "contact": row[2] or "",
+                    "adresse": row[3] or "",
+                }
+            self.appliquer_fournisseur_defaut_param()
+            if not self.fournisseur_id and rows:
+                self._appliquer_fournisseur_entree(rows[0][0], rows[0][1])
         except Exception as e:
             messagebox.showerror("Erreur", f"Fournisseurs : {e}")
         finally:
-            if 'cur' in locals(): cur.close()
-            if conn: conn.close()
+            if "cur" in locals():
+                cur.close()
+            if conn:
+                conn.close()
 
     def ouvrir_recherche_fournisseur(self):
         fen = ctk.CTkToplevel(self)
@@ -1106,11 +1166,9 @@ class PageCommandeFrs(ctk.CTkFrame):
             sel = tree.selection()
             if not sel: messagebox.showwarning("Attention", "Sélectionnez un fournisseur."); return
             v = tree.item(sel[0])['values']
-            self.fournisseur_id = v[0]; self.fournisseur_contact = v[2]; self.fournisseur_adresse = v[3]
-            self.entry_fournisseur.configure(state="normal")
-            self.entry_fournisseur.delete(0, "end")
-            self.entry_fournisseur.insert(0, v[1])
-            self.entry_fournisseur.configure(state="readonly")
+            self._appliquer_fournisseur_entree(v[0], v[1])
+            self.fournisseur_contact = v[2] or ""
+            self.fournisseur_adresse = v[3] or ""
             fen.destroy()
 
         tree.bind('<Double-Button-1>', lambda e: valider())
@@ -1249,12 +1307,9 @@ class PageCommandeFrs(ctk.CTkFrame):
             self.entry_ref.insert(0, commande[1])
             self.entry_ref.configure(state="readonly")
 
-            if commande[4]:
-                self.entry_fournisseur.configure(state="normal")
-                self.entry_fournisseur.delete(0, "end")
-                self.entry_fournisseur.insert(0, commande[4])
-                self.entry_fournisseur.configure(state="readonly")
-                self.fournisseur_id = commande[3]
+            id_frs, nom_frs = self._fournisseur_premier_ligne_commande(commande, details)
+            if id_frs:
+                self._appliquer_fournisseur_entree(id_frs, nom_frs)
 
             # Transporteur
             idtrans = commande[6]
@@ -1563,6 +1618,7 @@ class PageCommandeFrs(ctk.CTkFrame):
 
             self.mode_modification = False
             self.reinitialiser_formulaire()
+            self.appliquer_fournisseur_defaut_param()
 
         except Exception as e:
             conn.rollback()
@@ -1614,6 +1670,7 @@ class PageCommandeFrs(ctk.CTkFrame):
         self.reinitialiser_formulaire()
         self.mode_modification = False
         self.idcom_charge = None
+        self.appliquer_fournisseur_defaut_param()
 
     # ─────────────────────────────────────────────────────────────────────────
     # IMPRESSION

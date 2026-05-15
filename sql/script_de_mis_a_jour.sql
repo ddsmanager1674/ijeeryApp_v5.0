@@ -420,4 +420,36 @@ BEGIN
     END IF;
 END $$;
 
+-- ── Paramètres Bon de commande fournisseur ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.tb_param_commande_frs (
+    id smallint NOT NULL DEFAULT 1,
+    idfrs_defaut integer,
+    CONSTRAINT tb_param_commande_frs_pkey PRIMARY KEY (id),
+    CONSTRAINT tb_param_commande_frs_singleton CHECK (id = 1)
+);
+
+INSERT INTO public.tb_param_commande_frs (id, idfrs_defaut)
+VALUES (1, NULL)
+ON CONFLICT (id) DO NOTHING;
+
+COMMENT ON TABLE public.tb_param_commande_frs IS
+    'Paramètres globaux Bon de commande fournisseur (ligne unique id=1).';
+
+COMMENT ON COLUMN public.tb_param_commande_frs.idfrs_defaut IS
+    'Fournisseur pré-affiché à l''ouverture d''un nouveau bon de commande.';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'tb_param_commande_frs_idfrs_defaut_fkey'
+    ) THEN
+        ALTER TABLE ONLY public.tb_param_commande_frs
+            ADD CONSTRAINT tb_param_commande_frs_idfrs_defaut_fkey
+            FOREIGN KEY (idfrs_defaut)
+            REFERENCES public.tb_fournisseur(idfrs)
+            ON UPDATE CASCADE ON DELETE SET NULL;
+    END IF;
+END $$;
+
 COMMIT;
