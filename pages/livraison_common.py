@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import psycopg2
 import psycopg2.pool
 
+from db import load_db_config
+
 # ── Détection avoir (facture non livrable) ───────────────────────────────────
 
 SQL_FILTER_SANS_AVOIR = """
@@ -457,10 +459,12 @@ class LivraisonDB:
     def init_pool(cls) -> None:
         if cls._pool is not None:
             return
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        root_dir = os.path.dirname(current_dir)
-        with open(os.path.join(root_dir, "config.json"), "r", encoding="utf-8") as f:
-            db_config = json.load(f)["database"]
+        db_config = load_db_config()
+        if not db_config:
+            raise FileNotFoundError(
+                "config.json introuvable. En mode EXE, placez-le à côté de "
+                "iJeery_V5.0.exe (dossier dist\\iJeery_V5.0\\), pas dans _internal."
+            )
         cls._pool = psycopg2.pool.SimpleConnectionPool(1, 5, **db_config)
 
     @classmethod

@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any, List
 import threading
 
 from app_theme import Colors, Fonts, Layout, styled
+from db import load_db_config
 
 
 class PageLivraisonClient(ctk.CTkFrame):
@@ -49,12 +50,9 @@ class PageLivraisonClient(ctk.CTkFrame):
         if PageLivraisonClient._connection_pool is not None:
             return
         try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            root_dir = os.path.dirname(current_dir)
-            config_path = os.path.join(root_dir, 'config.json')
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                db_config = config['database']
+            db_config = load_db_config()
+            if not db_config:
+                raise FileNotFoundError("config.json")
             PageLivraisonClient._connection_pool = psycopg2.pool.SimpleConnectionPool(
                 minconn=1, maxconn=5, **db_config
             )

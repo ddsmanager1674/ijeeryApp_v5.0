@@ -36,21 +36,14 @@ class PageLivraisonEnAttente(ctk.CTkFrame):
 
     # ── Connexion DB ──────────────────────────────────────────────────────────
     def connect_db(self):
-        """Connexion qui remonte d'un niveau pour trouver config.json à la racine"""
+        """Connexion via config.json (dossier exe en prod, racine projet en dev)."""
         try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            root_dir = os.path.dirname(current_dir)
-            config_path = os.path.join(root_dir, 'config.json')
-
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                db_config = config['database']
             from pages.db_helper import connect_page_db
             return connect_page_db()
         except Exception as e:
             messagebox.showerror(
-                "Erreur de chemin",
-                f"Impossible de trouver config.json à la racine.\nErreur: {e}"
+                "Erreur de connexion",
+                f"Impossible de se connecter à la base.\nVérifiez config.json à côté de l'exe.\n{e}",
             )
             return None
 
