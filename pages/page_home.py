@@ -103,8 +103,10 @@ def _fmt(v):
 # REQUÊTES — DONNÉES KPI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _fetch_one(query, params=None, default=0):
-    conn = _get_conn()
+def _fetch_one(query, params=None, default=0, conn=None):
+    own_conn = conn is None
+    if own_conn:
+        conn = _get_conn()
     if not conn:
         return default
     try:
@@ -116,11 +118,17 @@ def _fetch_one(query, params=None, default=0):
         print(f"Erreur SQL: {e}")
         return default
     finally:
-        conn.close()
+        if own_conn and conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
-def _fetch_all(query, params=None):
-    conn = _get_conn()
+def _fetch_all(query, params=None, conn=None):
+    own_conn = conn is None
+    if own_conn:
+        conn = _get_conn()
     if not conn:
         return []
     try:
@@ -131,10 +139,14 @@ def _fetch_all(query, params=None):
         print(f"Erreur SQL: {e}")
         return []
     finally:
-        conn.close()
+        if own_conn and conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
-def get_solde_caisse():
+def get_solde_caisse(conn=None):
     today = date.today().strftime('%Y-%m-%d')
     v = _fetch_one("""
         SELECT COALESCE(SUM(CASE WHEN t1.idtypeoperation=1 THEN t1.mtpaye ELSE -t1.mtpaye END), 0)
@@ -159,11 +171,11 @@ def get_solde_caisse():
         ) t1
         LEFT JOIN tb_modepaiement t2 ON t1.idmode = t2.idmode
         WHERE COALESCE(t2.modedepaiement, 'Inconnu') IN ('Espèces', 'Espece')
-    """, [today] * 9)
+    """, [today] * 9, conn=conn)
     return _fmt(v)
 
 
-def get_total_client_jour():
+def get_total_client_jour(conn=None):
     today = date.today()
     v = _fetch_one("""
         SELECT COALESCE(SUM(CASE WHEN idtypeoperation=1 THEN mtpaye ELSE -mtpaye END),0)
@@ -174,34 +186,36 @@ def get_total_client_jour():
             SELECT idtypeoperation,mtpaye FROM tb_pmtcredit
             WHERE datepmt::date=%s AND id_banque IS NULL
         ) t
-    """, [today, today])
+    """, [today, today], conn=conn)
     return _fmt(v)
 
 
-def get_nb_factures_vente_jour():
+def get_nb_factures_vente_jour(conn=None):
     """Nombre de factures de vente validées du jour."""
     v = _fetch_one(
-        "SELECT COUNT(*) FROM tb_vente WHERE DATE(dateregistre)=CURRENT_DATE AND statut='VALIDEE'")
+        "SELECT COUNT(*) FROM tb_vente WHERE DATE(dateregistre)=CURRENT_DATE AND statut='VALIDEE'",
+        conn=conn,
+    )
     return f"{int(v)} facture{'s' if int(v) > 1 else ''}"
 
 
-def get_encaissement_jour():
+def get_encaissement_jour(conn=None):
     v = _fetch_one("""
         SELECT COALESCE(SUM(mtpaye),0) FROM tb_encaissement
         WHERE DATE(datepmt)=CURRENT_DATE AND idtypeoperation=1
-    """)
+    """, conn=conn)
     return _fmt(v)
 
 
-def get_decaissement_jour():
+def get_decaissement_jour(conn=None):
     v = _fetch_one("""
         SELECT COALESCE(SUM(mtpaye),0) FROM tb_decaissement
         WHERE DATE(datepmt)=CURRENT_DATE AND idtypeoperation=2
-    """)
+    """, conn=conn)
     return _fmt(v)
 
 
-def get_credit_total():
+def get_credit_total(conn=None):
     v = _fetch_one("""
         SELECT COALESCE(SUM(tv.totmtvente), 0) AS credit_donne_jour
         FROM tb_vente tv
@@ -209,11 +223,11 @@ def get_credit_total():
         WHERE mp.modedepaiement IN ('Crédit', 'Credit')
           AND DATE(tv.dateregistre) = CURRENT_DATE
           AND tv.statut = 'VALIDEE'
-    """)
+    """, conn=conn)
     return _fmt(v)
 
 
-def get_credit_general():
+def get_credit_general(conn=None):
     v = _fetch_one("""
         SELECT
             COALESCE(vc.total_credit_ventes, 0)
@@ -237,11 +251,11 @@ def get_credit_general():
                 SELECT COALESCE(SUM(mtpaye), 0) AS total_paye_credit
                 FROM tb_pmtcredit
             ) pc
-    """)
+    """, conn=conn)
     return _fmt(v)
 
 
-def get_dette_fournisseur():
+def get_dette_fournisseur(conn=None):
     v = _fetch_one("""
         SELECT
             COALESCE(dl.total_dette_livraisons, 0)
@@ -267,25 +281,27 @@ def get_dette_fournisseur():
                 SELECT COALESCE(SUM(mtpaye), 0) AS total_paye_frs
                 FROM tb_pmtcom
             ) pc
-    """)
+    """, conn=conn)
     return _fmt(v)
 
 
-def get_appro_jour():
+def get_appro_jour(conn=None):
     v = _fetch_one(
-        "SELECT COUNT(DISTINCT reflivfrs) FROM tb_livraisonfrs WHERE DATE(dateregistre)=CURRENT_DATE")
+        "SELECT COUNT(DISTINCT reflivfrs) FROM tb_livraisonfrs WHERE DATE(dateregistre)=CURRENT_DATE",
+        conn=conn,
+    )
     return f"{int(v)} BR"
 
 
-def get_absences_jour():
+def get_absences_jour(conn=None):
     today = date.today().strftime('%Y-%m-%d')
-    v = _fetch_one("SELECT COUNT(*) FROM tb_absence WHERE date=%s", [today])
+    v = _fetch_one("SELECT COUNT(*) FROM tb_absence WHERE date=%s", [today], conn=conn)
     return int(v)
 
 
 # ── Données Caisse : ventilation par type & mode (période = aujourd'hui) ─────
 
-def get_ventilation_types_jour():
+def get_ventilation_types_jour(conn=None):
     """
     Retourne un dict {type_doc: montant_net} pour la journée du jour.
     Utilisé pour les mini-barres de progression de la caisse.
@@ -301,8 +317,33 @@ def get_ventilation_types_jour():
         ("Dépenses",      "SELECT COALESCE(SUM(CASE WHEN idtypeoperation=1 THEN mtpaye ELSE -mtpaye END),0) FROM tb_decaissement WHERE datepmt::date=%s AND id_banque IS NULL"),
     ]
     for label, q in queries:
-        result[label] = float(_fetch_one(q, [today]))
+        result[label] = float(_fetch_one(q, [today], conn=conn))
     return result
+
+
+def _load_dashboard_data():
+    """Charge tous les KPI du tableau de bord sur une seule connexion."""
+    conn = _get_conn()
+    if not conn:
+        return None
+    try:
+        return {
+            "solde_especes": get_solde_caisse(conn=conn),
+            "total_client": get_total_client_jour(conn=conn),
+            "nb_factures": get_nb_factures_vente_jour(conn=conn),
+            "encaissement_jour": get_encaissement_jour(conn=conn),
+            "decaissement_jour": get_decaissement_jour(conn=conn),
+            "credit_total": get_credit_general(conn=conn),
+            "dette_fournisseur": get_dette_fournisseur(conn=conn),
+            "appro": get_appro_jour(conn=conn),
+            "absences": get_absences_jour(conn=conn),
+            "ventilation": get_ventilation_types_jour(conn=conn),
+        }
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 
@@ -484,18 +525,19 @@ class PageHome(ctk.CTkFrame):
         outer.grid(row=1, column=0, sticky="nsew")
         outer.grid_columnconfigure(0, weight=1)
 
-        # ── Chargement des données ────────────────────────────────────────────
+        # ── Chargement des données (une seule connexion) ─────────────────────
         try:
-            solde_especes     = get_solde_caisse()
-            total_client      = get_total_client_jour()
-            nb_factures       = get_nb_factures_vente_jour()
-            encaissement_jour = get_encaissement_jour()
-            decaissement_jour = get_decaissement_jour()
-            credit_total      = get_credit_general()
-            dette_fournisseur = get_dette_fournisseur()
-            appro             = get_appro_jour()
-            absences          = get_absences_jour()
-            ventilation       = get_ventilation_types_jour()
+            data = _load_dashboard_data() or {}
+            solde_especes     = data.get("solde_especes", "0 Ar")
+            total_client      = data.get("total_client", "0 Ar")
+            nb_factures       = data.get("nb_factures", "0 facture")
+            encaissement_jour = data.get("encaissement_jour", "0 Ar")
+            decaissement_jour = data.get("decaissement_jour", "0 Ar")
+            credit_total      = data.get("credit_total", "0 Ar")
+            dette_fournisseur = data.get("dette_fournisseur", "0 Ar")
+            appro             = data.get("appro", "0 BR")
+            absences          = data.get("absences", 0)
+            ventilation       = data.get("ventilation", {})
         except Exception as e:
             print(f"Erreur chargement dashboard: {e}")
             solde_especes = total_client = "0 Ar"

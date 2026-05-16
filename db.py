@@ -63,7 +63,6 @@ class DatabaseManager:
                 port=self.db_params["port"],
                 connect_timeout=10,
             )
-            print("[DB] Connexion établie.")
             return conn
         except psycopg2.OperationalError as e:
             print(f"[DB] {e}")

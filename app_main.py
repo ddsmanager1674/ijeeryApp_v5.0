@@ -915,6 +915,7 @@ class App(ctk.CTk):
             self.destroy()
             return
 
+        print("[DB] Connexion établie.")
         self.nom_societe = self._fetch_societe_name()
 
         # ── Layout racine ────────────────────────────────────────────────────

@@ -7,5 +7,5 @@ from db import ensure_connection, get_connection
 
 
 def connect_page_db(db_conn: Optional[Any] = None):
-    """Retourne une connexion active (partagée ou nouvelle)."""
-    return ensure_connection(db_conn or get_connection())
+    """Retourne une connexion active (réutilise db_conn si encore valide)."""
+    return ensure_connection(db_conn)
