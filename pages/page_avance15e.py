@@ -10,10 +10,11 @@ import os
 import json
 import sys
 from resource_utils import get_config_path, safe_file_read
-try:
-    from tkcalendar import DateEntry
-except Exception:  # tkcalendar non installé → fallback sur Entry texte
-    DateEntry = None
+from date_picker_utils import (
+    format_date_iso,
+    get_date_from_widget,
+    set_date_on_widget,
+)
 
 # Thème UI iJeery
 from app_theme import Colors, Fonts, Theme, styled, Layout
@@ -245,13 +246,8 @@ class PageAVQ(ctk.CTkFrame):
         filtres_frame.grid_columnconfigure(5, weight=1)
 
         ctk.CTkLabel(filtres_frame, text="Du", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
-        if DateEntry:
-            de_kw = dict(width=12, background=Colors.PRIMARY_HOVER, foreground=Colors.TEXT_ON_DARK, borderwidth=2, date_pattern="yyyy-mm-dd")
-            self.filter_date_start = DateEntry(filtres_frame, **de_kw)
-            self.filter_date_end = DateEntry(filtres_frame, **de_kw)
-        else:
-            self.filter_date_start = ctk.CTkEntry(filtres_frame, width=120, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, corner_radius=8, font=Fonts.body(11), placeholder_text="YYYY-MM-DD")
-            self.filter_date_end = ctk.CTkEntry(filtres_frame, width=120, height=32, fg_color=Colors.BG_INPUT, border_color=Colors.BORDER, corner_radius=8, font=Fonts.body(11), placeholder_text="YYYY-MM-DD")
+        self.filter_date_start = styled.date_entry(filtres_frame, width=11, initial=date.today())
+        self.filter_date_end = styled.date_entry(filtres_frame, width=11, initial=date.today())
         self.filter_date_start.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="w")
 
         ctk.CTkLabel(filtres_frame, text="Au", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=2, padx=(0, 6), pady=10, sticky="w")
@@ -446,30 +442,19 @@ class PageAVQ(ctk.CTkFrame):
     # ──────────────────────────────────────────────────────────────────────
 
     def _get_date_filter_value(self, w):
-        if DateEntry and hasattr(w, "get_date"):
-            return w.get_date().strftime("%Y-%m-%d")
-        if hasattr(w, "get"):
-            return (w.get() or "").strip()
-        return ""
+        d = get_date_from_widget(w)
+        return format_date_iso(d) if d else ""
 
     def reset_filters(self):
         try:
             self.filter_search_var.set("")
         except Exception:
             pass
-        if DateEntry:
-            try:
-                # remettre sur aujourd'hui pour les 2 champs
-                self.filter_date_start.set_date(date.today())
-                self.filter_date_end.set_date(date.today())
-            except Exception:
-                pass
-        else:
-            try:
-                self.filter_date_start.delete(0, ctk.END)
-                self.filter_date_end.delete(0, ctk.END)
-            except Exception:
-                pass
+        try:
+            set_date_on_widget(self.filter_date_start, date.today())
+            set_date_on_widget(self.filter_date_end, date.today())
+        except Exception:
+            pass
         try:
             self.sort_key.set("Date (desc)")
         except Exception:

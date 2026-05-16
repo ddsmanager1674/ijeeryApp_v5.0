@@ -802,12 +802,7 @@ class PageGestionPeremption(ctk.CTkFrame):
             justify="center")
         entry_qt.grid(row=1, column=0, padx=12, pady=(0, 10), sticky="ew")
 
-        entry_date = ctk.CTkEntry(
-            form, textvariable=var_date, height=32,
-            placeholder_text="ex: 31/12/2025",
-            fg_color=C.BG_INPUT, border_color=C.BORDER,
-            border_width=1, font=_f(11), corner_radius=6,
-            justify="center")
+        entry_date = styled.date_entry(form, width=11)
         entry_date.grid(row=1, column=1, padx=12, pady=(0, 10), sticky="ew")
 
         ctk.CTkLabel(form, text="Note (optionnel)",
@@ -835,12 +830,11 @@ class PageGestionPeremption(ctk.CTkFrame):
             if qt <= 0:
                 messagebox.showerror("Erreur", "La quantité doit être > 0.")
                 return
-            try:
-                dp = datetime.strptime(
-                    var_date.get().strip(), '%d/%m/%Y').date()
-            except ValueError:
+            from date_picker_utils import get_date_from_widget
+            dp = get_date_from_widget(entry_date)
+            if not dp:
                 messagebox.showerror("Erreur",
-                                     "Date invalide — format JJ/MM/AAAA.")
+                                     "Date invalide — format jj/mm/aaaa.")
                 return
             if dp < datetime.today().date():
                 if not messagebox.askyesno(

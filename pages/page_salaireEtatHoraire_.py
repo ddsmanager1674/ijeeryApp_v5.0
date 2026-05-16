@@ -176,7 +176,7 @@ class PageEtatSalaireHoraire(ctk.CTkFrame):
         ctk.CTkLabel(toolbar, text="Période", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=2, padx=(8, 6), pady=(10, 2), sticky="w")
         ctk.CTkLabel(toolbar, text="Recherche", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY).grid(row=0, column=4, columnspan=2, padx=(8, 6), pady=(10, 2), sticky="w")
 
-        de_kw = dict(width=12, background=Colors.PRIMARY_HOVER, foreground=Colors.TEXT_ON_DARK, borderwidth=2, date_pattern="yyyy-mm-dd")
+        de_kw = dict(width=12, background=Colors.PRIMARY_HOVER, foreground=Colors.TEXT_ON_DARK, borderwidth=2, date_pattern="dd/mm/yyyy")
         self.entry_start = DateEntry(toolbar, **de_kw)
         self.entry_start.grid(row=1, column=0, padx=(12, 8), pady=(0, 10), sticky="w")
         self.entry_end = DateEntry(toolbar, **de_kw)

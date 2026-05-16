@@ -520,6 +520,32 @@ class styled:
         return e
 
     @staticmethod
+    def date_entry(parent, width: int = 12, initial=None, **kwargs):
+        """
+        Sélecteur de date (dd/mm/yyyy) via tkcalendar.
+        Retourne IjDatePicker : .get_date(), .set_date(), .get() → texte dd/mm/yyyy.
+        """
+        from date_picker_utils import IjDatePicker
+
+        init = initial
+        if init is None:
+            from datetime import date as _d
+            init = _d.today()
+        picker = IjDatePicker(parent, width=width, initial=init, **kwargs)
+        return picker
+
+    @staticmethod
+    def datetime_entry(parent, width: int = 11, initial=None, readonly_time: bool = False, **kwargs):
+        """Date picker + champ heure (dd/mm/yyyy HH:MM:SS)."""
+        from date_picker_utils import IjDateTimePicker
+        from datetime import datetime as _dt
+
+        init = initial if initial is not None else _dt.now()
+        return IjDateTimePicker(
+            parent, width=width, initial=init, readonly_time=readonly_time, **kwargs
+        )
+
+    @staticmethod
     def combobox(parent, values=None, command=None,
                  height=38, **kwargs) -> ctk.CTkComboBox:
         """ComboBox stylisée."""

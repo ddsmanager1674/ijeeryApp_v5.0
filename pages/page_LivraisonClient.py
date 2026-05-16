@@ -287,7 +287,7 @@ class PageLivraisonClient(ctk.CTkFrame):
         ent_date = DateEntry(
             cal_container, width=12,
             background='darkblue', foreground='white', borderwidth=2,
-            date_pattern='yyyy-mm-dd', locale='fr_FR'
+            date_pattern='dd/mm/yyyy', locale='fr_FR'
         )
         ent_date.pack(padx=2, pady=2)
 

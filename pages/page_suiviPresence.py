@@ -16,6 +16,7 @@ from tkinter import ttk, messagebox, filedialog
 
 from resource_utils import get_config_path
 from app_theme import Colors, Fonts, Theme, styled, Layout
+from date_picker_utils import get_date_from_widget, parse_date, set_date_on_widget
 from pages.personnel_structure import UNKNOWN_LABEL, ensure_personnel_structure, has_personnel_structure, personnel_poste_joins
 
 
@@ -326,12 +327,7 @@ class PageSuiviPresence(ctk.CTkFrame):
                          ).grid(row=0, column=col, padx=(padl, 4), pady=7, sticky="w")
 
         lbl("Date :", 0)
-        self.date_entry = ctk.CTkEntry(
-            tb, width=118, height=28,
-            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-            font=Fonts.body(11), corner_radius=6,
-        )
-        self.date_entry.insert(0, date.today().strftime("%Y-%m-%d"))
+        self.date_entry = styled.date_entry(tb, width=11, initial=date.today())
         self.date_entry.grid(row=0, column=1, padx=(0, 6), pady=7)
 
         ctk.CTkButton(tb, text="Charger", width=80, height=28,
@@ -468,17 +464,11 @@ class PageSuiviPresence(ctk.CTkFrame):
                          ).grid(row=0, column=col, padx=(padl, 4), pady=7, sticky="w")
 
         lbl("Début :", 0)
-        self.h_from = ctk.CTkEntry(fc, width=112, height=28,
-                                    fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-                                    font=Fonts.body(11), corner_radius=6,
-                                    placeholder_text="YYYY-MM-DD")
+        self.h_from = styled.date_entry(fc, width=11, initial=date.today())
         self.h_from.grid(row=0, column=1, padx=(0, 8), pady=7)
 
         lbl("Fin :", 2, 0)
-        self.h_to = ctk.CTkEntry(fc, width=112, height=28,
-                                  fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
-                                  font=Fonts.body(11), corner_radius=6,
-                                  placeholder_text="YYYY-MM-DD")
+        self.h_to = styled.date_entry(fc, width=11, initial=date.today())
         self.h_to.grid(row=0, column=3, padx=(0, 8), pady=7)
 
         ctk.CTkButton(fc, text="🔍 Filtrer", width=84, height=28,
@@ -721,7 +711,7 @@ class PageSuiviPresence(ctk.CTkFrame):
         e.bind("<FocusOut>", save)
 
     def save_update(self):
-        d = self._parse(self.date_entry.get().strip())
+        d = get_date_from_widget(self.date_entry)
         if not d: return
         try:
             cur = db_manager.get_cursor()
@@ -778,20 +768,17 @@ class PageSuiviPresence(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _history_today(self):
-        t = date.today().strftime("%Y-%m-%d")
-        self.h_from.delete(0, "end"); self.h_from.insert(0, t)
-        self.h_to.delete(0, "end");   self.h_to.insert(0, t)
+        t = date.today()
+        set_date_on_widget(self.h_from, t)
+        set_date_on_widget(self.h_to, t)
         self.load_history()
 
     def load_history(self):
-        s = self.h_from.get().strip()
-        e = self.h_to.get().strip()
-        if not s or not e:
-            sd = ed = date.today()
-        else:
-            sd = self._parse(s); ed = self._parse(e)
-            if not sd or not ed or sd > ed:
-                messagebox.showwarning("Erreur", "Dates invalides."); return
+        sd = get_date_from_widget(self.h_from) or date.today()
+        ed = get_date_from_widget(self.h_to) or date.today()
+        if sd > ed:
+            messagebox.showwarning("Erreur", "La date de début doit être antérieure à la date de fin.")
+            return
         self.history_tree.delete(*self.history_tree.get_children())
         try:
             cur = db_manager.get_cursor()
@@ -853,11 +840,10 @@ class PageSuiviPresence(ctk.CTkFrame):
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _parse(self, value):
-        try:
-            return datetime.strptime(value, "%Y-%m-%d").date()
-        except Exception:
-            messagebox.showwarning("Date invalide", "Format attendu : YYYY-MM-DD")
-            return None
+        d = parse_date(value)
+        if value and not d:
+            messagebox.showwarning("Date invalide", "Format attendu : jj/mm/aaaa")
+        return d
 
     def _safe(self, value):
         return str(value) if value and str(value).strip() else "-"

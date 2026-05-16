@@ -231,7 +231,8 @@ class DatePickerPopup(ctk.CTkToplevel):
 
     def _pick(self, d: date):
         self._selected = d
-        self._on_select(d.strftime("%Y-%m-%d"))
+        from date_picker_utils import format_date_fr
+        self._on_select(format_date_fr(d))
         self.destroy()
 
     def _on_focus_out(self, event=None):
@@ -244,7 +245,7 @@ class DatePickerPopup(ctk.CTkToplevel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DateEntry(ctk.CTkFrame):
-    def __init__(self, parent, width=115, placeholder="YYYY-MM-DD", **kwargs):
+    def __init__(self, parent, width=115, placeholder="jj/mm/aaaa", **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._popup = None
 
@@ -1377,11 +1378,8 @@ class PageInventaireJour(ctk.CTkFrame):
         self._footer_labels["annule"].configure(text=str(annule))
 
     def _parse_date(self, value: str):
-        if not value: return None
-        try:
-            return datetime.strptime(value, "%Y-%m-%d").date()
-        except Exception:
-            return None
+        from date_picker_utils import parse_date
+        return parse_date(value)
 
     def _calc_stock_article(self, idarticle, idunite_cible, idmag=None):
         if not idarticle or not idunite_cible:

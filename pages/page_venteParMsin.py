@@ -42,6 +42,7 @@ from reportlab.lib import colors
 # IMPORTS LOCAUX
 # ──────────────────────────────────────────────────────────────────────────────
 from app_theme import Colors, Fonts, styled, Theme
+from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_date
 from resource_utils import get_config_path, safe_file_read
 from impression_pdf_utils import build_impression_output_path
 from settings_utils import open_file_if_enabled
@@ -578,9 +579,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         # — Date —
         ctk.CTkLabel(card, text="Date Sortie", **lbl_kw).grid(
             row=0, column=1, padx=4, pady=(8, 0), sticky="w")
-        self.entry_date_vente = ctk.CTkEntry(card, **entry_kw, width=130)
+        self.entry_date_vente = styled.date_entry(card, width=11)
         self.entry_date_vente.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="ew")
-        self.entry_date_vente.insert(0, datetime.now().strftime("%d/%m/%Y"))
 
         # — Magasin —
         ctk.CTkLabel(card, text="Magasin de", **lbl_kw).grid(
@@ -2071,7 +2071,7 @@ class PageVenteParMsin(ctk.CTkFrame):
                 MessageDialog("Erreur", "Aucun utilisateur connecté.", 'error')
                 return
 
-            date_str    = self.entry_date_vente.get()
+            date_vente_d = get_date_from_widget(self.entry_date_vente)
             description = self.entry_designation.get().strip()
             client_nom  = self.entry_client.get().strip()
 
@@ -2123,14 +2123,11 @@ class PageVenteParMsin(ctk.CTkFrame):
                     MessageDialog("Erreur", f"Impossible d'ajouter le client : {e}", 'error')
                     return
 
-            # ── Parse de la date ───────────────────────────────────────────────
-            try:
-                now = datetime.now()
-                date_vente = datetime.strptime(date_str, "%d/%m/%Y").replace(
-                    hour=now.hour, minute=now.minute, second=now.second)
-            except ValueError:
-                MessageDialog("Erreur de Date", "Format attendu : JJ/MM/AAAA", 'error')
+            if not date_vente_d:
+                MessageDialog("Erreur de Date", "Veuillez sélectionner une date de vente.", 'error')
                 return
+            now = datetime.now()
+            date_vente = datetime.combine(date_vente_d, now.time().replace(microsecond=0))
 
             # ── Groupement par magasin ─────────────────────────────────────────
             details_par_mag: Dict[int, list] = {}
@@ -2294,8 +2291,7 @@ class PageVenteParMsin(ctk.CTkFrame):
     def nouveau_facture(self):
         """Réinitialise TOUT le formulaire pour une nouvelle facture vierge."""
         self.generer_reference()
-        self.entry_date_vente.delete(0, "end")
-        self.entry_date_vente.insert(0, datetime.now().strftime("%d/%m/%Y"))
+        set_date_on_widget(self.entry_date_vente, datetime.now().date())
         self.entry_designation.delete(0, "end")
         self.entry_client.delete(0, "end")
         self.detail_vente = []
@@ -3219,8 +3215,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             self.entry_ref_vente.configure(state="normal")
             self.entry_ref_vente.delete(0, "end"); self.entry_ref_vente.insert(0, ref)
             self.entry_ref_vente.configure(state="readonly")
-            self.entry_date_vente.delete(0, "end")
-            self.entry_date_vente.insert(0, date_r.strftime("%d/%m/%Y"))
+            set_date_on_widget(self.entry_date_vente, date_r)
             self.entry_designation.delete(0, "end")
             self.entry_designation.insert(0, desc or "")
             self.entry_client.delete(0, "end")
