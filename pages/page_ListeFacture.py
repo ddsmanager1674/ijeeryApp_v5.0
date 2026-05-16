@@ -425,7 +425,8 @@ class PageDetailFacture(ctk.CTkToplevel):
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
-            conn = psycopg2.connect(**config['database'])
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cursor = conn.cursor()
 
             if self.mode_avoir:
@@ -503,7 +504,8 @@ class PageDetailFacture(ctk.CTkToplevel):
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
-            conn = psycopg2.connect(**config['database'])
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cursor = conn.cursor()
 
             sql = """
@@ -621,7 +623,8 @@ class PageDetailFacture(ctk.CTkToplevel):
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
-            conn = psycopg2.connect(**config['database'])
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cursor = conn.cursor()
 
             societe_info = _load_societe_info(cursor)
@@ -690,9 +693,8 @@ class PageDetailFacture(ctk.CTkToplevel):
                 parent=self, title="Confirmation",
                 message=f"Voulez-vous annuler la facture {self.refvente} ?"):
             try:
-                with open(get_config_path('config.json')) as f:
-                    config = json.load(f)
-                conn = psycopg2.connect(**config['database'])
+                from pages.db_helper import connect_page_db
+                conn = connect_page_db()
                 cursor = conn.cursor()
                 cursor.execute(
                     "UPDATE tb_vente SET statut = %s WHERE refvente = %s",
@@ -974,7 +976,8 @@ class PageListeFacture(ctk.CTkFrame):
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
-            return psycopg2.connect(**config['database'])
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception:
             return None
 

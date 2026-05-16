@@ -38,14 +38,8 @@ class PageParametres(ctk.CTkFrame):
                 config = json.load(f)
             db_config = config["database"]
 
-            return psycopg2.connect(
-                host=db_config["host"],
-                user=db_config["user"],
-                password=db_config["password"],
-                database=db_config["database"],
-                port=db_config["port"],
-                connect_timeout=5,
-            )
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as err:
             messagebox.showerror("Erreur de connexion", f"Connexion PostgreSQL impossible : {err}")
             return None

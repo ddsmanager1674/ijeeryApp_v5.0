@@ -103,30 +103,28 @@ class PageAVQ(ctk.CTkFrame):
         s.map("P.Treeview.Heading", background=[("active", Colors.MIDNIGHT_LIGHT)])
 
     def connect_db(self):
-        """Établit la connexion à la base de données à partir du fichier config.json"""
-        try:
-            config_path = get_config_path('config.json')
-            if not os.path.exists(config_path):
-                config_path = 'config.json'
-                
-            if not os.path.exists(config_path):
-                messagebox.showerror("Erreur", "Fichier config.json manquant.")
-                return None
-                 
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                db_config = config['database']
 
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port'],
-                client_encoding='UTF8'
+
+        try:
+
+
+            from pages.db_helper import connect_page_db
+
+
+            shared = (
+
+
+                getattr(self, '_db_conn_shared', None)
+
+
+                or getattr(self, '_db_conn_initial', None)
+
+
             )
-            print("Connection to the database successful!")
-            return conn
+
+
+            return connect_page_db(shared)
+
         except Exception as err:
             messagebox.showerror("Erreur de connexion", f"Détails : {err}")
             return None

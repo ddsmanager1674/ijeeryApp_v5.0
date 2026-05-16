@@ -50,8 +50,7 @@ from pages.page_avoir import PageAvoir
 from pages.page_proforma import PageCommandeCli
 from log_utils import AppLogger
 from db import load_db_config
-from stock_service import get_snapshot
-from stock_snapshot import StockSnapshot
+from stock_service import get_snapshot_cached, stock_unite
 from pages.ui_dialogs import (
     PasswordDialog,
     ErrorDialog,
@@ -757,18 +756,9 @@ class PageVenteParMsin(ctk.CTkFrame):
             if not idmag:
                 return 0.0
 
-            cache = getattr(self, "_stock_snapshot_cache", None)
-            if cache is None:
-                cache = {}
-                setattr(self, "_stock_snapshot_cache", cache)
-
             idmag_int = int(idmag)
-            snap = cache.get(idmag_int)
-            if snap is None:
-                snap = get_snapshot(idmag_int, conn=self._get_conn())
-                cache[idmag_int] = snap
-
-            return float(snap.stock_unite(int(idarticle), int(idunite_cible)))
+            snap = get_snapshot_cached(idmag_int, conn=self._get_conn())
+            return float(stock_unite(snap, int(idarticle), int(idunite_cible)))
         except Exception as e:
             print(f"Erreur calcul stock (StockManager): {e}")
             return 0.0

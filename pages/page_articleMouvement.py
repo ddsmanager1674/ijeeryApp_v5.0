@@ -88,9 +88,8 @@ class FenetreRechercheArticle(ctk.CTkToplevel):
 
     def _connect(self):
         try:
-            with open(get_config_path('config.json')) as f:
-                cfg = json.load(f)['database']
-            return psycopg2.connect(**cfg)
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
             messagebox.showerror("Connexion", str(e))
             return None
@@ -281,9 +280,8 @@ class PageArticleMouvement(ctk.CTkFrame):
 
     def _connect(self):
         try:
-            with open(get_config_path('config.json')) as f:
-                cfg = json.load(f)['database']
-            return psycopg2.connect(**cfg)
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
             messagebox.showerror("Connexion", str(e))
             return None

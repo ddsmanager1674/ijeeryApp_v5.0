@@ -28,7 +28,7 @@ from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
 from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_datetime
 from db import ensure_connection, get_connection
-from stock_service import get_snapshot
+from stock_service import get_snapshot_cached, invalidate_snapshot
 from stock_snapshot import format_nombre_auto
 from pages.ui_dialogs import MessageDialog, YesNoDialog
 
@@ -594,7 +594,7 @@ class PageTransfert(ctk.CTkFrame):
                     return
 
                 conn = self.get_connection()
-                snapshot = get_snapshot(int(idmag_actif), conn=conn)
+                snapshot = get_snapshot_cached(int(idmag_actif), conn=conn)
 
                 cur.execute(
                     """
@@ -965,6 +965,8 @@ class PageTransfert(ctk.CTkFrame):
                     )
 
                 conn.commit()
+                invalidate_snapshot(int(self.magasins_data[mag_sortie]))
+                invalidate_snapshot(int(self.magasins_data[mag_entree]))
                 cur.close()
                 conn.close()
 
@@ -1002,6 +1004,8 @@ class PageTransfert(ctk.CTkFrame):
                 )
 
             conn.commit()
+            invalidate_snapshot(int(self.magasins_data[mag_sortie]))
+            invalidate_snapshot(int(self.magasins_data[mag_entree]))
             cur.close()
             conn.close()
 
@@ -1359,7 +1363,15 @@ class PageTransfert(ctk.CTkFrame):
                     "UPDATE tb_transfert SET deleted=1 WHERE idtransfert=%s",
                     (id_transfert,),
                 )
+                cur.execute(
+                    "SELECT idmagsortie, idmagentree FROM tb_transfert WHERE idtransfert=%s",
+                    (id_transfert,),
+                )
+                _mags = cur.fetchone()
                 conn.commit()
+                if _mags:
+                    invalidate_snapshot(int(_mags[0]))
+                    invalidate_snapshot(int(_mags[1]))
                 cur.close()
                 conn.close()
                 MessageDialog("Supprimé", f"Transfert « {ref_transfert} » supprimé.", type_='info')

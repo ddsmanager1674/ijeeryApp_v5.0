@@ -26,7 +26,7 @@ from date_picker_utils import get_date_from_widget, set_date_on_widget
 from log_utils import AppLogger
 
 from db import ensure_connection, get_connection
-from stock_service import get_snapshot
+from stock_service import get_snapshot_cached, invalidate_snapshot, stock_unite
 from stock_snapshot import format_nombre_auto
 
 
@@ -594,7 +594,7 @@ class PageEntree(ctk.CTkFrame):
                 tree.heading("Stock", text=f"Magasin {designationmag}" if designationmag else "Magasin")
                 if idmag_actif is None:
                     return
-                snapshot = get_snapshot(int(idmag_actif), conn=self.conn)
+                snapshot = get_snapshot_cached(int(idmag_actif), conn=self.conn)
                 cur.execute(QUERY_ARTICLES, (filtre_like, filtre_like))
                 for idx, row in enumerate(cur.fetchall()):
                     stock_total = snapshot.stock_unite(row[0], row[1])
@@ -1081,6 +1081,8 @@ class PageEntree(ctk.CTkFrame):
                 )
 
             conn.commit()
+            for _m in {int(d['idmag']) for d in self.detail_entree}:
+                invalidate_snapshot(_m)
 
             try:
                 self._logger.log(

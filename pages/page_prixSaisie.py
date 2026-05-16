@@ -99,10 +99,8 @@ class PagePrixSaisie(ctk.CTkFrame):
         try:
             with open(get_config_path('config.json')) as f:
                 cfg = json.load(f)['database']
-            return psycopg2.connect(
-                host=cfg['host'], user=cfg['user'],
-                password=cfg['password'], database=cfg['database'],
-                port=cfg['port'])
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except FileNotFoundError:
             messagebox.showerror("Configuration",
                                  "Fichier 'config.json' introuvable.")

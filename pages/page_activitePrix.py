@@ -53,14 +53,8 @@ class DatabaseManager:
             return False
 
         try:
-            self.conn = psycopg2.connect(
-                host=self.db_params['host'],
-                user=self.db_params['user'],
-                password=self.db_params['password'],
-                database=self.db_params['database'],
-                port=self.db_params['port'],
-                client_encoding='UTF8'
-            )
+            from pages.db_helper import connect_page_db
+            self.conn = connect_page_db()
             self.cursor = self.conn.cursor()
             print("Connection to the database successful!")
             return True
@@ -147,7 +141,8 @@ class PageActivitePrix(ctk.CTkFrame):
         """Récupère les données d'activités, de séries et l'ID de la dernière année scolaire."""
         conn = None
         try:
-            conn = psycopg2.connect(**self.db_params)
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cur = conn.cursor()
 
             cur.execute("SELECT id, designationactivite FROM tb_activite ORDER BY designationactivite")
@@ -401,7 +396,8 @@ class PageActivitePrix(ctk.CTkFrame):
 
         conn = None
         try:
-            conn = psycopg2.connect(**self.db_params)
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cur = conn.cursor()
 
             sql = """
@@ -435,7 +431,8 @@ class PageActivitePrix(ctk.CTkFrame):
 
         conn = None
         try:
-            conn = psycopg2.connect(**self.db_params)
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cur = conn.cursor()
 
             # Étape 1 : Trouver le dernier idanneescolaire
@@ -536,7 +533,8 @@ class PageActivitePrix(ctk.CTkFrame):
 
         conn = None
         try:
-            conn = psycopg2.connect(**self.db_params)
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cur = conn.cursor()
 
             cur.execute("""
@@ -605,7 +603,8 @@ class PageActivitePrix(ctk.CTkFrame):
             id_serie = self.series_data.get(selected_serie)
             id_annee = self.latest_annee_scolaire_id
             if id_activite and id_serie and id_annee:
-                conn = psycopg2.connect(**self.db_params)
+                from pages.db_helper import connect_page_db
+                conn = connect_page_db()
                 cur = conn.cursor()
                 cur.execute("""
                     SELECT montant FROM tb_activiteprix
@@ -728,7 +727,8 @@ class PageActivitePrix(ctk.CTkFrame):
         """Recharge la liste des activités dans la combobox après ajout."""
         conn = None
         try:
-            conn = psycopg2.connect(**self.db_params)
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             cur = conn.cursor()
             cur.execute("SELECT id, designationactivite FROM tb_activite ORDER BY designationactivite")
             self.activites_data = {designation: activite_id for activite_id, designation in cur.fetchall()}

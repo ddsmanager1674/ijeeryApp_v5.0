@@ -42,14 +42,8 @@ class DatabaseManager:
         """Establishes a new database connection."""
         if self.db_params is None: return False
         try:
-            self.conn = psycopg2.connect(
-                host=self.db_params['host'],
-                user=self.db_params['user'],
-                password=self.db_params['password'],
-                database=self.db_params['database'],
-                port=self.db_params['port'],
-                client_encoding='UTF8'
-            )
+            from pages.db_helper import connect_page_db
+            self.conn = connect_page_db()
             self.cursor = self.conn.cursor()
             return True
         except Exception as e:

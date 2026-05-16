@@ -259,14 +259,8 @@ class PageAutorisation(ctk.CTkFrame):
         with open(config_path, "r", encoding="utf-8") as f:
             db = json.load(f)["database"]
 
-        return psycopg2.connect(
-            host=db["host"],
-            user=db["user"],
-            password=db["password"],
-            database=db["database"],
-            port=db["port"],
-            connect_timeout=5,
-        )
+        from pages.db_helper import connect_page_db
+        return connect_page_db()
 
     def _required_menu_names(self):
         names = []

@@ -29,15 +29,21 @@ class PageInfosCharges(ctk.CTkFrame):
     # DB
     # ─────────────────────────────────────────────────────────────────────────
     def connect_db(self):
+
         try:
-            with open(get_config_path("config.json")) as f:
-                config = json.load(f)
-                db_config = config["database"]
-            return psycopg2.connect(
-                host=db_config["host"], user=db_config["user"],
-                password=db_config["password"], database=db_config["database"],
-                port=db_config["port"]
+
+            from pages.db_helper import connect_page_db
+
+            shared = (
+
+                getattr(self, '_db_conn_shared', None)
+
+                or getattr(self, '_db_conn_initial', None)
+
             )
+
+            return connect_page_db(shared)
+
         except FileNotFoundError:
             messagebox.showerror("Erreur", "Fichier 'config.json' non trouvé.")
         except KeyError:

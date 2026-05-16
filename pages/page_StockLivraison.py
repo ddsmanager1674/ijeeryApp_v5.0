@@ -25,18 +25,12 @@ class PageStockLivraison(ctk.CTkFrame):
         self.charger_donnees()
     
     def connect_db(self):
-        """Connexion qui remonte d'un niveau pour trouver config.json à la racine"""
+        """Connexion via db_helper (config centralisée)."""
         try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            root_dir = os.path.dirname(current_dir)
-            config_path = os.path.join(root_dir, 'config.json')
- 
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                db_config = config['database']
-            return psycopg2.connect(**db_config)
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
-            messagebox.showerror("Erreur de chemin", f"Impossible de trouver config.json à la racine.\nErreur: {e}")
+            messagebox.showerror("Erreur de connexion", f"Impossible de se connecter à la base.\nErreur: {e}")
             return None
     
     def formater_nombre(self, nombre):
@@ -330,102 +324,12 @@ class PageStockLivraison(ctk.CTkFrame):
             conn.close()
 
     def _calculer_stock_sql(self, cursor, idarticle, idunite, idmag):
-        """
-        Calcule le stock théorique via une seule requête SQL agrégée
-        (toutes les unités converties en unité de base, puis reconverties).
-        """
+        """Stock théorique aligné sur StockManager (snapshot centralisé)."""
         try:
-            # Récupérer les unités et facteurs de conversion
-            cursor.execute("""
-                SELECT idunite, COALESCE(qtunite, 1)
-                FROM tb_unite
-                WHERE idarticle = %s
-                ORDER BY idunite ASC
-            """, (idarticle,))
-            unites = cursor.fetchall()
-            if not unites:
-                return 0.0
-
-            idunite_base = unites[0][0]
-            facteurs = {}
-            facteur_cumul = 1.0
-            for i, (idu, qtu) in enumerate(unites):
-                if i == 0:
-                    facteurs[idu] = 1.0
-                else:
-                    facteur_cumul *= float(qtu)
-                    facteurs[idu] = facteur_cumul
-
-            # Calcul groupé pour toutes les unités en une seule requête par table
-            ids_unites = list(facteurs.keys())
-            placeholders = ",".join(["%s"] * len(ids_unites))
-            params = [idarticle, idmag] + ids_unites
-
-            cursor.execute(f"""
-                SELECT idunite, COALESCE(SUM(qtlivrefrs), 0)
-                FROM tb_livraisonfrs
-                WHERE idarticle = %s AND idmag = %s AND idunite IN ({placeholders})
-                GROUP BY idunite
-            """, params)
-            livraisons = {r[0]: float(r[1]) for r in cursor.fetchall()}
-
-            cursor.execute(f"""
-                SELECT idunite, COALESCE(SUM(qtvente), 0)
-                FROM tb_ventedetail
-                WHERE idarticle = %s AND idmag = %s AND idunite IN ({placeholders})
-                GROUP BY idunite
-            """, params)
-            ventes = {r[0]: float(r[1]) for r in cursor.fetchall()}
-
-            cursor.execute(f"""
-                SELECT idunite, COALESCE(SUM(qtsortie), 0)
-                FROM tb_sortiedetail
-                WHERE idarticle = %s AND idmag = %s AND idunite IN ({placeholders})
-                GROUP BY idunite
-            """, params)
-            sorties = {r[0]: float(r[1]) for r in cursor.fetchall()}
-
-            cursor.execute(f"""
-                SELECT td.idunite, COALESCE(SUM(td.qttransfertsortie), 0)
-                FROM tb_transfertdetail td
-                INNER JOIN tb_transfert t ON td.idtransfert = t.idtransfert
-                WHERE td.idarticle = %s AND t.idmagsortie = %s AND td.idunite IN ({placeholders})
-                GROUP BY td.idunite
-            """, params)
-            trf_sortie = {r[0]: float(r[1]) for r in cursor.fetchall()}
-
-            cursor.execute(f"""
-                SELECT td.idunite, COALESCE(SUM(td.qttransfertentree), 0)
-                FROM tb_transfertdetail td
-                INNER JOIN tb_transfert t ON td.idtransfert = t.idtransfert
-                WHERE td.idarticle = %s AND t.idmagentree = %s AND td.idunite IN ({placeholders})
-                GROUP BY td.idunite
-            """, params)
-            trf_entree = {r[0]: float(r[1]) for r in cursor.fetchall()}
-
-            cursor.execute(f"""
-                SELECT idunite, COALESCE(SUM(qtavoir), 0)
-                FROM tb_avoirdetail
-                WHERE idarticle = %s AND idmag = %s AND idunite IN ({placeholders})
-                GROUP BY idunite
-            """, params)
-            avoirs = {r[0]: float(r[1]) for r in cursor.fetchall()}
-
-            # Agréger en unité de base
-            stock_base = 0.0
-            for idu, facteur in facteurs.items():
-                mouvement = (
-                    livraisons.get(idu, 0) + avoirs.get(idu, 0) + trf_entree.get(idu, 0)
-                    - ventes.get(idu, 0) - sorties.get(idu, 0) - trf_sortie.get(idu, 0)
-                )
-                stock_base += mouvement * facteur
-
-            # Convertir vers l'unité cible
-            facteur_cible = facteurs.get(idunite, 1.0)
-            if facteur_cible == 0:
-                return 0.0
-            return stock_base / facteur_cible
-
+            from stock_service import get_snapshot_cached, stock_unite
+            conn = getattr(cursor, "connection", None)
+            snap = get_snapshot_cached(int(idmag), conn=conn)
+            return float(stock_unite(snap, int(idarticle), int(idunite)))
         except Exception as e:
             print(f"Erreur calcul stock: {e}")
             return 0.0

@@ -579,13 +579,28 @@ class PagePeronnelAjout(ctk.CTkFrame):
     # ── DB ────────────────────────────────────────────────────────────────────
 
     def connect_db(self):
+
+
         try:
-            with open(get_config_path('config.json')) as f:
-                db = json.load(f)['database']
-            return psycopg2.connect(
-                host=db['host'], user=db['user'], password=db['password'],
-                database=db['database'], port=db['port']
+
+
+            from pages.db_helper import connect_page_db
+
+
+            shared = (
+
+
+                getattr(self, '_db_conn_shared', None)
+
+
+                or getattr(self, '_db_conn_initial', None)
+
+
             )
+
+
+            return connect_page_db(shared)
+
         except Exception as e:
             messagebox.showerror("Connexion", str(e))
             return None

@@ -14,7 +14,7 @@ from date_picker_utils import set_date_on_widget
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
 from db import ensure_connection, get_connection
-from stock_service import get_snapshot
+from stock_service import get_snapshot_cached, stock_unite
 from stock_snapshot import format_nombre_auto
 from pages.ui_dialogs import PasswordDialog
 
@@ -864,21 +864,13 @@ class PageChangementArticle(ctk.CTkFrame):
                     label_count.configure(text="0 article(s)")
                     return
 
-                cache = getattr(self, "_stock_snapshot_cache", None)
-                if cache is None:
-                    cache = {}
-                    setattr(self, "_stock_snapshot_cache", cache)
-
                 idmag_int = int(idmag_actif)
-                snapshot = cache.get(idmag_int)
-                if snapshot is None:
-                    snapshot = get_snapshot(idmag_int, conn=self.connect_db())
-                    cache[idmag_int] = snapshot
+                snapshot = get_snapshot_cached(idmag_int, conn=self.connect_db())
 
                 cur.execute(QUERY_ARTICLES, (filtre_like, filtre_like))
                 rows = cur.fetchall()
                 for idx, row in enumerate(rows):
-                    stock_total = snapshot.stock_unite(row[0], row[1])
+                    stock_total = stock_unite(snapshot, row[0], row[1])
                     tree.insert('', 'end', values=(
                         row[0], row[1],
                         row[2] or "", row[3] or "", row[4] or "",

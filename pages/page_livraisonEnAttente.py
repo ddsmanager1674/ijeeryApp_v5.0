@@ -45,7 +45,8 @@ class PageLivraisonEnAttente(ctk.CTkFrame):
             with open(config_path, 'r') as f:
                 config = json.load(f)
                 db_config = config['database']
-            return psycopg2.connect(**db_config)
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
             messagebox.showerror(
                 "Erreur de chemin",

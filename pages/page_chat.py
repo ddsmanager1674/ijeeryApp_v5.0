@@ -1504,7 +1504,8 @@ class PageChat(ctk.CTkFrame):
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
-            return psycopg2.connect(**config['database'])
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
             print(f"[PageChat] Erreur connect_db: {e}")
             return None

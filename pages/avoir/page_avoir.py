@@ -37,8 +37,7 @@ from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_da
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
 from db import ensure_connection, get_connection  # noqa: F401 — connect_db
-from stock_service import get_snapshot
-from stock_snapshot import StockSnapshot
+from stock_service import get_snapshot_cached, invalidate_snapshot, stock_unite
 from pages.ui_dialogs import MessageDialog, YesNoDialog, SimpleDialogWithChoice
 
 # ── Imports ReportLab (impression PDF) ───────────────────────────────────────
@@ -199,8 +198,6 @@ class PageAvoir(ctk.CTkFrame):
 
         # ── Paramètres d'impression (settings.json) ───────────────────────────
         self.settings = self._load_settings()
-        self._stock_snapshot_cache: dict[int, StockSnapshot] = {}
-
         # ── Layout principal : 6 rows ─────────────────────────────────────────
         self.grid_columnconfigure(0, weight=1)
         for row, w in enumerate([0, 0, 0, 1, 0, 0]):
@@ -799,12 +796,8 @@ class PageAvoir(ctk.CTkFrame):
             if idmag_int == 0:
                 return 0.0
 
-            snap = self._stock_snapshot_cache.get(idmag_int)
-            if snap is None:
-                snap = get_snapshot(idmag_int, conn=self.conn)
-                self._stock_snapshot_cache[idmag_int] = snap
-
-            return float(snap.stock_unite(int(idarticle), int(idunite_cible)))
+            snap = get_snapshot_cached(idmag_int, conn=self.conn)
+            return float(stock_unite(snap, int(idarticle), int(idunite_cible)))
         except Exception:
             return 0.0
 
@@ -2115,6 +2108,8 @@ class PageAvoir(ctk.CTkFrame):
             )
 
             conn.commit()
+            for _m in {int(d['idmag']) for d in details_a_enregistrer}:
+                invalidate_snapshot(_m)
 
             # Confirmation + impression selon settings
             show_confirmation = self.settings.get('Avoir_ImpressionConfirmation', 1)

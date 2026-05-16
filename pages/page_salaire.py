@@ -53,13 +53,8 @@ class DatabaseManager:
             return False
 
         try:
-            self.conn = psycopg2.connect(
-                host=self.db_params['host'],
-                user=self.db_params['user'],
-                password=self.db_params['password'],
-                database=self.db_params['database'],
-                port=self.db_params['port']
-            )
+            from pages.db_helper import connect_page_db
+            self.conn = connect_page_db()
             self.cursor = self.conn.cursor()
             print("Connection to the database successful!")
             return True
@@ -226,20 +221,28 @@ class Salaire(ctk.CTkFrame):  # ou autre base selon votre structure
     # car Treeview gère ses propres en-têtes. Vous pouvez la supprimer.
 
     def connect_db(self):
-        try:
-            # Lecture robuste du fichier config avec chemin absolu
-            config_path = get_config_path('config.json')
-            config_content, encoding = safe_file_read(config_path)
-            config = json.loads(config_content)
-            db_config = config['database']
 
-            return psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']
+
+        try:
+
+
+            from pages.db_helper import connect_page_db
+
+
+            shared = (
+
+
+                getattr(self, '_db_conn_shared', None)
+
+
+                or getattr(self, '_db_conn_initial', None)
+
+
             )
+
+
+            return connect_page_db(shared)
+
         except psycopg2.Error as e:
             messagebox.showerror("Erreur de connexion", f"Impossible de se connecter à la base de données: {e}")
             exit()

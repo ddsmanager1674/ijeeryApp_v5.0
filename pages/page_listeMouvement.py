@@ -544,12 +544,10 @@ class PageListeMouvement(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def connect_db(self):
-        """Ouvre une connexion PostgreSQL depuis config.json."""
+        """Ouvre une connexion PostgreSQL via db_helper."""
         try:
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
-            return psycopg2.connect(**db_config)
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
             messagebox.showerror("Erreur de connexion",
                                  f"Impossible de se connecter à la BDD: {e}")

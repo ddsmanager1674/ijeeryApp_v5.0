@@ -605,7 +605,8 @@ class PagePmtFacture(ctk.CTkToplevel):
         try:
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
-            return psycopg2.connect(**config['database'])
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur de connexion : {e}")
             return None
@@ -1204,6 +1205,9 @@ class PagePmtFacture(ctk.CTkToplevel):
                     print(f"     📋 Log enregistré: ancien={ancien_stock}, nouveau={nouveau_stock}")
 
                 conn.commit()
+                from stock_service import invalidate_snapshot
+                for _m in {int(det[2]) for det in articles if det[2]}:
+                    invalidate_snapshot(_m)
                 print(f"\n{'='*70}")
                 print(f"✅ VALIDATION RÉUSSIE - Tous les changements sont validés")
                 print(f"{'='*70}\n")

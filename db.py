@@ -96,6 +96,25 @@ def get_connection():
     return _manager().get_connection()
 
 
+def get_postgres_admin_connection():
+    """Connexion à la base postgres (opérations admin : sauvegarde, DROP/CREATE DB)."""
+    cfg = load_db_config()
+    if not cfg:
+        return None
+    try:
+        return psycopg2.connect(
+            host=cfg["host"],
+            user=cfg["user"],
+            password=cfg["password"],
+            port=cfg["port"],
+            dbname="postgres",
+            connect_timeout=10,
+        )
+    except psycopg2.OperationalError as e:
+        print(f"[DB] {e}")
+        return None
+
+
 def ensure_connection(conn=None):
     """Ping/reconnect sur conn existante ou nouvelle connexion."""
     return _manager().ensure_connection(conn)

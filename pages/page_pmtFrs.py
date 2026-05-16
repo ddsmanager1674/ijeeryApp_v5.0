@@ -73,7 +73,8 @@ class PagePmtFrs(ctk.CTkToplevel):
             with open(get_config_path('config.json')) as f:
                 config = json.load(f)
                 db_config = config['database']
-            conn = psycopg2.connect(**db_config)
+            from pages.db_helper import connect_page_db
+            conn = connect_page_db()
             return conn
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur de connexion : {e}")

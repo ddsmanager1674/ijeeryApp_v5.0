@@ -47,7 +47,8 @@ class DatabaseManager:
         if not self.db_params:
             return False
         try:
-            self.conn = psycopg2.connect(**self.db_params)
+            from pages.db_helper import connect_page_db
+            self.conn = connect_page_db()
             self.cursor = self.conn.cursor()
             return True
         except Exception as e:

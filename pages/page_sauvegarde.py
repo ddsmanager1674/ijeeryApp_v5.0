@@ -38,14 +38,8 @@ class DatabaseManager:
         if self.db_params is None:
             return False
         try:
-            self.conn = psycopg2.connect(
-                host=self.db_params["host"],
-                user=self.db_params["user"],
-                password=self.db_params["password"],
-                database=self.db_params["database"],
-                port=self.db_params["port"],
-                client_encoding="UTF8",
-            )
+            from pages.db_helper import connect_page_db
+            self.conn = connect_page_db()
             self.cursor = self.conn.cursor()
             return True
         except Exception as e:
@@ -508,13 +502,10 @@ class PageSauvegarde(ctk.CTkFrame):
     def terminate_all_db_connections(self, dbname_to_terminate):
         conn_sys = None
         try:
-            conn_sys = psycopg2.connect(
-                dbname="postgres",
-                user=self.DB_USER,
-                password=self.DB_PASSWORD,
-                host=self.DB_HOST,
-                port=self.DB_PORT,
-            )
+            from db import get_postgres_admin_connection
+            conn_sys = get_postgres_admin_connection()
+            if not conn_sys:
+                return False
             conn_sys.autocommit = True
             cursor_sys = conn_sys.cursor()
             query = f"""
@@ -553,13 +544,10 @@ class PageSauvegarde(ctk.CTkFrame):
 
             conn_sys = None
             try:
-                conn_sys = psycopg2.connect(
-                    dbname="postgres",
-                    user=self.DB_USER,
-                    password=self.DB_PASSWORD,
-                    host=self.DB_HOST,
-                    port=self.DB_PORT,
-                )
+                from db import get_postgres_admin_connection
+                conn_sys = get_postgres_admin_connection()
+                if not conn_sys:
+                    return
                 conn_sys.autocommit = True
                 cursor_sys = conn_sys.cursor()
                 cursor_sys.execute(f"DROP DATABASE IF EXISTS {self.DB_NAME};")

@@ -80,15 +80,8 @@ class DatabaseManager:
         if not self.db_params:
             return None
         try:
-            conn = psycopg2.connect(
-                host=self.db_params['host'],
-                user=self.db_params['user'],
-                password=self.db_params['password'],
-                database=self.db_params['database'],
-                port=self.db_params['port'],
-                client_encoding='UTF8'
-            )
-            return conn
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except psycopg2.OperationalError as e:
             print(f"Erreur connexion: {e}")
             return None
