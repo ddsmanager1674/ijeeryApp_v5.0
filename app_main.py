@@ -84,6 +84,14 @@ def _F(size=11, weight="normal"):
 
 
 from db import DatabaseManager
+from resource_utils import init_app_data_files
+
+init_app_data_files()
+try:
+    from app_runtime_log import init_runtime_log, log_info, log_exception
+    init_runtime_log()
+except Exception:
+    log_info = log_exception = None  # type: ignore
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DÉFINITION DES MENUS (séparation données / UI)
@@ -915,7 +923,10 @@ class App(ctk.CTk):
             self.destroy()
             return
 
-        print("[DB] Connexion établie.")
+        try:
+            log_info("[DB] Connexion établie.")
+        except Exception:
+            pass
         self.nom_societe = self._fetch_societe_name()
 
         # ── Layout racine ────────────────────────────────────────────────────
@@ -1039,7 +1050,12 @@ class App(ctk.CTk):
         try:
             instance = self._instantiate(cls, kwargs_key)
         except Exception as e:
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
+            try:
+                log_exception(e, context=f"navigate {module_path}.{class_name}")
+            except Exception:
+                pass
             self._show_not_authorized(f"Erreur d'affichage :\n{e}")
             return
 

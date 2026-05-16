@@ -98,7 +98,17 @@ else:
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── Remember Me ─────────────────────────────────────────────────────────────────
-_REMEMBER_PATH = get_resource_path("remember.json")
+from resource_utils import ensure_app_data_file, get_app_data_path, init_app_data_files
+
+init_app_data_files()
+try:
+    from app_runtime_log import init_runtime_log
+    init_runtime_log()
+except Exception:
+    pass
+
+_REMEMBER_PATH = get_app_data_path("remember.json")
+ensure_app_data_file("remember.json")
 
 
 def _encode_password(plain: str) -> str:

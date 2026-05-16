@@ -922,12 +922,14 @@ class PageBonReception(ctk.CTkFrame):
 
     def open_file(self, filename):
         try:
-            if os.name == 'nt':
-                os.startfile(filename)
-            else:
-                import subprocess, sys
-                subprocess.call(['open' if sys.platform == 'darwin' else 'xdg-open', filename])
-        except:
+            from settings_utils import open_file_if_enabled
+            open_file_if_enabled(
+                filename,
+                operation="open",
+                setting_key="LivraisonFrs_OpenA5",
+                setting_default=1,
+            )
+        except Exception:
             pass
 
 

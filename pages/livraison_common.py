@@ -906,6 +906,7 @@ def generer_pdf_bl(
             footer_supplement=(
                 "<i>CECI EST UN DUPLICATA DU BON DE LIVRAISON</i>" if duplicata else None
             ),
+            setting_key="Livraison_BL_OpenA5",
         )
     finally:
         try:

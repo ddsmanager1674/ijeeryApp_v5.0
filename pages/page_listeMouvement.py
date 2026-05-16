@@ -291,7 +291,8 @@ class PageListeMouvement(ctk.CTkFrame):
         lbl_conf.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
 
     def _ouvrir_parametres(self):
-        path = get_config_path("settings.json")
+        from resource_utils import get_settings_path
+        path = get_settings_path("settings.json")
         try:
             os.startfile(path)
         except Exception:

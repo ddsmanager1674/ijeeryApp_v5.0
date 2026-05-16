@@ -37,13 +37,9 @@ def _to_int(v: Any, default: int = 1) -> int:
 
 
 def application_writable_root() -> str:
-    """
-    Racine où l'on peut écrire les exports : dossier de l'exécutable (PyInstaller),
-    sinon répertoire du projet (dossier parent de ce fichier = racine app).
-    """
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    """Délègue à resource_utils (dossier exe / racine projet)."""
+    from resource_utils import application_writable_root as _root
+    return _root()
 
 
 def normalize_relative_subpath(raw: str) -> str:

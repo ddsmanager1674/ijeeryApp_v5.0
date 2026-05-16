@@ -246,11 +246,13 @@ class PagePmtFrs(ctk.CTkToplevel):
             
             c.save()
             
-            # Ouverture automatique
-            if os.name == 'nt': # Windows
-                os.startfile(pdf_path)
-            else: # Linux/Mac
-                subprocess.run(['xdg-open', pdf_path])
+            from settings_utils import open_file_if_enabled
+            open_file_if_enabled(
+                pdf_path,
+                operation="open",
+                setting_key="PmtFrs_OpenPdf",
+                setting_default=1,
+            )
                 
         except Exception as e:
             traceback.print_exc()

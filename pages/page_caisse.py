@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
+from settings_utils import open_file_if_enabled
 
 # Imports ReportLab pour le PDF
 from reportlab.lib import colors
@@ -850,7 +851,12 @@ class PageCaisse(ctk.CTkFrame):
                 f"Edité le : {datetime.now().strftime('%d/%m/%Y %H:%M')}",
                 styles['Italic']))
             doc.build(elements)
-            os.startfile(nom_fichier)
+            open_file_if_enabled(
+                nom_fichier,
+                operation="open",
+                setting_key="Caisse_Etat_OpenA5",
+                setting_default=1,
+            )
             try:
                 filtre_doc  = self.filtre_doc_actif  or "Tous"
                 filtre_mode = self.filtre_mode_actif or "Tous"

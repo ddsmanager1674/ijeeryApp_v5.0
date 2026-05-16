@@ -73,7 +73,7 @@ Remove-Item -Recurse -Force build, dist, "iJeery_V5.0.spec", __pycache__ -ErrorA
 
 Copier-coller la commande complète (en une seule ligne):
 
-.\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --add-data "settings.json;." --add-data "session.json;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py
+.\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py
 
 EXPLICATION DES PARAMÈTRES:
 
@@ -98,10 +98,12 @@ EXPLICATION DES PARAMÈTRES:
     ✅ "image;image"        → Logos, icônes, images
     ✅ "icons;icons"        → Icônes de l'application
     ✅ "pages;pages"        → Tous vos modules Python
-    ✅ "config.json;."      → Configuration DB
-    ✅ "config.ini;."       → Paramètres
-    ✅ "settings.json;."    → Préférences
-    ✅ "session.json;."     → Données de session
+    ✅ "config.json;."      → Modèle DB (copié une fois à côté de l'exe au 1er lancement)
+    ✅ "config.ini;."       → Modèle ini (idem)
+
+    ⚠️ NE PAS embarquer settings.json ni session.json dans --add-data :
+    ces fichiers sont créés/modifiés à côté de iJeery_V5.0.exe (dossier writable).
+    Évite le doublon source vs _internal. Journal : ijeery_app.log au même endroit.
 
 --hidden-import=MODULE
     Force l'inclusion des modules même s'ils ne sont pas détectés automatiquement
@@ -266,7 +268,7 @@ Si vous modifiez votre code et voulez regénérer l'exe:
    Remove-Item -Recurse -Force build, dist, "iJeery_V5.0.spec", __pycache__ -ErrorAction SilentlyContinue
 
 2. Régénérer (copier-coller la commande de l'Étape 3):
-   .\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --add-data "settings.json;." --add-data "session.json;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py
+   .\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py
 
 3. Copier les config:
    Copy-Item -Path "config.json", "config.ini", "settings.json" -Destination "dist\iJeery_V5.0\" -Force
@@ -306,7 +308,7 @@ NOTES IMPORTANTES
 
 ⚠️ COMMANDLINE PRATIQUE - Copier cette ligne complète:
 
-Remove-Item -Recurse -Force build, dist, "iJeery_V5.0.spec", __pycache__ -ErrorAction SilentlyContinue; .\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --add-data "settings.json;." --add-data "session.json;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py; Copy-Item -Path "config.json", "config.ini", "settings.json" -Destination "dist\iJeery_V5.0\" -Force
+Remove-Item -Recurse -Force build, dist, "iJeery_V5.0.spec", __pycache__ -ErrorAction SilentlyContinue; .\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py; Copy-Item -Path "config.json", "config.ini", "settings.json" -Destination "dist\iJeery_V5.0\" -Force
 
 Cette seule ligne fera:
 1. Nettoyer (build/dist/spec/__pycache__)

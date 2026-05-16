@@ -13,6 +13,7 @@ from impression_pdf_utils import (
     folder_to_relative_export_path,
     get_configured_export_directory_abs,
 )
+from pdf_print_settings_registry import merge_defaults_into_settings, settings_by_section
 from settings_utils import (
     GLOBAL_PRINT_KEY,
     load_settings,
@@ -24,7 +25,7 @@ class UserSettingsWindow(ctk.CTkToplevel):
     def __init__(self, master, connect_db_callable, username_hint: str = ""):
         super().__init__(master)
         self._connect_db = connect_db_callable
-        self._settings = load_settings()
+        self._settings = merge_defaults_into_settings(load_settings())
         for _k, _v in default_pdf_export_settings().items():
             self._settings.setdefault(_k, _v)
 
@@ -242,36 +243,6 @@ class UserSettingsWindow(ctk.CTkToplevel):
         scroll.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 0))
         scroll.grid_columnconfigure(0, weight=1)
 
-        # Clés existantes (granularité)
-        self._print_keys_a5 = [
-            ("Vente - Confirmation", "Vente_ImpressionConfirmation", 1),
-            ("Vente - Facture A5 (PDF)", "Vente_ImpressionA5", 1),
-            ("Avoir - Confirmation", "Avoir_ImpressionConfirmation", 1),
-            ("Avoir - A5 (PDF)", "Avoir_ImpressionA5", 1),
-            ("Stock - Bon d'Entrée A5 (PDF) - Ouverture auto", "Entree_OpenA5", 1),
-            ("Stock - Bon de Sortie A5 (PDF) - Ouverture auto", "Sortie_OpenA5", 1),
-            ("Stock - Consommation interne A5 (PDF) - Ouverture auto", "Consommation_OpenA5", 1),
-            ("Stock - Changement articles A5 (PDF) - Ouverture auto", "Changement_OpenA5", 1),
-            ("Crédit - Acceptation A5 (PDF) - Ouverture auto", "Credit_Acceptation_OpenA5", 1),
-            ("Crédit - État temporaire A5 (PDF) - Ouverture auto", "Credit_Temporaire_OpenA5", 0),
-            ("Client créance - Ouverture A5 (PDF)", "Client_Creance_OpenA5", 0),
-            ("Fournisseur Paiement dette - Ouverture A5 (PDF)", "Fournisseur_PmtDette_OpenA5", 0),
-            ("Fournisseur dette - Ouverture A5 (PDF) (validation)", "Fournisseur_Dette_OpenA5", 0),
-            ("Mouvements - Ouverture PDF A5", "Mouvements_ImpressionAutoOpen", 1),
-        ]
-        self._print_keys_ticket80 = [
-            ("Vente - Ticket 80mm (texte) - Ouverture auto", "Vente_ImpressionTicket", 0),
-            ("Personnel - Avance 15e - Ticket 80mm (PDF)", "Avance15e_ImpressionTicket80", 0),
-            ("Personnel - Avance spéciale - Ticket 80mm (PDF)", "AvanceSpecial_ImpressionTicket80", 0),
-            ("Avoir - Ticket 80mm", "Avoir_ImpressionTicket", 0),
-            ("Client à payer - Ticket 80mm", "ClientAPayer_ImpressionTicket", 1),
-            ("Facture - Paiement (Ticket 80mm PDF) - Ouverture auto", "Facture_Paiement_OpenTicket80Pdf", 1),
-            ("Client Paiement à crédit - Ouverture Ticket 80mm (PDF)", "Client_PmtCredit_OpenTicket80", 0),
-            ("Client Paiement crédit - Impression X80", "Client_PmtCredit_PrintX80", 0),
-            ("Client créance - Ouverture Ticket 80mm (PDF)", "Client_Creance_OpenTicketPdf", 0),
-            ("Fournisseur Paiement dette - Ouverture Ticket 80mm (PDF)", "Fournisseur_PmtDette_OpenTicket80", 0),
-            ("Fournisseur dette - Ouverture Ticket 80mm (PDF)", "Fournisseur_Dette_OpenTicketPdf", 0),
-        ]
         self._vars = {}
 
         def _section(title: str, row_idx: int) -> int:
@@ -286,12 +257,12 @@ class UserSettingsWindow(ctk.CTkToplevel):
 
         row = 0
         row = _section("Impressions A5 (PDF)", row)
-        for label, key, default in self._print_keys_a5:
-            v = ctk.BooleanVar(value=bool(self._settings.get(key, default)))
-            self._vars[key] = v
+        for item in settings_by_section("a5"):
+            v = ctk.BooleanVar(value=bool(self._settings.get(item.key, item.default)))
+            self._vars[item.key] = v
             ctk.CTkSwitch(
                 scroll,
-                text=label,
+                text=item.label,
                 variable=v,
                 onvalue=True,
                 offvalue=False,
@@ -301,12 +272,12 @@ class UserSettingsWindow(ctk.CTkToplevel):
             row += 1
 
         row = _section("Tickets 80mm (PDF/Texte)", row)
-        for label, key, default in self._print_keys_ticket80:
-            v = ctk.BooleanVar(value=bool(self._settings.get(key, default)))
-            self._vars[key] = v
+        for item in settings_by_section("ticket80"):
+            v = ctk.BooleanVar(value=bool(self._settings.get(item.key, item.default)))
+            self._vars[item.key] = v
             ctk.CTkSwitch(
                 scroll,
-                text=label,
+                text=item.label,
                 variable=v,
                 onvalue=True,
                 offvalue=False,

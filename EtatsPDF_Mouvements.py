@@ -150,7 +150,8 @@ class EtatPDFMouvements:
     def _build_pdf_a5(self, output_path, titre_entete, reference, date_operation, 
                       magasin, operateur, table_data, description, 
                       responsable_1="Responsable 1", responsable_2="Responsable 2",
-                      duplicata=False, footer_supplement=None):
+                      duplicata=False, footer_supplement=None,
+                      setting_key="Mouvements_ImpressionAutoOpen"):
         """
         Construit et génère un PDF au format A5 Landscape selon le modèle redesigné.
         
@@ -512,13 +513,21 @@ class EtatPDFMouvements:
             
             # Ouverture automatique (selon settings)
             try:
-                settings = load_settings()
-                auto_open = int(settings.get("Mouvements_ImpressionAutoOpen", 1) or 0) == 1
+                from settings_utils import is_setting_enabled, open_file_if_enabled
+                open_file_if_enabled(
+                    output_path,
+                    operation="open",
+                    setting_key=setting_key or "Mouvements_ImpressionAutoOpen",
+                    setting_default=1,
+                )
             except Exception:
-                auto_open = True
-
-            if auto_open and is_global_print_enabled():
-                self._open_pdf_in_chrome(output_path)
+                try:
+                    settings = load_settings()
+                    auto_open = int(settings.get(setting_key or "Mouvements_ImpressionAutoOpen", 1) or 0) == 1
+                except Exception:
+                    auto_open = True
+                if auto_open and is_global_print_enabled():
+                    self._open_pdf_in_chrome(output_path)
             
             return True
         except Exception as e:

@@ -11,16 +11,10 @@ import json
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def get_config_path():
-    """Détermine le chemin du config.json compatible avec l'EXE compilé."""
-    if getattr(sys, 'frozen', False):
-        # Si c'est un EXE, le dossier racine est celui où se trouve l'EXE
-        dossier_racine = os.path.dirname(sys.executable)
-    else:
-        # Si c'est en mode développement (VS Code)
-        dossier_actuel = os.path.dirname(os.path.abspath(__file__))
-        dossier_racine = os.path.dirname(dossier_actuel)
-    
-    return os.path.join(dossier_racine, 'config.json')
+    """Chemin config.json modifiable (dossier exe / projet)."""
+    from resource_utils import ensure_app_data_file, get_app_data_path
+    ensure_app_data_file("config.json")
+    return get_app_data_path("config.json")
 
 def load_json_config():
     """Charge les paramètres de connexion directement depuis config.json."""

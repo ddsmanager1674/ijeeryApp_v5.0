@@ -1812,7 +1812,13 @@ class PageCommandeCli(ctk.CTkFrame):
             
             # Ouvrir le fichier PDF
             if os.path.exists(pdf_filename):
-                os.startfile(pdf_filename)  # Windows
+                from settings_utils import open_file_if_enabled
+                open_file_if_enabled(
+                    pdf_filename,
+                    operation="open",
+                    setting_key="Proforma_OpenA5",
+                    setting_default=1,
+                )
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur lors de la génération du PDF : {str(e)}")
 

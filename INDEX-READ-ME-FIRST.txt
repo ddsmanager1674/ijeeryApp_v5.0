@@ -114,7 +114,7 @@ Si vous êtes PRESSÉ et voulez juste la commande:
 
 2. Exécuter cette commande (copier-coller en une ligne):
 
-Remove-Item -Recurse -Force build, dist, "iJeery_V5.0.spec", __pycache__ -ErrorAction SilentlyContinue; .\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --add-data "settings.json;." --add-data "session.json;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py; Copy-Item -Path "config.json", "config.ini", "settings.json" -Destination "dist\iJeery_V5.0\" -Force
+Remove-Item -Recurse -Force build, dist, "iJeery_V5.0.spec", __pycache__ -ErrorAction SilentlyContinue; .\.venv\Scripts\pyinstaller.exe --onedir --windowed --name iJeery_V5.0 --add-data "image;image" --add-data "icons;icons" --add-data "pages;pages" --add-data "config.json;." --add-data "config.ini;." --hidden-import=customtkinter --hidden-import=psycopg2 --hidden-import=reportlab --hidden-import=PIL --hidden-import=openpyxl --hidden-import=pandas page_login.py; Copy-Item -Path "config.json", "config.ini" -Destination "dist\iJeery_V5.0\" -Force -ErrorAction SilentlyContinue
 
 3. ATTENDRE 10-15 minutes
 

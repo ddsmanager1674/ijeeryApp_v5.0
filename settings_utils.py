@@ -4,7 +4,7 @@ import os
 import subprocess
 from typing import Any
 
-from resource_utils import get_config_path
+from resource_utils import ensure_app_data_file, get_settings_path
 
 
 SETTINGS_FILE = "settings.json"
@@ -15,7 +15,8 @@ GLOBAL_PRINT_KEY = "Global_Impression"
 
 def load_settings() -> dict[str, Any]:
     try:
-        with open(get_config_path(SETTINGS_FILE), "r", encoding="utf-8") as f:
+        ensure_app_data_file(SETTINGS_FILE)
+        with open(get_settings_path(SETTINGS_FILE), "r", encoding="utf-8") as f:
             data = json.load(f)
             return data if isinstance(data, dict) else {}
     except Exception:
@@ -24,7 +25,7 @@ def load_settings() -> dict[str, Any]:
 
 def save_settings(settings: dict[str, Any]) -> bool:
     try:
-        path = get_config_path(SETTINGS_FILE)
+        path = get_settings_path(SETTINGS_FILE)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(settings or {}, f, indent=2, ensure_ascii=False)
         return True

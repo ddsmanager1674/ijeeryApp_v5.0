@@ -1106,6 +1106,7 @@ class PageTransfert(ctk.CTkFrame):
                     description=description,
                     responsable_1="Le Magasinier",
                     responsable_2="Le Contrôleur",
+                    setting_key="Transfert_OpenA5",
                 )
 
                 try:
@@ -1113,11 +1114,6 @@ class PageTransfert(ctk.CTkFrame):
                 except Exception:
                     pass
 
-                if result:
-                    try:
-                        os.startfile(filename)
-                    except Exception:
-                        pass
                 return result
 
             except Exception as e:

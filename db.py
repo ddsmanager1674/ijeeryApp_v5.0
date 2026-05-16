@@ -16,7 +16,7 @@ from typing import Any, Dict, Generator, Optional
 
 import psycopg2
 
-from resource_utils import get_config_path
+from resource_utils import ensure_app_data_file, get_config_path
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 
@@ -24,7 +24,8 @@ _default_manager: Optional["DatabaseManager"] = None
 
 
 def load_db_config() -> Optional[Dict[str, Any]]:
-    """Charge la section database depuis config.json."""
+    """Charge la section database depuis config.json (dossier données writable)."""
+    ensure_app_data_file("config.json")
     paths = [
         get_config_path("config.json"),
         os.path.join(_BASE, "config.json"),
@@ -40,8 +41,16 @@ def load_db_config() -> Optional[Dict[str, Any]]:
                 with open(p, "r", encoding="utf-8") as f:
                     return json.load(f)["database"]
             except Exception as e:
-                print(f"[DB] config.json invalide ({p}): {e}")
-    print("[DB] config.json introuvable.")
+                try:
+                    from app_runtime_log import log_error
+                    log_error("config.json invalide (%s): %s", p, e)
+                except Exception:
+                    print(f"[DB] config.json invalide ({p}): {e}")
+    try:
+        from app_runtime_log import log_error
+        log_error("config.json introuvable (chemins testés: %s)", paths)
+    except Exception:
+        print("[DB] config.json introuvable.")
     return None
 
 
@@ -65,7 +74,11 @@ class DatabaseManager:
             )
             return conn
         except psycopg2.OperationalError as e:
-            print(f"[DB] {e}")
+            try:
+                from app_runtime_log import log_error
+                log_error("Connexion PostgreSQL impossible: %s", e)
+            except Exception:
+                print(f"[DB] {e}")
             return None
 
     def ensure_connection(self, conn=None):

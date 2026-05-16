@@ -1,5 +1,15 @@
 import customtkinter as ctk
-from page_login import LoginWindow # Importation absolue pour page_login.py
+
+from resource_utils import init_app_data_files
+
+init_app_data_files()
+try:
+    from app_runtime_log import init_runtime_log
+    init_runtime_log()
+except Exception:
+    pass
+
+from page_login import LoginWindow  # noqa: E402
 
 if __name__ == "__main__":
     # Configure le mode d'apparence de CustomTkinter (Light, Dark, System)
