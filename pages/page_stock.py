@@ -9,6 +9,7 @@ import os
 from resource_utils import get_config_path, safe_file_read
 from log_utils import AppLogger
 from stock_manager import StockManager
+from db import ensure_connection, get_connection, load_db_config
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -79,6 +80,7 @@ class PageStock(ctk.CTkFrame):
 
     def __init__(self, master, db_conn=None, session_data=None, iduser=None):
         super().__init__(master, fg_color=C.BG_PAGE)
+        self._db_conn_shared = db_conn
         if iduser is not None:
             self.iduser = iduser
         elif session_data and 'user_id' in session_data:
@@ -193,19 +195,10 @@ class PageStock(ctk.CTkFrame):
     # ====================================================================
 
     def connect_db(self):
-        """Connexion à la base de données PostgreSQL"""
+        """Connexion à la base de données PostgreSQL via module db."""
         try:
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']
-            )
-            return conn
+            conn = self._db_conn_shared or get_connection()
+            return ensure_connection(conn)
         except Exception as err:
             messagebox.showerror("Erreur de connexion", f"Erreur : {err}")
             return None
@@ -449,9 +442,9 @@ class PageStock(ctk.CTkFrame):
             facteurs = {int(idu): float(f) for (idu, f) in cursor.fetchall()}
 
             # 3) Calcul des stocks en unité de base par article et par magasin via StockManager
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
+            db_config = load_db_config()
+            if not db_config:
+                return []
 
             sm = StockManager(
                 host=db_config['host'],
@@ -531,9 +524,9 @@ class PageStock(ctk.CTkFrame):
         """
         sm = None
         try:
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
+            db_config = load_db_config()
+            if not db_config:
+                return []
 
             sm = StockManager(
                 host=db_config['host'],

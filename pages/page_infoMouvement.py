@@ -13,7 +13,10 @@ from app_theme import Colors, Fonts, styled
 from date_picker_utils import set_date_on_widget
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
-from stock_snapshot import StockSnapshot, format_nombre_auto
+from db import ensure_connection, get_connection
+from stock_service import get_snapshot
+from stock_snapshot import format_nombre_auto
+from pages.ui_dialogs import PasswordDialog
 
 # Imports pour génération PDF
 from reportlab.lib.pagesizes import A5, landscape
@@ -135,16 +138,9 @@ class PageChangementArticle(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def connect_db(self):
-        """Ouvre une connexion fraîche à PostgreSQL depuis config.json."""
+        """Connexion PostgreSQL via module db."""
         try:
-            with open(get_config_path('config.json')) as f:
-                config    = json.load(f)
-                db_config = config['database']
-            return psycopg2.connect(
-                host=db_config['host'], user=db_config['user'],
-                password=db_config['password'], database=db_config['database'],
-                port=db_config['port'],
-            )
+            return ensure_connection(get_connection())
         except Exception as e:
             messagebox.showerror("Erreur de connexion", str(e))
             return None
@@ -876,7 +872,7 @@ class PageChangementArticle(ctk.CTkFrame):
                 idmag_int = int(idmag_actif)
                 snapshot = cache.get(idmag_int)
                 if snapshot is None:
-                    snapshot = StockSnapshot.build(idmag_int)
+                    snapshot = get_snapshot(idmag_int, conn=self.connect_db())
                     cache[idmag_int] = snapshot
 
                 cur.execute(QUERY_ARTICLES, (filtre_like, filtre_like))
@@ -1504,32 +1500,6 @@ if __name__ == "__main__":
 
 
 
-class PasswordDialog(ctk.CTkToplevel):
-    def __init__(self, title, text):
-        super().__init__()
-        self.title(title)
-        self.geometry("300x150")
-        self.result = None
-        
-        self.label = ctk.CTkLabel(self, text=text)
-        self.label.pack(pady=10)
-        
-        # Le paramètre show="*" cache les caractères
-        self.entry = ctk.CTkEntry(self, show="*")
-        self.entry.pack(pady=5)
-        self.entry.focus_set()
-        
-        self.btn = ctk.CTkButton(self, text="Valider", command=self.ok)
-        self.btn.pack(pady=10)
-        
-        self.grab_set()  # Rend la fenêtre modale
-        self.wait_window()
-
-    def ok(self):
-        self.result = self.entry.get()
-        self.destroy()
-
-
 class PageInfoMouvementStock(ctk.CTkFrame):
     """Frame principal avec navigation - Pour intégration dans app_main"""
 
@@ -1547,10 +1517,11 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         ("🧾", "Infos Charges", PageInfosCharges),
     )
 
-    def __init__(self, parent, iduser, **kwargs):
+    def __init__(self, parent, iduser, db_conn=None, **kwargs):
         super().__init__(parent, fg_color=Colors.BG_PAGE, corner_radius=0, **kwargs)
 
         self.iduser = iduser
+        self._db_conn_initial = db_conn
         self._sidebar_collapsed = self._lire_sidebar_hamburger_defaut()
         self._current_menu_label: Optional[str] = None
 
@@ -1578,32 +1549,15 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         self.show_page(self._menu_defaut_au_demarrage())
     
     def connect_db(self):
-        """Connexion à la base de données PostgreSQL"""
+        """Connexion à la base de données PostgreSQL via module db."""
         try:
-            # Assurez-vous que 'config.json' existe et est accessible
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
-
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']  
-            )
-            return conn
+            conn = self._db_conn_initial or get_connection()
+            return ensure_connection(conn)
         except FileNotFoundError:
             messagebox.showerror("Erreur de configuration", "Fichier 'config.json' non trouvé.")
             return None
-        except KeyError:
-            messagebox.showerror("Erreur de configuration", "Clés de base de données manquantes dans 'config.json'.")
-            return None
-        except psycopg2.Error as err:
+        except (psycopg2.Error, UnicodeDecodeError) as err:
             messagebox.showerror("Erreur de connexion", f"Erreur de connexion à PostgreSQL : {err}")
-            return None
-        except UnicodeDecodeError as err:
-            messagebox.showerror("Erreur d'encodage", f"Problème d'encodage du fichier de configuration : {err}")
             return None
         
     def _sidebar_width(self) -> int:

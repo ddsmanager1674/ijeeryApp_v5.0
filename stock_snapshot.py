@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Any, Iterable
+from typing import Dict, Any
 
-import psycopg2
-
-from resource_utils import get_config_path
+from db import get_connection, load_db_config
 from stock_manager import StockManager
 
 
@@ -31,9 +28,11 @@ def format_nombre_auto(nombre: Any) -> str:
 
 
 def read_db_config() -> Dict[str, Any]:
-    with open(get_config_path("config.json"), "r", encoding="utf-8") as f:
-        config = json.load(f)
-    return config["database"]
+    """Compatibilité : délègue à db.load_db_config()."""
+    cfg = load_db_config()
+    if cfg is None:
+        raise FileNotFoundError("config.json introuvable ou invalide")
+    return cfg
 
 
 def _fetch_facteurs_conversion(conn) -> Dict[int, float]:
@@ -84,21 +83,23 @@ class StockSnapshot:
     facteur_vers_base_par_unite: Dict[int, float]
 
     @classmethod
-    def build(cls, idmagasin: int) -> "StockSnapshot":
-        db = read_db_config()
+    def build(cls, idmagasin: int, conn=None) -> "StockSnapshot":
+        db = load_db_config()
+        if db is None:
+            raise FileNotFoundError("config.json introuvable ou invalide")
 
         # 1) facteurs de conversion (via SQL, une seule fois)
-        conn = psycopg2.connect(
-            host=db["host"],
-            user=db["user"],
-            password=db["password"],
-            database=db["database"],
-            port=db["port"],
-        )
+        own_conn = conn is None
+        if own_conn:
+            conn = get_connection()
         try:
             facteurs = _fetch_facteurs_conversion(conn)
         finally:
-            conn.close()
+            if own_conn and conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         # 2) stock base par article via StockManager (logique métier)
         sm = StockManager(

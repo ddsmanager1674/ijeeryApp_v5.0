@@ -264,10 +264,8 @@ class PageStockAlerte(ctk.CTkFrame):
     # ── Base de données ───────────────────────────────────────────────────────
     def connect_db(self):
         try:
-            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            with open(os.path.join(root, "config.json")) as f:
-                cfg = json.load(f)
-            return psycopg2.connect(**cfg.get("database", {}))
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except Exception as e:
             messagebox.showerror("Connexion", f"Impossible de se connecter :\n{e}")
             return None

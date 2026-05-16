@@ -156,18 +156,8 @@ class PageCommandeCli(ctk.CTkFrame):
     def connect_db(self):
         """Connexion à la base de données PostgreSQL"""
         try:
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
-
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']  
-            )
-            return conn
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except FileNotFoundError:
             messagebox.showerror("Erreur de configuration", "Fichier 'config.json' non trouvé.")
             return None

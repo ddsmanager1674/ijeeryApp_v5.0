@@ -14,76 +14,7 @@ from html import escape
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled, Theme
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Dialogs
-# ─────────────────────────────────────────────────────────────────────────────
-class MessageDialog(ctk.CTkToplevel):
-    def __init__(self, title: str, message: str, type_: str = "info"):
-        super().__init__()
-        self.title(title)
-        self.geometry("420x190")
-        self.resizable(False, False)
-        self.configure(fg_color=Colors.BG_CARD)
-
-        icon = "ℹ️" if type_ == "info" else "⚠️" if type_ == "warning" else "❌"
-        icon_color = Colors.PRIMARY if type_ == "info" else Colors.WARNING if type_ == "warning" else Colors.DANGER
-
-        ctk.CTkLabel(
-            self, text=icon, font=Fonts.heading(24), text_color=icon_color
-        ).pack(pady=(18, 6))
-        ctk.CTkLabel(
-            self, text=message, font=Fonts.body(12),
-            text_color=Colors.TEXT_PRIMARY, wraplength=360, justify="center"
-        ).pack(padx=16, pady=(0, 14))
-
-        styled.button_success(
-            self, text="OK", command=self.destroy, width=110, height=34
-        ).pack(pady=(0, 14))
-
-        self.grab_set()
-        self.lift()
-        self.focus_force()
-        self.attributes("-topmost", True)
-        self.wait_window()
-
-
-class YesNoDialog(ctk.CTkToplevel):
-    def __init__(self, title: str, message: str):
-        super().__init__()
-        self.title(title)
-        self.geometry("430x200")
-        self.resizable(False, False)
-        self.configure(fg_color=Colors.BG_CARD)
-        self.result = False
-
-        ctk.CTkLabel(
-            self, text="❓", font=Fonts.heading(24), text_color=Colors.WARNING
-        ).pack(pady=(18, 6))
-        ctk.CTkLabel(
-            self, text=message, font=Fonts.body(12),
-            text_color=Colors.TEXT_PRIMARY, wraplength=370, justify="center"
-        ).pack(padx=16, pady=(0, 14))
-
-        bf = ctk.CTkFrame(self, fg_color="transparent")
-        bf.pack(pady=(0, 14))
-        styled.button_danger(bf, text="Non", command=self._no, width=110, height=34).pack(side="left", padx=8)
-        styled.button_success(bf, text="Oui", command=self._yes, width=110, height=34).pack(side="left", padx=8)
-
-        self.grab_set()
-        self.lift()
-        self.focus_force()
-        self.attributes("-topmost", True)
-        self.wait_window()
-
-    def _yes(self):
-        self.result = True
-        self.destroy()
-
-    def _no(self):
-        self.result = False
-        self.destroy()
+from pages.ui_dialogs import MessageDialog, YesNoDialog
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -149,14 +80,8 @@ class PageCommandeFrs(ctk.CTkFrame):
     # ─────────────────────────────────────────────────────────────────────────
     def connect_db(self):
         try:
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
-            return psycopg2.connect(
-                host=db_config['host'], user=db_config['user'],
-                password=db_config['password'], database=db_config['database'],
-                port=db_config['port']
-            )
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except FileNotFoundError:
             messagebox.showerror("Erreur", "Fichier 'config.json' non trouvé.")
         except KeyError:

@@ -25,7 +25,9 @@ from app_theme import Colors, Fonts, styled
 from date_picker_utils import get_date_from_widget, set_date_on_widget
 from log_utils import AppLogger
 
-from stock_snapshot import StockSnapshot, format_nombre_auto
+from db import ensure_connection, get_connection
+from stock_service import get_snapshot
+from stock_snapshot import format_nombre_auto
 
 
 ctk.set_appearance_mode("Light")
@@ -45,10 +47,11 @@ class PageEntree(ctk.CTkFrame):
     Row 5 — Actions (Nouveau | 🖨 | 🗑 | 💾)
     """
 
-    def __init__(self, master, iduser: int, **kwargs):
+    def __init__(self, master, iduser: int, db_conn=None, **kwargs):
         super().__init__(master, fg_color=Colors.BG_PAGE, **kwargs)
 
         self.id_user_connecte = iduser
+        self._db_conn_initial = db_conn
         self.session_data = getattr(master, "session_data", None) or {"user_id": self.id_user_connecte}
         self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.id_user_connecte)
 
@@ -82,20 +85,9 @@ class PageEntree(ctk.CTkFrame):
 
     def connect_db(self):
         try:
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
-            return psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port'],
-            )
-        except FileNotFoundError:
-            messagebox.showerror("Erreur", "config.json non trouvé.")
-            return None
-        except psycopg2.Error as e:
+            conn = self._db_conn_initial or get_connection()
+            return ensure_connection(conn)
+        except Exception as e:
             messagebox.showerror("Erreur BD", str(e))
             return None
 
@@ -602,7 +594,7 @@ class PageEntree(ctk.CTkFrame):
                 tree.heading("Stock", text=f"Magasin {designationmag}" if designationmag else "Magasin")
                 if idmag_actif is None:
                     return
-                snapshot = StockSnapshot.build(int(idmag_actif))
+                snapshot = get_snapshot(int(idmag_actif), conn=self.conn)
                 cur.execute(QUERY_ARTICLES, (filtre_like, filtre_like))
                 for idx, row in enumerate(cur.fetchall()):
                     stock_total = snapshot.stock_unite(row[0], row[1])

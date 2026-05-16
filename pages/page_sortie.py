@@ -36,7 +36,9 @@ from resource_utils import get_config_path, get_session_path, safe_file_read
 from app_theme import Colors, Fonts, styled
 from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_date, format_date_fr
 from log_utils import AppLogger
-from stock_snapshot import StockSnapshot, format_nombre_auto
+from db import ensure_connection, get_connection
+from stock_service import get_snapshot
+from stock_snapshot import format_nombre_auto
 
 # ReportLab
 from reportlab.lib.pagesizes import A5, landscape
@@ -65,10 +67,11 @@ class PageSortie(ctk.CTkFrame):
     └────────────────────────────────────────────────────────────┘
     """
 
-    def __init__(self, master, id_user_connecte: int, **kwargs):
+    def __init__(self, master, id_user_connecte: int, db_conn=None, **kwargs):
         super().__init__(master, fg_color=Colors.BG_PAGE, **kwargs)
 
         self.id_user_connecte = id_user_connecte
+        self._db_conn_initial = db_conn
         self.session_data = getattr(master, "session_data", None) or {"user_id": self.id_user_connecte}
         self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.id_user_connecte)
         self.conn: Optional[psycopg2.extensions.connection] = None
@@ -111,20 +114,11 @@ class PageSortie(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def connect_db(self):
-        """Ouvre une connexion fraîche à PostgreSQL depuis config.json."""
+        """Connexion PostgreSQL via module db."""
         try:
-            with open(get_config_path('config.json')) as f:
-                config    = json.load(f)
-                db_config = config['database']
-            return psycopg2.connect(
-                host=db_config['host'], user=db_config['user'],
-                password=db_config['password'], database=db_config['database'],
-                port=db_config['port'],
-            )
-        except FileNotFoundError:
-            messagebox.showerror("Erreur", "config.json non trouvé.")
-            return None
-        except psycopg2.Error as e:
+            conn = self._db_conn_initial or get_connection()
+            return ensure_connection(conn)
+        except Exception as e:
             messagebox.showerror("Erreur BD", str(e))
             return None
 
@@ -929,7 +923,7 @@ class PageSortie(ctk.CTkFrame):
                 if idmag_actif is None:
                     return
 
-                snapshot = StockSnapshot.build(int(idmag_actif))
+                snapshot = get_snapshot(int(idmag_actif), conn=self.conn)
                 cur.execute(QUERY_ARTICLES, (filtre_like, filtre_like))
                 for idx, row in enumerate(cur.fetchall()):
                     stock_total = snapshot.stock_unite(row[0], row[1])

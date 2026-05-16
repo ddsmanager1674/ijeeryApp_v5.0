@@ -27,7 +27,10 @@ import os
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
 from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_datetime
-from stock_snapshot import StockSnapshot, format_nombre_auto
+from db import ensure_connection, get_connection
+from stock_service import get_snapshot
+from stock_snapshot import format_nombre_auto
+from pages.ui_dialogs import MessageDialog, YesNoDialog
 
 # ReportLab (impression PDF)
 from reportlab.lib.pagesizes import A5
@@ -38,95 +41,6 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
-
-
-class MessageDialog(ctk.CTkToplevel):
-    """Dialogue personnalisé info/warning/error."""
-
-    def __init__(self, title: str, message: str, type_: str = 'info'):
-        super().__init__()
-        self.title(title)
-        self.geometry("400x180")
-        self.resizable(False, False)
-        self.configure(fg_color=Colors.BG_CARD)
-
-        self.update_idletasks()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        ww, wh = 400, 180
-        x = (sw // 2) - (ww // 2)
-        y = (sh // 2) - (wh // 2)
-        self.geometry(f"{ww}x{wh}+{x}+{y}")
-
-        icon_text = "ℹ️" if type_ == 'info' else "⚠️" if type_ == 'warning' else "❌"
-        icon_color = Colors.PRIMARY if type_ == 'info' else Colors.WARNING if type_ == 'warning' else Colors.DANGER
-
-        ctk.CTkLabel(self, text=icon_text, font=Fonts.heading(24), text_color=icon_color).pack(pady=(20, 5))
-        ctk.CTkLabel(
-            self, text=message, font=Fonts.body(12),
-            text_color=Colors.TEXT_PRIMARY, wraplength=350, justify="center"
-        ).pack(pady=(0, 20), padx=20)
-        ctk.CTkButton(
-            self, text="OK", command=self.destroy, width=100, height=36,
-            fg_color=Colors.SUCCESS_DARK, hover_color=Colors.INFO_DARK
-        ).pack(pady=(0, 14))
-
-        self.grab_set()
-        self.lift()
-        self.focus_force()
-        self.attributes('-topmost', True)
-        self.wait_window()
-
-
-class YesNoDialog(ctk.CTkToplevel):
-    """Dialogue personnalisé de confirmation Oui/Non."""
-
-    def __init__(self, title: str, message: str):
-        super().__init__()
-        self.title(title)
-        self.geometry("420x190")
-        self.resizable(False, False)
-        self.configure(fg_color=Colors.BG_CARD)
-        self.result = False
-
-        self.update_idletasks()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        ww, wh = 420, 190
-        x = (sw // 2) - (ww // 2)
-        y = (sh // 2) - (wh // 2)
-        self.geometry(f"{ww}x{wh}+{x}+{y}")
-
-        ctk.CTkLabel(self, text="❓", font=Fonts.heading(24), text_color=Colors.WARNING).pack(pady=(20, 5))
-        ctk.CTkLabel(
-            self, text=message, font=Fonts.body(12),
-            text_color=Colors.TEXT_PRIMARY, wraplength=360, justify="center"
-        ).pack(pady=(0, 20), padx=20)
-
-        bf = ctk.CTkFrame(self, fg_color="transparent")
-        bf.pack(pady=(0, 14))
-        ctk.CTkButton(
-            bf, text="Non", width=100, height=36, command=self._no,
-            fg_color=Colors.DANGER, hover_color=Colors.DANGER_DARK
-        ).pack(side="left", padx=10)
-        ctk.CTkButton(
-            bf, text="Oui", width=100, height=36, command=self._yes,
-            fg_color=Colors.SUCCESS_DARK, hover_color=Colors.INFO_DARK
-        ).pack(side="right", padx=10)
-
-        self.grab_set()
-        self.lift()
-        self.focus_force()
-        self.attributes('-topmost', True)
-        self.wait_window()
-
-    def _yes(self):
-        self.result = True
-        self.destroy()
-
-    def _no(self):
-        self.result = False
-        self.destroy()
 
 
 class PageTransfert(ctk.CTkFrame):
@@ -168,30 +82,14 @@ class PageTransfert(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def connect_db(self):
-        """Ouvre une connexion fraîche à PostgreSQL depuis config.json."""
+        """Connexion PostgreSQL via module db."""
         try:
-            with open(get_config_path('config.json')) as f:
-                config    = json.load(f)
-                db_config = config['database']
-
-            return psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port'],
-            )
-        except FileNotFoundError:
-            MessageDialog("Erreur", "config.json non trouvé.", type_='error')
-            return None
-        except KeyError:
-            MessageDialog("Erreur", "Clés de base de données manquantes.", type_='error')
-            return None
-        except psycopg2.Error as err:
+            return ensure_connection(get_connection())
+        except (psycopg2.Error, UnicodeDecodeError) as err:
             MessageDialog("Erreur connexion", str(err), type_='error')
             return None
-        except UnicodeDecodeError as err:
-            MessageDialog("Erreur encodage", str(err), type_='error')
+        except Exception:
+            MessageDialog("Erreur", "Impossible de se connecter à la base.", type_='error')
             return None
 
     def get_connection(self):
@@ -695,7 +593,8 @@ class PageTransfert(ctk.CTkFrame):
                 if idmag_actif is None:
                     return
 
-                snapshot = StockSnapshot.build(int(idmag_actif))
+                conn = self.get_connection()
+                snapshot = get_snapshot(int(idmag_actif), conn=conn)
 
                 cur.execute(
                     """

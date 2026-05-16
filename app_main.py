@@ -83,63 +83,7 @@ def _F(size=11, weight="normal"):
     return ctk.CTkFont(family=fam, size=size, weight=weight)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# GESTIONNAIRE DE BASE DE DONNÉES
-# ─────────────────────────────────────────────────────────────────────────────
-
-class DatabaseManager:
-    """Connexion PostgreSQL centralisée avec retry simple."""
-
-    def __init__(self):
-        self.db_params = self._load_config()
-
-    def _load_config(self):
-        paths = [
-            os.path.join(_BASE, "config.json"),
-            "config.json",
-        ]
-        for p in paths:
-            if os.path.exists(p):
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        return json.load(f)["database"]
-                except Exception as e:
-                    print(f"[DB] config.json invalide ({p}): {e}")
-        print("[DB] ❌ config.json introuvable.")
-        return None
-
-    def get_connection(self):
-        if not self.db_params:
-            return None
-        try:
-            conn = psycopg2.connect(
-                host=self.db_params["host"],
-                user=self.db_params["user"],
-                password=self.db_params["password"],
-                database=self.db_params["database"],
-                port=self.db_params["port"],
-                connect_timeout=10,
-            )
-            print("[DB] ✅ Connexion établie.")
-            return conn
-        except psycopg2.OperationalError as e:
-            print(f"[DB] ❌ {e}")
-            return None
-
-    def ensure_connection(self, conn=None):
-        """Retourne une connexion active ; reconnecte si elle est fermée ou invalide."""
-        if conn is not None and not getattr(conn, "closed", True):
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-                return conn
-            except psycopg2.Error:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-        return self.get_connection()
-
+from db import DatabaseManager
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DÉFINITION DES MENUS (séparation données / UI)
@@ -1117,10 +1061,13 @@ class App(ctk.CTk):
 
         if kwargs_key == "iduser":
             # Certaines pages utilisent "parent" (positionnel) d'autres "master=" (kwarg).
-            # On essaie les deux pour couvrir PageInfoMouvementStock et PageAVQ/FenetreAvanceSpec.
             for call in [
-                lambda: cls(master, iduser=self.id_user_connecte),   # parent positionnel
+                lambda: cls(master, self.id_user_connecte, self.db_conn),
+                lambda: cls(master, iduser=self.id_user_connecte, db_conn=self.db_conn),
+                lambda: cls(master=master, iduser=self.id_user_connecte, db_conn=self.db_conn),
+                lambda: cls(master, iduser=self.id_user_connecte),
                 lambda: cls(master=master, iduser=self.id_user_connecte),
+                lambda: cls(master, self.id_user_connecte),
             ]:
                 try:
                     return call()

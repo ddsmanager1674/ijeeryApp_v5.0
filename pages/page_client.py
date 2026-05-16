@@ -125,22 +125,8 @@ class PageClient(ctk.CTkFrame):
         
     def connect_db(self):
         try:
-            if not os.path.exists(get_config_path('config.json')):
-                 messagebox.showerror("Erreur de configuration", "Le fichier config.json est manquant.")
-                 return None
-                 
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
-                db_config = config['database']
-
-            conn = psycopg2.connect(
-                host=db_config['host'],
-                user=db_config['user'],
-                password=db_config['password'],
-                database=db_config['database'],
-                port=db_config['port']  
-                )
-            return conn
+            from pages.db_helper import connect_page_db
+            return connect_page_db()
         except psycopg2.Error as err:
             messagebox.showerror("Erreur de connexion", f"Erreur : {err}")
             return None

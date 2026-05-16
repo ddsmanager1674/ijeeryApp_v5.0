@@ -1,10 +1,7 @@
-import json
 import os
 from typing import Any, Optional
 
-import psycopg2
-
-from resource_utils import get_config_path
+from db import get_connection
 
 
 def _build_description(
@@ -36,16 +33,7 @@ class AppLogger:
         self.fallback_user_id = fallback_user_id
 
     def _connect(self):
-        with open(get_config_path("config.json"), "r", encoding="utf-8") as f:
-            config = json.load(f)
-        db = config["database"]
-        return psycopg2.connect(
-            host=db["host"],
-            user=db["user"],
-            password=db["password"],
-            database=db["database"],
-            port=db["port"],
-        )
+        return get_connection()
 
     def _resolve_user_id(self) -> Optional[int]:
         candidates = [
