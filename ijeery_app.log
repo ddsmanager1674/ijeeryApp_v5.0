@@ -1,0 +1,5 @@
+2026-05-16 16:10:01 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-16 16:10:04 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-16 16:10:04 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-16 16:10:07 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-16 16:10:07 | INFO     | ijeery | [DB] Connexion établie.
