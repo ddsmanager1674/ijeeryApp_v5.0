@@ -90,6 +90,37 @@ FILTER_MAP = {
     "Absent":     "absent",
 }
 
+HISTORY_PRESENCE_FILTER = {
+    "Tous": None,
+    "Présents": "present",
+    "Retards": "retard",
+    "Absents": "absent",
+    "En attente": "en_attente",
+}
+
+UPDATE_TREE_COLUMNS = [
+    ("ID", 38, "center", "id", "int"),
+    ("Nom complet", 165, "w", "nom", "str"),
+    ("Sexe", 48, "center", "sexe", "str"),
+    ("Catégorie", 125, "w", "categorie", "str"),
+    ("Poste", 135, "w", "poste", "str"),
+    ("Matin", 108, "center", "matin", "state"),
+    ("Après-midi", 108, "center", "apresmidi", "state"),
+    ("Observation", 180, "w", "observation", "str"),
+]
+
+HISTORY_TREE_COLUMNS = [
+    ("ID", 38, "center", "id", "int"),
+    ("Nom complet", 165, "w", "nom", "str"),
+    ("Sexe", 48, "center", "sexe", "str"),
+    ("Catégorie", 125, "w", "categorie", "str"),
+    ("Poste", 135, "w", "poste", "str"),
+    ("✅ Présent", 80, "center", "present", "int"),
+    ("🟠 Retard", 80, "center", "retard", "int"),
+    ("🔴 Absent", 80, "center", "absent", "int"),
+    ("⬜ Attente", 80, "center", "en_attente", "int"),
+]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Onglets Chrome
@@ -227,9 +258,14 @@ class PageSuiviPresence(ctk.CTkFrame):
 
         self.update_rows_cache = {}
         self._all_update_rows  = []
+        self._all_history_rows = []
         self._stat_labels      = {}
         self._categorie_filter_map = {}
         self._poste_filter_map = {}
+        self._history_categorie_filter_map = {}
+        self._history_poste_filter_map = {}
+        self._update_sort = {"col": None, "desc": False}
+        self._history_sort = {"col": None, "desc": False}
         _setup_treeview_style()
 
         self.grid_columnconfigure(0, weight=1)
@@ -241,7 +277,9 @@ class PageSuiviPresence(ctk.CTkFrame):
         self._load_category_poste_filters()
 
         self._show_tab("Suivi du jour")
-        self.load_update_for_date(self.date_entry.get())
+        d0 = get_date_from_widget(self.date_entry)
+        if d0:
+            self.load_update_for_date(d0)
         self.load_history()
 
     # ── En-tête compact ──────────────────────────────────────────────────────
@@ -406,18 +444,13 @@ class PageSuiviPresence(ctk.CTkFrame):
         tc.grid_columnconfigure(0, weight=1)
         tc.grid_rowconfigure(0, weight=1)
 
-        cols = ("ID", "Nom complet", "Sexe", "Catégorie", "Poste",
-                "Matin", "Après-midi", "Observation")
+        cols = tuple(c[0] for c in UPDATE_TREE_COLUMNS)
         self.update_tree = ttk.Treeview(tc, columns=cols, show="headings",
                                          style="P.Treeview", selectmode="browse")
-        for col, w, anc in [
-            ("ID", 38, "center"), ("Nom complet", 165, "w"),
-            ("Sexe", 48, "center"), ("Catégorie", 125, "w"), ("Poste", 135, "w"),
-            ("Matin", 108, "center"), ("Après-midi", 108, "center"),
-            ("Observation", 180, "w"),
-        ]:
-            self.update_tree.heading(col, text=col)
-            self.update_tree.column(col, width=w, anchor=anc, minwidth=30)
+        self._configure_sortable_tree(
+            self.update_tree, UPDATE_TREE_COLUMNS, self._update_sort,
+            on_sort=self._on_sort_update_tree,
+        )
 
         self.update_tree.tag_configure("even", background=Colors.BG_CARD)
         self.update_tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
@@ -456,18 +489,18 @@ class PageSuiviPresence(ctk.CTkFrame):
     def _build_history_page(self, parent):
         fc = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD, corner_radius=8)
         fc.grid(row=0, column=0, padx=8, pady=(6, 3), sticky="ew")
-        fc.grid_columnconfigure(5, weight=1)
+        fc.grid_columnconfigure(11, weight=1)
 
-        def lbl(text, col, padl=10):
+        def lbl(text, row, col, padl=10):
             ctk.CTkLabel(fc, text=text, font=Fonts.label(11),
                          text_color=Colors.TEXT_SECONDARY
-                         ).grid(row=0, column=col, padx=(padl, 4), pady=7, sticky="w")
+                         ).grid(row=row, column=col, padx=(padl, 4), pady=(7 if row == 0 else 2, 2), sticky="w")
 
-        lbl("Début :", 0)
+        lbl("Début :", 0, 0)
         self.h_from = styled.date_entry(fc, width=11, initial=date.today())
         self.h_from.grid(row=0, column=1, padx=(0, 8), pady=7)
 
-        lbl("Fin :", 2, 0)
+        lbl("Fin :", 0, 2)
         self.h_to = styled.date_entry(fc, width=11, initial=date.today())
         self.h_to.grid(row=0, column=3, padx=(0, 8), pady=7)
 
@@ -489,25 +522,51 @@ class PageSuiviPresence(ctk.CTkFrame):
                       fg_color=Colors.PREMIUM, hover_color=Colors.PREMIUM_DARK,
                       font=Fonts.bold(11), corner_radius=6,
                       command=self.export_history_excel,
-                      ).grid(row=0, column=7, padx=(0, 10), pady=7, sticky="e")
+                      ).grid(row=0, column=12, padx=(0, 10), pady=7, sticky="e")
+
+        lbl("Catégorie :", 1, 0)
+        self.combo_h_categorie = ctk.CTkComboBox(
+            fc, values=["Toutes"], state="readonly", width=125, height=28,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            button_color=Colors.PRIMARY, font=Fonts.body(11),
+            command=lambda v: self._on_history_filter_category_change(v),
+        )
+        self.combo_h_categorie.set("Toutes")
+        self.combo_h_categorie.grid(row=1, column=1, padx=(0, 8), pady=(0, 8), sticky="w")
+
+        lbl("Poste :", 1, 2)
+        self.combo_h_poste = ctk.CTkComboBox(
+            fc, values=["Tous"], state="readonly", width=120, height=28,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            button_color=Colors.PRIMARY, font=Fonts.body(11),
+            command=lambda v: self._apply_history_filter(),
+        )
+        self.combo_h_poste.set("Tous")
+        self.combo_h_poste.grid(row=1, column=3, padx=(0, 8), pady=(0, 8), sticky="w")
+
+        lbl("Présence :", 1, 4)
+        self.combo_h_presence = ctk.CTkComboBox(
+            fc, values=list(HISTORY_PRESENCE_FILTER.keys()),
+            state="readonly", width=118, height=28,
+            fg_color=Colors.BG_INPUT, border_color=Colors.BORDER,
+            button_color=Colors.PRIMARY, font=Fonts.body(11),
+            command=lambda v: self._apply_history_filter(),
+        )
+        self.combo_h_presence.set("Tous")
+        self.combo_h_presence.grid(row=1, column=5, padx=(0, 8), pady=(0, 8), sticky="w")
 
         tc = ctk.CTkFrame(parent, fg_color=Colors.BG_CARD, corner_radius=8)
         tc.grid(row=1, column=0, padx=8, pady=(0, 6), sticky="nsew")
         tc.grid_columnconfigure(0, weight=1)
         tc.grid_rowconfigure(0, weight=1)
 
-        cols = ("ID", "Nom complet", "Sexe", "Catégorie", "Poste",
-                "✅ Présent", "🟠 Retard", "🔴 Absent", "⬜ Attente")
+        cols = tuple(c[0] for c in HISTORY_TREE_COLUMNS)
         self.history_tree = ttk.Treeview(tc, columns=cols, show="headings",
                                           style="P.Treeview", selectmode="browse")
-        for col, w, anc in [
-            ("ID", 38, "center"), ("Nom complet", 165, "w"),
-            ("Sexe", 48, "center"), ("Catégorie", 125, "w"), ("Poste", 135, "w"),
-            ("✅ Présent", 80, "center"), ("🟠 Retard", 80, "center"),
-            ("🔴 Absent", 80, "center"), ("⬜ Attente", 80, "center"),
-        ]:
-            self.history_tree.heading(col, text=col)
-            self.history_tree.column(col, width=w, anchor=anc, minwidth=30)
+        self._configure_sortable_tree(
+            self.history_tree, HISTORY_TREE_COLUMNS, self._history_sort,
+            on_sort=self._on_sort_history_tree,
+        )
 
         self.history_tree.tag_configure("even", background=Colors.BG_CARD)
         self.history_tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
@@ -524,7 +583,92 @@ class PageSuiviPresence(ctk.CTkFrame):
     # ══════════════════════════════════════════════════════════════════════════
 
     def on_update_load(self):
-        self.load_update_for_date(self.date_entry.get().strip())
+        d = get_date_from_widget(self.date_entry)
+        if d:
+            self.load_update_for_date(d)
+
+    # ── Tri des tableaux (en-têtes cliquables + flèches) ─────────────────────
+
+    @staticmethod
+    def _heading_with_sort_arrow(base_text: str, sort_key: str, sort_state: dict) -> str:
+        if sort_state.get("col") == sort_key:
+            return f"{base_text} {'▼' if sort_state.get('desc') else '▲'}"
+        return f"{base_text} ↕"
+
+    def _configure_sortable_tree(self, tree, columns_spec, sort_state, on_sort):
+        for col_id, width, anchor, sort_key, _stype in columns_spec:
+            tree.heading(
+                col_id,
+                text=self._heading_with_sort_arrow(col_id, sort_key, sort_state),
+                command=lambda sk=sort_key: on_sort(sk),
+            )
+            tree.column(col_id, width=width, anchor=anchor, minwidth=30)
+
+    def _refresh_tree_headings(self, tree, columns_spec, sort_state):
+        for col_id, _w, _a, sort_key, _t in columns_spec:
+            tree.heading(
+                col_id,
+                text=self._heading_with_sort_arrow(col_id, sort_key, sort_state),
+            )
+
+    @staticmethod
+    def _sort_key_for_value(val, sort_type: str):
+        if sort_type == "int":
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return 0
+        if sort_type == "state":
+            s = val if isinstance(val, str) else str(val or "")
+            if s in STATE_ORDER:
+                return STATE_ORDER.index(s)
+            mapped = LABEL_STATE.get(s)
+            if mapped in STATE_ORDER:
+                return STATE_ORDER.index(mapped)
+            return 99
+        return (str(val or "")).lower()
+
+    def _sort_row_list(self, rows, sort_key, desc, columns_spec):
+        stype = next((t for c, _w, _a, sk, t in columns_spec if sk == sort_key), "str")
+        rows.sort(
+            key=lambda r: self._sort_key_for_value(
+                r.get(sort_key) if isinstance(r, dict) else r[sort_key], stype
+            ),
+            reverse=bool(desc),
+        )
+
+    def _on_sort_update_tree(self, sort_key):
+        if self._update_sort.get("col") == sort_key:
+            self._update_sort["desc"] = not self._update_sort.get("desc", False)
+        else:
+            self._update_sort = {"col": sort_key, "desc": False}
+        self._refresh_tree_headings(self.update_tree, UPDATE_TREE_COLUMNS, self._update_sort)
+        if self._all_update_rows:
+            self._sort_row_list(self._all_update_rows, sort_key, self._update_sort["desc"], UPDATE_TREE_COLUMNS)
+            self._apply_filter()
+        else:
+            self._sort_visible_tree(self.update_tree, sort_key, self._update_sort["desc"], UPDATE_TREE_COLUMNS)
+
+    def _on_sort_history_tree(self, sort_key):
+        if self._history_sort.get("col") == sort_key:
+            self._history_sort["desc"] = not self._history_sort.get("desc", False)
+        else:
+            self._history_sort = {"col": sort_key, "desc": False}
+        self._refresh_tree_headings(self.history_tree, HISTORY_TREE_COLUMNS, self._history_sort)
+        if self._all_history_rows:
+            self._sort_row_list(self._all_history_rows, sort_key, self._history_sort["desc"], HISTORY_TREE_COLUMNS)
+            self._apply_history_filter()
+        else:
+            self._sort_visible_tree(self.history_tree, sort_key, self._history_sort["desc"], HISTORY_TREE_COLUMNS)
+
+    def _sort_visible_tree(self, tree, sort_key, desc, columns_spec):
+        col_id = next(spec[0] for spec in columns_spec if spec[3] == sort_key)
+        stype = next(spec[4] for spec in columns_spec if spec[3] == sort_key)
+        items = [(tree.set(iid, col_id), iid) for iid in tree.get_children("")]
+        items.sort(key=lambda x: self._sort_key_for_value(x[0], stype), reverse=bool(desc))
+        for idx, (_v, iid) in enumerate(items):
+            tree.move(iid, "", idx)
+            tree.item(iid, tags=("even" if idx % 2 == 0 else "odd",))
 
     def _load_category_poste_filters(self):
         if not hasattr(self, "combo_filter_categorie"):
@@ -542,7 +686,13 @@ class PageSuiviPresence(ctk.CTkFrame):
             cats = cur.fetchall()
             self._categorie_filter_map = {r[1]: r[0] for r in cats}
             self.combo_filter_categorie.configure(values=["Toutes", UNKNOWN_LABEL] + [r[1] for r in cats])
+            self._history_categorie_filter_map = dict(self._categorie_filter_map)
+            if hasattr(self, "combo_h_categorie"):
+                self.combo_h_categorie.configure(
+                    values=["Toutes", UNKNOWN_LABEL] + [r[1] for r in cats]
+                )
             self._load_poste_filter_values()
+            self._load_history_poste_filter_values()
         except Exception:
             pass
 
@@ -585,6 +735,45 @@ class PageSuiviPresence(ctk.CTkFrame):
         self._load_poste_filter_values()
         self._apply_filter()
 
+    def _load_history_poste_filter_values(self):
+        if not hasattr(self, "combo_h_poste"):
+            return
+        if not self._personnel_structure_ready:
+            self.combo_h_poste.configure(values=["Tous", UNKNOWN_LABEL])
+            self.combo_h_poste.set("Tous")
+            return
+        selected_cat = self.combo_h_categorie.get()
+        try:
+            cur = db_manager.get_cursor()
+            if selected_cat == "Toutes":
+                cur.execute(
+                    "SELECT idposte, titre FROM tb_postepersonnel "
+                    "WHERE COALESCE(deleted,0)=0 ORDER BY titre"
+                )
+                rows = cur.fetchall()
+                self._history_poste_filter_map = {r[1]: r[0] for r in rows}
+                values = ["Tous", UNKNOWN_LABEL] + [r[1] for r in rows]
+            elif selected_cat == UNKNOWN_LABEL:
+                self._history_poste_filter_map = {}
+                values = ["Tous", UNKNOWN_LABEL]
+            else:
+                cur.execute(
+                    "SELECT idposte, titre FROM tb_postepersonnel "
+                    "WHERE COALESCE(deleted,0)=0 AND idcategorie=%s ORDER BY titre",
+                    (self._history_categorie_filter_map.get(selected_cat),),
+                )
+                rows = cur.fetchall()
+                self._history_poste_filter_map = {r[1]: r[0] for r in rows}
+                values = ["Tous", UNKNOWN_LABEL] + [r[1] for r in rows]
+            self.combo_h_poste.configure(values=values)
+            self.combo_h_poste.set("Tous")
+        except Exception:
+            pass
+
+    def _on_history_filter_category_change(self, value):
+        self._load_history_poste_filter_values()
+        self._apply_history_filter()
+
     def _apply_filter(self):
         target = FILTER_MAP.get(self.combo_statut.get())
         cat_filter = self.combo_filter_categorie.get() if hasattr(self, "combo_filter_categorie") else "Toutes"
@@ -593,21 +782,26 @@ class PageSuiviPresence(ctk.CTkFrame):
         self.update_rows_cache = {}
         count = 0
         for row in self._all_update_rows:
-            ms = row[5] or "en_attente"
-            ap = row[6] or "en_attente"
+            ms = row["matin"]
+            ap = row["apresmidi"]
             if target and ms != target and ap != target:
                 continue
-            if cat_filter != "Toutes" and row[3] != cat_filter:
+            if cat_filter != "Toutes" and row["categorie"] != cat_filter:
                 continue
-            if poste_filter != "Tous" and row[4] != poste_filter:
+            if poste_filter != "Tous" and row["poste"] != poste_filter:
                 continue
             tag = "even" if count % 2 == 0 else "odd"
             iid = self.update_tree.insert("", "end", tags=(tag,), values=(
-                row[0], row[1].strip(), self._safe(row[2]), self._safe(row[3]), self._safe(row[4]),
-                STATE_DISPLAY.get(ms), STATE_DISPLAY.get(ap), self._safe(row[7]),
+                row["id"], row["nom"], self._safe(row["sexe"]),
+                self._safe(row["categorie"]), self._safe(row["poste"]),
+                STATE_DISPLAY.get(ms), STATE_DISPLAY.get(ap), self._safe(row["observation"]),
             ))
             self.update_rows_cache[iid] = row
             count += 1
+        if self._update_sort.get("col"):
+            self._sort_visible_tree(
+                self.update_tree, self._update_sort["col"], self._update_sort["desc"], UPDATE_TREE_COLUMNS,
+            )
         self._update_stats()
 
     def ensure_presence_day(self, d):
@@ -662,19 +856,38 @@ class PageSuiviPresence(ctk.CTkFrame):
                     (UNKNOWN_LABEL, UNKNOWN_LABEL, d),
                 )
             rows = cur.fetchall()
-            self._all_update_rows = list(rows)
-            for idx, row in enumerate(rows):
-                ms  = row[5] or "en_attente"
-                ap  = row[6] or "en_attente"
-                tag = "even" if idx % 2 == 0 else "odd"
-                iid = self.update_tree.insert("", "end", tags=(tag,), values=(
-                    row[0], row[1].strip(), self._safe(row[2]), self._safe(row[3]), self._safe(row[4]),
-                    STATE_DISPLAY.get(ms), STATE_DISPLAY.get(ap), self._safe(row[7]),
-                ))
-                self.update_rows_cache[iid] = row
-            self._update_stats()
+            self._all_update_rows = [
+                {
+                    "id": row[0], "nom": row[1].strip(), "sexe": row[2],
+                    "categorie": row[3], "poste": row[4],
+                    "matin": row[5] or "en_attente", "apresmidi": row[6] or "en_attente",
+                    "observation": row[7], "_row": row,
+                }
+                for row in rows
+            ]
+            if self._update_sort.get("col"):
+                self._sort_row_list(
+                    self._all_update_rows, self._update_sort["col"],
+                    self._update_sort["desc"], UPDATE_TREE_COLUMNS,
+                )
+            self._apply_filter()
         except Exception as e:
             messagebox.showerror("Erreur", str(e))
+
+    def _sync_update_row_from_tree(self, vals, matin=None, apresmidi=None, observation=None):
+        try:
+            pid = int(vals[0])
+        except (TypeError, ValueError):
+            return
+        for row in self._all_update_rows:
+            if row.get("id") == pid:
+                if matin is not None:
+                    row["matin"] = matin
+                if apresmidi is not None:
+                    row["apresmidi"] = apresmidi
+                if observation is not None:
+                    row["observation"] = observation
+                break
 
     def _on_dbl_click(self, event):
         item = self.update_tree.identify("item",   event.x, event.y)
@@ -687,6 +900,7 @@ class PageSuiviPresence(ctk.CTkFrame):
             next_s = STATE_ORDER[(STATE_ORDER.index(cur_s) + 1) % 4]
             vals[ci] = STATE_DISPLAY[next_s]
             self.update_tree.item(item, values=vals)
+            self._sync_update_row_from_tree(vals, matin=next_s if ci == 5 else None, apresmidi=next_s if ci == 6 else None)
             self._update_stats()
         elif ci == 7:
             self._inline_edit(item, ci)
@@ -706,6 +920,7 @@ class PageSuiviPresence(ctk.CTkFrame):
             vals = list(self.update_tree.item(item, "values"))
             vals[ci] = v if v else "-"
             self.update_tree.item(item, values=vals)
+            self._sync_update_row_from_tree(vals, observation="" if vals[ci] == "-" else vals[ci])
             e.destroy()
         e.bind("<Return>", save)
         e.bind("<FocusOut>", save)
@@ -810,18 +1025,62 @@ class PageSuiviPresence(ctk.CTkFrame):
             pmap = {}
             for _, pid, m, a in cur.fetchall():
                 pmap.setdefault(pid, []).append((m, a))
-            for idx, p in enumerate(personnels):
+            self._all_history_rows = []
+            for p in personnels:
                 st = {k: 0 for k in STATE_ORDER}
                 for m, a in pmap.get(p[0], []):
                     for x in (m, a):
-                        if x in st: st[x] += 1
-                tag = "even" if idx % 2 == 0 else "odd"
-                self.history_tree.insert("", "end", tags=(tag,), values=(
-                    p[0], p[1].strip(), self._safe(p[2]), self._safe(p[3]), self._safe(p[4]),
-                    st["present"], st["retard"], st["absent"], st["en_attente"],
-                ))
+                        if x in st:
+                            st[x] += 1
+                self._all_history_rows.append({
+                    "id": p[0],
+                    "nom": p[1].strip(),
+                    "sexe": p[2],
+                    "categorie": p[3],
+                    "poste": p[4],
+                    "present": st["present"],
+                    "retard": st["retard"],
+                    "absent": st["absent"],
+                    "en_attente": st["en_attente"],
+                })
+            if self._history_sort.get("col"):
+                self._sort_row_list(
+                    self._all_history_rows, self._history_sort["col"],
+                    self._history_sort["desc"], HISTORY_TREE_COLUMNS,
+                )
+            self._apply_history_filter()
         except Exception as e:
             messagebox.showerror("Erreur", str(e))
+
+    def _apply_history_filter(self):
+        if not hasattr(self, "history_tree"):
+            return
+        cat_filter = self.combo_h_categorie.get() if hasattr(self, "combo_h_categorie") else "Toutes"
+        poste_filter = self.combo_h_poste.get() if hasattr(self, "combo_h_poste") else "Tous"
+        presence_label = self.combo_h_presence.get() if hasattr(self, "combo_h_presence") else "Tous"
+        presence_key = HISTORY_PRESENCE_FILTER.get(presence_label)
+
+        self.history_tree.delete(*self.history_tree.get_children())
+        count = 0
+        for row in self._all_history_rows:
+            if cat_filter != "Toutes" and row["categorie"] != cat_filter:
+                continue
+            if poste_filter != "Tous" and row["poste"] != poste_filter:
+                continue
+            if presence_key and int(row.get(presence_key, 0) or 0) <= 0:
+                continue
+            tag = "even" if count % 2 == 0 else "odd"
+            self.history_tree.insert("", "end", tags=(tag,), values=(
+                row["id"], row["nom"], self._safe(row["sexe"]),
+                self._safe(row["categorie"]), self._safe(row["poste"]),
+                row["present"], row["retard"], row["absent"], row["en_attente"],
+            ))
+            count += 1
+        if self._history_sort.get("col"):
+            self._sort_visible_tree(
+                self.history_tree, self._history_sort["col"],
+                self._history_sort["desc"], HISTORY_TREE_COLUMNS,
+            )
 
     def export_history_excel(self):
         data = [self.history_tree.item(i, "values")
