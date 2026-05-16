@@ -146,9 +146,10 @@ class PageClientCrédit(ctk.CTkFrame):
         self.tree.tag_configure("odd", background="#E6EFF8", foreground="#000000")
         
         for col in columns:
-            self.tree.heading(col, text=col)
             self.tree.column(col, anchor="center")
         
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(columns), configure_columns=False)
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Double-1>", self.on_double_click)
 

@@ -230,9 +230,15 @@ class PageBanque(ctk.CTkFrame):
         self._configure_table_alternating_colors(self.tree)
 
         for col in self.colonnes:
-            self.tree.heading(col, text=col)
             self.tree.column(col, anchor="center", width=120)
         self.tree.column("Description", width=320, anchor="w")
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(
+            self.tree,
+            self.colonnes,
+            column_types={"Encaissement": "fr_float", "Décaissement": "fr_float", "Date": "date"},
+            configure_columns=False,
+        )
 
         self.scrollbar_y = ttk.Scrollbar(self.frame_tree, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=self.scrollbar_y.set)

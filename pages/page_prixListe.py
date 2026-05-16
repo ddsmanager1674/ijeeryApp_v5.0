@@ -452,9 +452,11 @@ class PagePrixListe(ctk.CTkFrame):
             COL_PRIX: "e",
         }
         for col in ALL_COLS:
-            self.tree.heading(col, text=col)
             self.tree.column(col, anchor=col_anchor[col], stretch=False)
         self._appliquer_colonnes_treeview()
+        from treeview_sort_utils import attach_tree_sort
+        _fr = {c: "fr_float" for c in (COL_MINMAX, COL_MOY, COL_PRIX)}
+        attach_tree_sort(self.tree, ALL_COLS, column_types=_fr, configure_columns=False)
 
         self._scroll_y = ctk.CTkScrollbar(
             tbl, orientation="vertical", command=self.tree.yview,

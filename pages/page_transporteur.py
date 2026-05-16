@@ -139,10 +139,11 @@ class FenetreDetailTransporteur(ctk.CTkToplevel):
 
         widths = {"Référence": 120, "Date": 130, "Fournisseur": 200, "Total": 110, "Statut": 120}
         for col in cols:
-            self.tree_hist.heading(col, text=col)
             self.tree_hist.column(col, width=widths[col],
                                   anchor="e" if col == "Total" else "w")
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree_hist, list(cols), configure_columns=False)
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree_hist.yview)
         self.tree_hist.configure(yscrollcommand=vsb.set)
         self.tree_hist.grid(row=0, column=0, sticky="nsew")

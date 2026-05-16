@@ -15,6 +15,7 @@ import psycopg2, psycopg2.extras, json
 from datetime import datetime, timedelta
 from resource_utils import get_config_path
 from log_utils import AppLogger
+from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -255,7 +256,8 @@ class PageGestionPeremption(ctk.CTkFrame):
         self.item_meta    = {}
         self.magasins     = []
         self.search_timer = None
-        self._sort_state  = {}
+        self._sort_state = new_sort_state()
+        self._tree_sort = None
 
         self._apply_tree_style()
         self._build_ui()
@@ -481,9 +483,14 @@ class PageGestionPeremption(ctk.CTkFrame):
         }
         for col in cols:
             w, anchor = col_cfg[col]
-            self.tree.heading(col, text=col,
-                              command=lambda c=col: self._sort_by(c))
             self.tree.column(col, width=w, anchor=anchor)
+        self._tree_sort = TreeSortController(
+            self.tree,
+            [TreeColumn(c, width=col_cfg[c][0], anchor=col_cfg[c][1]) for c in cols],
+            sort_state=self._sort_state,
+        )
+        self._tree_sort.on_sort = lambda col, desc: self._sort_by(col, desc)
+        self._tree_sort.wire_headings(configure_columns=False)
 
         sy = ctk.CTkScrollbar(tbl, orientation="vertical",
                               command=self.tree.yview)
@@ -654,9 +661,7 @@ class PageGestionPeremption(ctk.CTkFrame):
     def on_filter_change(self, *_):
         self._populate(self.all_rows)
 
-    def _sort_by(self, col):
-        reverse = self._sort_state.get(col, False)
-        self._sort_state[col] = not reverse
+    def _sort_by(self, col, desc=False):
         key_map = {
             "Code":             "codearticle",
             "Designation":      "designationarticle",
@@ -675,7 +680,7 @@ class PageGestionPeremption(ctk.CTkFrame):
                 self._populate(sorted(
                     self.all_rows,
                     key=lambda r: (r[k] is None, r[k]),
-                    reverse=reverse))
+                    reverse=bool(desc)))
             except Exception:
                 pass
 

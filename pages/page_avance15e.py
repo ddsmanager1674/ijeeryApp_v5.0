@@ -15,6 +15,7 @@ from date_picker_utils import (
     get_date_from_widget,
     set_date_on_widget,
 )
+from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
 
 # Thème UI iJeery
 from app_theme import Colors, Fonts, Theme, styled, Layout
@@ -54,7 +55,8 @@ class PageAVQ(ctk.CTkFrame):
         self.selected_personnel_var = ctk.StringVar(value="")
         self.iduser = iduser
         self._avances_raw = []
-        self._sort_state = {"col": None, "desc": False}
+        self._sort_state = new_sort_state()
+        self._table_sort = None
 
         # Afficher l'iduser pour le débogage
         if self.iduser:
@@ -286,19 +288,20 @@ class PageAVQ(ctk.CTkFrame):
 
         # Use ttk.Treeview as CTkTreeview doesn't exist
         self.treeview = ttk.Treeview(tree_frame, columns=("Date", "Référence", "Observation", "Montant", "ID", "Personnel"), show="headings", style="P.Treeview")
-        self.treeview.heading("Date", text="Date", anchor="w", command=lambda: self.sort_treeview("date"))
-        self.treeview.heading("Référence", text="Référence", anchor="w", command=lambda: self.sort_treeview("ref"))
-        self.treeview.heading("Observation", text="Observation", anchor="w", command=lambda: self.sort_treeview("obs"))
-        self.treeview.heading("Montant", text="Montant", anchor="e", command=lambda: self.sort_treeview("montant"))
-        self.treeview.heading("ID", text="ID", anchor="w")
-        self.treeview.heading("Personnel", text="Personnel", anchor="w", command=lambda: self.sort_treeview("personnel"))
-
-        self.treeview.column("Date", width=150)
-        self.treeview.column("Référence", width=120)
-        self.treeview.column("Observation", width=200)
-        self.treeview.column("Montant", width=80, anchor="e")
-        self.treeview.column("ID", width=0, stretch=tk.NO) # Hide ID column
-        self.treeview.column("Personnel", width=150)
+        self._table_sort = TreeSortController(
+            self.treeview,
+            [
+                TreeColumn("Date", sort_key="date", sort_type="date", width=150),
+                TreeColumn("Référence", sort_key="ref", width=120),
+                TreeColumn("Observation", sort_key="obs", width=200),
+                TreeColumn("Montant", sort_key="montant", sort_type="float", width=80, anchor="e"),
+                TreeColumn("ID", sortable=False, width=0, stretch=False),
+                TreeColumn("Personnel", sort_key="personnel", width=150),
+            ],
+            sort_state=self._sort_state,
+        )
+        self._table_sort.on_sort = lambda sk, desc: self.apply_filters(force_sort_key=sk, force_desc=desc)
+        self._table_sort.wire_headings()
         self._configure_table_alternating_colors(self.treeview)
 
         self.treeview.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
@@ -462,12 +465,8 @@ class PageAVQ(ctk.CTkFrame):
         self.apply_filters()
 
     def sort_treeview(self, key):
-        # clic sur l'en-tête: bascule asc/desc
-        if self._sort_state.get("col") == key:
-            self._sort_state["desc"] = not self._sort_state.get("desc", False)
-        else:
-            self._sort_state = {"col": key, "desc": False}
-        self.apply_filters(force_sort_key=key, force_desc=self._sort_state["desc"])
+        if self._table_sort:
+            self._table_sort.click(key)
 
     def apply_filters(self, force_sort_key=None, force_desc=None):
         # build filtered list from self._avances_raw
@@ -530,6 +529,8 @@ class PageAVQ(ctk.CTkFrame):
         # render
         for item in self.treeview.get_children():
             self.treeview.delete(item)
+        if self._table_sort:
+            self._table_sort.refresh_headings()
         for r in rows:
             self.treeview.insert(
                 "",

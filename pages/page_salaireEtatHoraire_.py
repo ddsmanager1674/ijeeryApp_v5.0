@@ -15,6 +15,7 @@ from resource_utils import get_config_path, safe_file_read
 
 from app_theme import Colors, Fonts, styled, Layout
 from log_utils import AppLogger
+from treeview_sort_utils import attach_tree_sort
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -108,31 +109,6 @@ if conn is None:
 cursor = conn.cursor()
     
 
-# Global sort_order for column sorting
-sort_order = {}
-
-
-
-def sort_column(tv, col, col_index):
-    """Sorts the Treeview column data."""
-    global sort_order
-    data = [(tv.set(k, col), k) for k in tv.get_children('')]
-    try:
-        if col in ["Taux horaire", "Total Heure", "Montant", "Avance 15e", "Déduction", "Net à payer"]:
-            # Handle French number format for sorting
-            data.sort(key=lambda t: float(str(t[0]).replace('.', '').replace(',', '.')),
-                      reverse=sort_order.get(col, False))
-        else:
-            data.sort(key=lambda t: str(t[0]).lower(),
-                      reverse=sort_order.get(col, False))
-    except Exception:
-        data.sort(reverse=sort_order.get(col, False))
-
-    for index, (val, k) in enumerate(data):
-        tv.move(k, '', index)
-
-    sort_order[col] = not sort_order.get(col, False)
-
 #---
 
 ## PageEtatSalaireHoraire Class
@@ -220,7 +196,6 @@ class PageEtatSalaireHoraire(ctk.CTkFrame):
         self._configure_table_alternating_colors(self.tree)
 
         for col in self.columns:
-            self.tree.heading(col, text=col, command=lambda c=col, i=self.columns.index(col): sort_column(self.tree, c, i))
             self.tree.column(col, anchor="center", width=100)
 
         self.tree.column("Nom", anchor="w", width=120)
@@ -231,6 +206,21 @@ class PageEtatSalaireHoraire(ctk.CTkFrame):
         self.tree.column("Avance 15e", width=100)
         self.tree.column("Déduction", width=100)
         self.tree.column("Net à payer", width=100)
+
+        _fr_num = {
+            "Taux horaire": "fr_float",
+            "Total Heure": "fr_float",
+            "Montant": "fr_float",
+            "Avance 15e": "fr_float",
+            "Déduction": "fr_float",
+            "Net à payer": "fr_float",
+        }
+        attach_tree_sort(
+            self.tree,
+            self.columns,
+            column_types=_fr_num,
+            configure_columns=False,
+        )
 
         self.vsb = ttk.Scrollbar(table_card, orient="vertical", command=self.tree.yview)
         self.vsb.grid(row=0, column=1, sticky="ns", pady=6)

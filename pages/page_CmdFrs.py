@@ -632,11 +632,12 @@ class PageCommandeFrs(ctk.CTkFrame):
         col_widths = {"Article": 220, "Unité": 75, "Qté Cmd": 90,
                       "Prix Unit.": 105, "Qté Livrée": 90, "Péremption": 90, "Fournisseur": 140}
         for col in colonnes:
-            self.tree.heading(col, text=col)
             self.tree.column(col, width=col_widths.get(col, 90),
                              anchor="center" if col not in ("Article", "Fournisseur") else "w",
                              minwidth=60)
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(colonnes), configure_columns=False)
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)

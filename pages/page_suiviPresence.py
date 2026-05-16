@@ -17,6 +17,11 @@ from tkinter import ttk, messagebox, filedialog
 from resource_utils import get_config_path
 from app_theme import Colors, Fonts, Theme, styled, Layout
 from date_picker_utils import get_date_from_widget, parse_date, set_date_on_widget
+from treeview_sort_utils import (
+    TreeSortController,
+    columns_from_tuples,
+    new_sort_state,
+)
 from pages.personnel_structure import UNKNOWN_LABEL, ensure_personnel_structure, has_personnel_structure, personnel_poste_joins
 
 
@@ -264,8 +269,10 @@ class PageSuiviPresence(ctk.CTkFrame):
         self._poste_filter_map = {}
         self._history_categorie_filter_map = {}
         self._history_poste_filter_map = {}
-        self._update_sort = {"col": None, "desc": False}
-        self._history_sort = {"col": None, "desc": False}
+        self._update_sort = new_sort_state()
+        self._history_sort = new_sort_state()
+        self._update_sort_ctrl = None
+        self._history_sort_ctrl = None
         _setup_treeview_style()
 
         self.grid_columnconfigure(0, weight=1)
@@ -447,10 +454,15 @@ class PageSuiviPresence(ctk.CTkFrame):
         cols = tuple(c[0] for c in UPDATE_TREE_COLUMNS)
         self.update_tree = ttk.Treeview(tc, columns=cols, show="headings",
                                          style="P.Treeview", selectmode="browse")
-        self._configure_sortable_tree(
-            self.update_tree, UPDATE_TREE_COLUMNS, self._update_sort,
-            on_sort=self._on_sort_update_tree,
+        self._update_sort_ctrl = TreeSortController(
+            self.update_tree,
+            columns_from_tuples(UPDATE_TREE_COLUMNS),
+            sort_state=self._update_sort,
+            state_order=STATE_ORDER,
+            label_to_state=LABEL_STATE,
         )
+        self._update_sort_ctrl.on_sort = self._on_sort_update_tree
+        self._update_sort_ctrl.wire_headings()
 
         self.update_tree.tag_configure("even", background=Colors.BG_CARD)
         self.update_tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
@@ -563,10 +575,13 @@ class PageSuiviPresence(ctk.CTkFrame):
         cols = tuple(c[0] for c in HISTORY_TREE_COLUMNS)
         self.history_tree = ttk.Treeview(tc, columns=cols, show="headings",
                                           style="P.Treeview", selectmode="browse")
-        self._configure_sortable_tree(
-            self.history_tree, HISTORY_TREE_COLUMNS, self._history_sort,
-            on_sort=self._on_sort_history_tree,
+        self._history_sort_ctrl = TreeSortController(
+            self.history_tree,
+            columns_from_tuples(HISTORY_TREE_COLUMNS),
+            sort_state=self._history_sort,
         )
+        self._history_sort_ctrl.on_sort = self._on_sort_history_tree
+        self._history_sort_ctrl.wire_headings()
 
         self.history_tree.tag_configure("even", background=Colors.BG_CARD)
         self.history_tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
@@ -587,88 +602,15 @@ class PageSuiviPresence(ctk.CTkFrame):
         if d:
             self.load_update_for_date(d)
 
-    # ── Tri des tableaux (en-têtes cliquables + flèches) ─────────────────────
-
-    @staticmethod
-    def _heading_with_sort_arrow(base_text: str, sort_key: str, sort_state: dict) -> str:
-        if sort_state.get("col") == sort_key:
-            return f"{base_text} {'▼' if sort_state.get('desc') else '▲'}"
-        return f"{base_text} ↕"
-
-    def _configure_sortable_tree(self, tree, columns_spec, sort_state, on_sort):
-        for col_id, width, anchor, sort_key, _stype in columns_spec:
-            tree.heading(
-                col_id,
-                text=self._heading_with_sort_arrow(col_id, sort_key, sort_state),
-                command=lambda sk=sort_key: on_sort(sk),
-            )
-            tree.column(col_id, width=width, anchor=anchor, minwidth=30)
-
-    def _refresh_tree_headings(self, tree, columns_spec, sort_state):
-        for col_id, _w, _a, sort_key, _t in columns_spec:
-            tree.heading(
-                col_id,
-                text=self._heading_with_sort_arrow(col_id, sort_key, sort_state),
-            )
-
-    @staticmethod
-    def _sort_key_for_value(val, sort_type: str):
-        if sort_type == "int":
-            try:
-                return int(val)
-            except (TypeError, ValueError):
-                return 0
-        if sort_type == "state":
-            s = val if isinstance(val, str) else str(val or "")
-            if s in STATE_ORDER:
-                return STATE_ORDER.index(s)
-            mapped = LABEL_STATE.get(s)
-            if mapped in STATE_ORDER:
-                return STATE_ORDER.index(mapped)
-            return 99
-        return (str(val or "")).lower()
-
-    def _sort_row_list(self, rows, sort_key, desc, columns_spec):
-        stype = next((t for c, _w, _a, sk, t in columns_spec if sk == sort_key), "str")
-        rows.sort(
-            key=lambda r: self._sort_key_for_value(
-                r.get(sort_key) if isinstance(r, dict) else r[sort_key], stype
-            ),
-            reverse=bool(desc),
+    def _on_sort_update_tree(self, sort_key, desc):
+        self._update_sort_ctrl.after_click_sort_rows(
+            self._all_update_rows, self._apply_filter,
         )
 
-    def _on_sort_update_tree(self, sort_key):
-        if self._update_sort.get("col") == sort_key:
-            self._update_sort["desc"] = not self._update_sort.get("desc", False)
-        else:
-            self._update_sort = {"col": sort_key, "desc": False}
-        self._refresh_tree_headings(self.update_tree, UPDATE_TREE_COLUMNS, self._update_sort)
-        if self._all_update_rows:
-            self._sort_row_list(self._all_update_rows, sort_key, self._update_sort["desc"], UPDATE_TREE_COLUMNS)
-            self._apply_filter()
-        else:
-            self._sort_visible_tree(self.update_tree, sort_key, self._update_sort["desc"], UPDATE_TREE_COLUMNS)
-
-    def _on_sort_history_tree(self, sort_key):
-        if self._history_sort.get("col") == sort_key:
-            self._history_sort["desc"] = not self._history_sort.get("desc", False)
-        else:
-            self._history_sort = {"col": sort_key, "desc": False}
-        self._refresh_tree_headings(self.history_tree, HISTORY_TREE_COLUMNS, self._history_sort)
-        if self._all_history_rows:
-            self._sort_row_list(self._all_history_rows, sort_key, self._history_sort["desc"], HISTORY_TREE_COLUMNS)
-            self._apply_history_filter()
-        else:
-            self._sort_visible_tree(self.history_tree, sort_key, self._history_sort["desc"], HISTORY_TREE_COLUMNS)
-
-    def _sort_visible_tree(self, tree, sort_key, desc, columns_spec):
-        col_id = next(spec[0] for spec in columns_spec if spec[3] == sort_key)
-        stype = next(spec[4] for spec in columns_spec if spec[3] == sort_key)
-        items = [(tree.set(iid, col_id), iid) for iid in tree.get_children("")]
-        items.sort(key=lambda x: self._sort_key_for_value(x[0], stype), reverse=bool(desc))
-        for idx, (_v, iid) in enumerate(items):
-            tree.move(iid, "", idx)
-            tree.item(iid, tags=("even" if idx % 2 == 0 else "odd",))
+    def _on_sort_history_tree(self, sort_key, desc):
+        self._history_sort_ctrl.after_click_sort_rows(
+            self._all_history_rows, self._apply_history_filter,
+        )
 
     def _load_category_poste_filters(self):
         if not hasattr(self, "combo_filter_categorie"):
@@ -798,10 +740,8 @@ class PageSuiviPresence(ctk.CTkFrame):
             ))
             self.update_rows_cache[iid] = row
             count += 1
-        if self._update_sort.get("col"):
-            self._sort_visible_tree(
-                self.update_tree, self._update_sort["col"], self._update_sort["desc"], UPDATE_TREE_COLUMNS,
-            )
+        if self._update_sort.get("col") and self._update_sort_ctrl:
+            self._update_sort_ctrl.sort_visible()
         self._update_stats()
 
     def ensure_presence_day(self, d):
@@ -865,11 +805,8 @@ class PageSuiviPresence(ctk.CTkFrame):
                 }
                 for row in rows
             ]
-            if self._update_sort.get("col"):
-                self._sort_row_list(
-                    self._all_update_rows, self._update_sort["col"],
-                    self._update_sort["desc"], UPDATE_TREE_COLUMNS,
-                )
+            if self._update_sort.get("col") and self._update_sort_ctrl:
+                self._update_sort_ctrl.sort_rows(self._all_update_rows)
             self._apply_filter()
         except Exception as e:
             messagebox.showerror("Erreur", str(e))
@@ -1043,11 +980,8 @@ class PageSuiviPresence(ctk.CTkFrame):
                     "absent": st["absent"],
                     "en_attente": st["en_attente"],
                 })
-            if self._history_sort.get("col"):
-                self._sort_row_list(
-                    self._all_history_rows, self._history_sort["col"],
-                    self._history_sort["desc"], HISTORY_TREE_COLUMNS,
-                )
+            if self._history_sort.get("col") and self._history_sort_ctrl:
+                self._history_sort_ctrl.sort_rows(self._all_history_rows)
             self._apply_history_filter()
         except Exception as e:
             messagebox.showerror("Erreur", str(e))
@@ -1076,11 +1010,8 @@ class PageSuiviPresence(ctk.CTkFrame):
                 row["present"], row["retard"], row["absent"], row["en_attente"],
             ))
             count += 1
-        if self._history_sort.get("col"):
-            self._sort_visible_tree(
-                self.history_tree, self._history_sort["col"],
-                self._history_sort["desc"], HISTORY_TREE_COLUMNS,
-            )
+        if self._history_sort.get("col") and self._history_sort_ctrl:
+            self._history_sort_ctrl.sort_visible()
 
     def export_history_excel(self):
         data = [self.history_tree.item(i, "values")

@@ -35,6 +35,7 @@ except ImportError:
             from tkinter import messagebox as _mb
             _mb.showerror("Erreur", "Le fichier 'page_retardCredit.py' est manquant ou contient une erreur.")
 from log_utils import AppLogger
+from treeview_sort_utils import attach_tree_sort, new_sort_state
 
 
 try:
@@ -114,6 +115,8 @@ class PageClient(ctk.CTkFrame):
         
         self.sort_column = "Crédit en cours"
         self.sort_ascending = False
+        self._client_sort_state = new_sort_state()
+        self._client_sort = None
         
         _apply_treeview_theme()   # ← appliqué une seule fois à l'init
         self.setup_ui()
@@ -272,9 +275,16 @@ class PageClient(ctk.CTkFrame):
         col_widths = {"Nom du Client": 120, "Contact": 110, "Adresse": 140,
                       "NIF": 90, "Crédit en cours": 130, "Dernier Crédit": 190, "Type": 110}
         for col in columns:
-            self.tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
             self.tree.column(col, width=col_widths.get(col, 110))
         self.tree.column("Crédit en cours", anchor="e")
+        self._client_sort = attach_tree_sort(
+            self.tree,
+            columns,
+            sort_state=self._client_sort_state,
+            column_widths=col_widths,
+            on_sort=self._on_client_header_sort,
+            configure_columns=False,
+        )
         
         self.tree.pack(fill="both", expand=True, pady=10)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
@@ -410,36 +420,37 @@ class PageClient(ctk.CTkFrame):
         self.tree.update_idletasks()
         if self.search_entry.get().strip():
             self.filter_clients()
-    def sort_by_column(self, column):
-        if self.sort_column == column:
-            self.sort_ascending = not self.sort_ascending
-        else:
-            self.sort_column = column
-            self.sort_ascending = True
-        
+    def _on_client_header_sort(self, column, desc):
+        self.sort_column = column
+        self.sort_ascending = not desc
         if not self.all_clients_data:
             return
-        
         col_index = {
             "Nom du Client": 1, "Contact": 2, "Adresse": 3, "NIF": 4,
             "Crédit en cours": "credit", "Dernier Crédit": "dernier_credit"
         }
         
         if column == "Crédit en cours":
-            sorted_data = sorted(self.all_clients_data, key=lambda x: x[1], reverse=not self.sort_ascending)
+            sorted_data = sorted(self.all_clients_data, key=lambda x: x[1], reverse=desc)
         elif column == "Dernier Crédit":
             sorted_data = sorted(
                 self.all_clients_data,
                 key=lambda x: self._extract_days_from_label(x[2]),
-                reverse=not self.sort_ascending
+                reverse=desc,
             )
         else:
             idx = col_index.get(column, 1)
-            sorted_data = sorted(self.all_clients_data, 
-                               key=lambda x: str(x[0][idx] or "").lower(),
-                               reverse=not self.sort_ascending)
+            sorted_data = sorted(
+                self.all_clients_data,
+                key=lambda x: str(x[0][idx] or "").lower(),
+                reverse=desc,
+            )
         
         self.display_clients(sorted_data)
+
+    def sort_by_column(self, column):
+        if self._client_sort:
+            self._client_sort.click(column)
 
     def add_client(self):
         if not self.conn: return

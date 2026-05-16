@@ -129,9 +129,10 @@ class PageSalaireEtatSB(ctk.CTkFrame):
         self.treeview.configure(yscrollcommand=vsb.set)
         vsb.grid(row=0, column=1, sticky="ns", pady=6)
         for col in self.headers:
-            self.treeview.heading(col, text=col)
             self.treeview.column(col, anchor="center", width=120)
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.treeview, list(self.headers), configure_columns=False)
         self.label_count = ctk.CTkLabel(self, text="Nombre affichés: 0", font=Fonts.label(11), text_color=Colors.TEXT_SECONDARY)
         self.label_count.grid(row=4, column=0, sticky="w", padx=14, pady=(0, 10))
 

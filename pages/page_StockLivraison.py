@@ -147,9 +147,10 @@ class PageStockLivraison(ctk.CTkFrame):
         }
         
         for col in colonnes:
-            self.tree.heading(col, text=col)
             self.tree.column(col, width=largeurs.get(col, 120), anchor='center')
         
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(colonnes), configure_columns=False)
         # Scrollbars
         scrollbar_y = ctk.CTkScrollbar(
             table_card,

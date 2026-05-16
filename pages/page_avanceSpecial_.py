@@ -15,6 +15,7 @@ from date_picker_utils import (
     get_date_from_widget,
     set_date_on_widget,
 )
+from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
 
 # Thème UI iJeery
 from app_theme import Colors, Fonts, Theme, styled, Layout
@@ -74,7 +75,8 @@ class FenetreAvanceSpec(ctk.CTkFrame):
         self.id_prof_selectionne = None
         self.selected_personnel_var = ctk.StringVar(value="")
         self._avances_raw = []
-        self._sort_state = {"col": None, "desc": False}
+        self._sort_state = new_sort_state()
+        self._table_sort = None
 
         # Widgets d'interface
         self.creer_widgets()
@@ -273,11 +275,8 @@ class FenetreAvanceSpec(ctk.CTkFrame):
         self.apply_filters()
 
     def sort_treeview(self, key):
-        if self._sort_state.get("col") == key:
-            self._sort_state["desc"] = not self._sort_state.get("desc", False)
-        else:
-            self._sort_state = {"col": key, "desc": False}
-        self.apply_filters(force_sort_key=key, force_desc=self._sort_state["desc"])
+        if self._table_sort:
+            self._table_sort.click(key)
 
     def apply_filters(self, force_sort_key=None, force_desc=None):
         q = (self.filter_search_var.get() if hasattr(self, "filter_search_var") else "").strip().lower()
@@ -333,6 +332,8 @@ class FenetreAvanceSpec(ctk.CTkFrame):
             else:
                 rows.sort(key=lambda x: x.get("date_dt") or datetime.min, reverse=True)
 
+        if self._table_sort:
+            self._table_sort.refresh_headings()
         for item in self.tree.get_children():
             self.tree.delete(item)
         for r in rows:
@@ -516,18 +517,20 @@ class FenetreAvanceSpec(ctk.CTkFrame):
             style="P.Treeview",
         )
         self._configure_table_alternating_colors(self.tree)
-        for col in ("Date", "Référence", "Observation", "Montant", "Nb Remboursement", "Paiement par Mois"):
-            if col == "Date":
-                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("date"))
-            elif col == "Référence":
-                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("ref"))
-            elif col == "Observation":
-                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("obs"))
-            elif col == "Montant":
-                self.tree.heading(col, text=col, command=lambda: self.sort_treeview("montant"))
-            else:
-                self.tree.heading(col, text=col)
-            self.tree.column(col, width=120)
+        self._table_sort = TreeSortController(
+            self.tree,
+            [
+                TreeColumn("Date", sort_key="date", sort_type="date", width=120),
+                TreeColumn("Référence", sort_key="ref", width=120),
+                TreeColumn("Observation", sort_key="obs", width=120),
+                TreeColumn("Montant", sort_key="montant", sort_type="float", width=120),
+                TreeColumn("Nb Remboursement", sortable=False, width=120),
+                TreeColumn("Paiement par Mois", sortable=False, width=120),
+            ],
+            sort_state=self._sort_state,
+        )
+        self._table_sort.on_sort = lambda sk, desc: self.apply_filters(force_sort_key=sk, force_desc=desc)
+        self._table_sort.wire_headings()
 
         # Configuration des scrolls (still ttk.Scrollbar)
         vsb = ttk.Scrollbar(tree_container_frame, orient="vertical", command=self.tree.yview)

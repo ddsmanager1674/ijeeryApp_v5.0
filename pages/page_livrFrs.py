@@ -288,11 +288,12 @@ class PageBonReception(ctk.CTkFrame):
         col_widths = {"Article": 260, "Unité": 90, "Date péremption": 105,
                       "Fournisseur": 155, "Qté Livrée": 90, "Prix Unit.": 100, "Montant": 105}
         for col in colonnes:
-            self.tree.heading(col, text=col)
             self.tree.column(col, width=col_widths.get(col, 90),
                              anchor="w" if col in ("Article", "Fournisseur") else "center",
                              minwidth=60)
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(colonnes), configure_columns=False)
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)

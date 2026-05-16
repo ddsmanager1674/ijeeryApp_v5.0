@@ -1148,9 +1148,12 @@ class PageAvoir(ctk.CTkFrame):
         tree.tag_configure("odd",  background=Colors.BG_ROW_ALT)
 
         for col, w in zip(colonnes, [60, 220, 180, 320]):
-            tree.heading(col, text=col)
             tree.column(col, width=w, anchor="w" if col != "ID" else "center")
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(tree, list(col_config.keys()), configure_columns=False)
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(tree, list(zip(colonnes, [60, 220, 180, 320])), configure_columns=False)
         tree.pack(fill="both", expand=True, pady=5)
 
         def charger_clients(filtre=""):
@@ -1706,7 +1709,6 @@ class PageAvoir(ctk.CTkFrame):
             "Montant Total": (120, True), "Utilisateur": (100, True),
         }
         for col, (w, visible) in col_config.items():
-            tree.heading(col, text=col)
             tree.column(col, width=w, stretch=visible, anchor='center')
 
         scrollbar = ctk.CTkScrollbar(tree_frame, command=tree.yview)

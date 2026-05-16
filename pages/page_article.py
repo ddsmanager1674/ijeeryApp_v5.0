@@ -267,9 +267,10 @@ class PageArticle(ctk.CTkFrame):
             "Alerte Dépôt": (80,  "center", False),
         }
         for col, (w, anc, stretch) in col_cfg.items():
-            self.tree.heading(col, text=col)
             self.tree.column(col, width=w if w else 200, anchor=anc,
                              stretch=stretch, minwidth=50)
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(col_cfg.keys()), configure_columns=False)
 
         sy = ctk.CTkScrollbar(tbl, orientation="vertical",
                                command=self.tree.yview)

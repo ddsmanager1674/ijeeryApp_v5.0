@@ -322,13 +322,14 @@ class PageChangementArticle(ctk.CTkFrame):
         )
         self._configure_table_alternating_colors(self.tree_sortie)
         for col in colonnes_sortie:
-            self.tree_sortie.heading(col, text=col)
             self.tree_sortie.column(
                 col,
                 width=280 if col == "Désignation" else 110,
                 anchor="w" if col in ("Code", "Désignation", "Unité", "Magasin") else "e",
             )
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree_sortie, list(colonnes_sortie), configure_columns=False)
         sb_sortie = ctk.CTkScrollbar(tree_container, command=self.tree_sortie.yview)
         self.tree_sortie.configure(yscrollcommand=sb_sortie.set)
         self.tree_sortie.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=4)

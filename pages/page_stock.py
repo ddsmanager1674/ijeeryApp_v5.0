@@ -267,7 +267,6 @@ class PageStock(ctk.CTkFrame):
         hsb.grid(row=1, column=0, sticky="ew",  padx=(6, 0))
 
         for col in self.colonnes_dynamiques:
-            self.tree.heading(col, text=col)
             if col == "Désignation":
                 self.tree.column(col, width=350, anchor="w",      minwidth=200)
             elif col == "Code":
@@ -276,6 +275,12 @@ class PageStock(ctk.CTkFrame):
                 self.tree.column(col, width=120, anchor="e")
             else:
                 self.tree.column(col, width=110, anchor="center")
+        from treeview_sort_utils import attach_tree_sort
+        _st = {"Prix": "fr_float"} if "Prix" in self.colonnes_dynamiques else {}
+        attach_tree_sort(
+            self.tree, list(self.colonnes_dynamiques),
+            column_types=_st, configure_columns=False,
+        )
 
     def charger_stocks_avec_progression(self):
         """Charge les stocks avec une fenêtre de progression"""

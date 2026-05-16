@@ -462,9 +462,10 @@ class PageListeMouvement(ctk.CTkFrame):
                                 foreground=Colors.TEXT_PRIMARY)
 
         for col in cols_default:
-            self.tree.heading(col, text=col)
             self.tree.column(col, width=120, anchor="center")
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(cols_default), configure_columns=False)
         # Scrollbars via CTkScrollbar (thème cohérent)
         sb_y = ctk.CTkScrollbar(tree_card, command=self.tree.yview)
         sb_x = ctk.CTkScrollbar(tree_card, orientation="horizontal",
@@ -744,7 +745,6 @@ class PageListeMouvement(ctk.CTkFrame):
         self.tree.configure(columns=cols)
 
         for col in cols:
-            self.tree.heading(col, text=col)
             # Largeur adaptée par type de colonne
             if col in ("Montant Total", "Articles", "Nombre d'articles"):
                 self.tree.column(col, width=110, anchor="e",   minwidth=80)
@@ -760,6 +760,9 @@ class PageListeMouvement(ctk.CTkFrame):
                 self.tree.column(col, width=180, anchor="w",   minwidth=120)
             else:
                 self.tree.column(col, width=150, anchor="w",   minwidth=100)
+        from treeview_sort_utils import attach_tree_sort
+        _lt = {"Montant Total": "fr_float", "Nombre d'articles": "int"}
+        attach_tree_sort(self.tree, cols, column_types=_lt, configure_columns=False)
 
         for idx, row in df.iterrows():
             tag = "row_white" if idx % 2 == 0 else "row_alt"
@@ -945,8 +948,9 @@ class PageListeMouvement(ctk.CTkFrame):
                            foreground=Colors.TEXT_PRIMARY)
 
         for col in columns:
-            tree.heading(col, text=col)
             tree.column(col, width=130, anchor="w")
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(tree, columns, configure_columns=False)
 
         sb_y = ctk.CTkScrollbar(card, command=tree.yview)
         sb_x = ctk.CTkScrollbar(card, orientation="horizontal", command=tree.xview)

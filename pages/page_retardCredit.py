@@ -7,6 +7,7 @@ import os
 from datetime import datetime, date
 from typing import List
 from resource_utils import get_config_path
+from treeview_sort_utils import attach_tree_sort, new_sort_state
 
 
 class PageRetardCredit(ctk.CTkFrame):
@@ -22,6 +23,8 @@ class PageRetardCredit(ctk.CTkFrame):
         self.total_montant = ctk.StringVar(value="0,00 Ar")
         self.total_retard_count = ctk.StringVar(value="0 client(s)")
         self.current_records: List = []
+        self._retard_sort_state = new_sort_state()
+        self._retard_sort = None
 
         # 3. CRÉATION DE L'INTERFACE
         self.create_widgets()
@@ -139,8 +142,22 @@ class PageRetardCredit(ctk.CTkFrame):
             "Nb Jours Retard":    110,
         }
         for col in columns:
-            self.tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
             self.tree.column(col, anchor="center", width=col_widths.get(col, 110))
+        _num_cols = {
+            "Montant (Ar)": "fr_float",
+            "Total Payé (Ar)": "fr_float",
+            "Solde Restant (Ar)": "fr_float",
+            "Date Facture": "date",
+            "Date Échéance": "date",
+        }
+        self._retard_sort = attach_tree_sort(
+            self.tree,
+            columns,
+            sort_state=self._retard_sort_state,
+            column_types=_num_cols,
+            on_sort=self._on_retard_header_sort,
+            configure_columns=False,
+        )
 
         # Scrollbars
         vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self.tree.yview)
@@ -273,7 +290,7 @@ class PageRetardCredit(ctk.CTkFrame):
     # ─────────────────────────────────────────────
     #  TRI PAR COLONNE
     # ─────────────────────────────────────────────
-    def sort_by_column(self, col: str):
+    def _on_retard_header_sort(self, col: str, desc: bool):
         col_index = {
             "Client":             0,
             "N° Facture":         1,
@@ -284,15 +301,18 @@ class PageRetardCredit(ctk.CTkFrame):
             "Date Échéance":      6,
             "Nb Jours Retard":    7,
         }.get(col, 0)
-
         try:
             self.current_records.sort(
                 key=lambda r: (r[col_index] is None, r[col_index]),
-                reverse=False
+                reverse=bool(desc),
             )
         except TypeError:
             pass
         self.update_ui()
+
+    def sort_by_column(self, col: str):
+        if self._retard_sort:
+            self._retard_sort.click(col)
 
     # ─────────────────────────────────────────────
     #  EXPORTATION EXCEL (CSV)

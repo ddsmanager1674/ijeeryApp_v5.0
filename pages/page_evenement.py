@@ -7,6 +7,7 @@ from resource_utils import get_config_path
 from app_theme import Colors, Fonts, styled
 from date_picker_utils import format_date_iso, get_date_from_widget, set_date_on_widget
 from log_utils import AppLogger
+from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
 
 
 class PageEvenement(ctk.CTkFrame):
@@ -18,8 +19,12 @@ class PageEvenement(ctk.CTkFrame):
         self.session_data = session_data
         self.db_config = db_config
         self.conn = self.connect_db()
+        self._sort_state = new_sort_state()
+        self._sort_state["col"] = "datetime"
+        self._sort_state["desc"] = True
         self.sort_column = "datetime"
         self.sort_desc = True
+        self._tree_sort = None
         self._logger = AppLogger(conn=self.conn, session_data=self.session_data or {})
         self._build_ui()
         self._apply_table_style()
@@ -123,12 +128,20 @@ class PageEvenement(ctk.CTkFrame):
 
         columns = ("datetime", "user", "description")
         self.tree = ttk.Treeview(table_wrap, columns=columns, show="headings", style="Evenements.Treeview")
-        self.tree.heading("datetime", text="Date & Heure", command=lambda: self._toggle_sort("datetime"))
-        self.tree.heading("user", text="Utilisateur", command=lambda: self._toggle_sort("user"))
-        self.tree.heading("description", text="Description", command=lambda: self._toggle_sort("description"))
         self.tree.column("datetime", width=180, anchor="center")
         self.tree.column("user", width=180, anchor="w")
         self.tree.column("description", width=700, anchor="w")
+        self._tree_sort = TreeSortController(
+            self.tree,
+            [
+                TreeColumn("datetime", text="Date & Heure", sort_type="datetime", width=180, anchor="center"),
+                TreeColumn("user", text="Utilisateur", width=180),
+                TreeColumn("description", text="Description", width=700),
+            ],
+            sort_state=self._sort_state,
+        )
+        self._tree_sort.on_sort = self._on_header_sort
+        self._tree_sort.wire_headings(configure_columns=False)
         self.tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
         self.tree.tag_configure("row_even", background=Colors.BG_CARD)
         self.tree.tag_configure("row_odd", background=Colors.BG_ROW_ALT)
@@ -192,13 +205,16 @@ class PageEvenement(ctk.CTkFrame):
         except Exception as err:
             messagebox.showerror("Erreur", f"Chargement des utilisateurs impossible : {err}")
 
-    def _toggle_sort(self, column):
-        if self.sort_column == column:
-            self.sort_desc = not self.sort_desc
-        else:
-            self.sort_column = column
-            self.sort_desc = True
+    def _on_header_sort(self, column, desc):
+        self.sort_column = column
+        self.sort_desc = desc
         self.refresh_data()
+
+    def _toggle_sort(self, column):
+        if self._tree_sort:
+            self._tree_sort.click(column)
+        else:
+            self._on_header_sort(column, True)
 
     def _refresh_row_colors(self):
         for idx, item in enumerate(self.tree.get_children()):
@@ -209,8 +225,14 @@ class PageEvenement(ctk.CTkFrame):
         self.user_filter.set("Tous")
         set_date_on_widget(self.date_from_entry, None)
         set_date_on_widget(self.date_to_entry, date.today())
+        self._sort_state = new_sort_state()
+        self._sort_state["col"] = "datetime"
+        self._sort_state["desc"] = True
         self.sort_column = "datetime"
         self.sort_desc = True
+        if self._tree_sort:
+            self._tree_sort.sort_state = self._sort_state
+            self._tree_sort.refresh_headings()
         self.refresh_data()
 
     def _refresh_with_log(self):
@@ -305,6 +327,8 @@ class PageEvenement(ctk.CTkFrame):
                 self.tree.insert("", "end", values=(dt, row[1], row[2] or ""))
 
             self._refresh_row_colors()
+            if self._tree_sort:
+                self._tree_sort.refresh_headings()
             self.result_count_label.configure(text=f"{len(rows)} résultat(s)")
         except Exception as err:
             messagebox.showerror("Erreur", f"Chargement des événements impossible : {err}")

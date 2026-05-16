@@ -215,9 +215,10 @@ class PageStockParFrs(ctk.CTkFrame):
             "Prix d'achat":        dict(width=130, anchor="e",      minwidth=90),
         }
         for col in self.COLONNES:
-            self.tree.heading(col, text=col)
             self.tree.column(col, **col_cfg.get(col, {}))
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(self.COLONNES), configure_columns=False)
     def _remplir_treeview(self):
         for item in self.tree.get_children():
             self.tree.delete(item)

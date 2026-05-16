@@ -28,6 +28,7 @@ except ImportError:
     _T = False
 
 from log_utils import AppLogger
+from treeview_sort_utils import attach_tree_sort, new_sort_state
 
 # ── Constantes de police (cohérence globale) ─────────────────────────────────
 _FONT_FAMILY  = "Roboto" if _T else "Segoe UI"
@@ -97,6 +98,8 @@ class PageFournisseur(ctk.CTkFrame):
 
         self.sort_column = "Dette en cours"
         self.sort_ascending = False
+        self._frs_sort_state = new_sort_state()
+        self._frs_sort = None
 
         _apply_treeview_theme()   # ← appliqué une seule fois à l'init
         self.setup_ui()
@@ -247,9 +250,16 @@ class PageFournisseur(ctk.CTkFrame):
                       "Nom Banque": 120, "Compte Bancaire": 120, "Adresse Banque": 130,
                       "NIF": 90, "STAT": 90, "CIF": 90, "Dette en cours": 130}
         for col in columns:
-            self.tree.heading(col, text=col, command=lambda c=col: self.sort_by_column(c))
             self.tree.column(col, width=col_widths.get(col, 110), minwidth=80)
         self.tree.column("Dette en cours", anchor="e")
+        self._frs_sort = attach_tree_sort(
+            self.tree,
+            columns,
+            sort_state=self._frs_sort_state,
+            column_widths=col_widths,
+            on_sort=self._on_frs_header_sort,
+            configure_columns=False,
+        )
 
         vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
@@ -310,16 +320,11 @@ class PageFournisseur(ctk.CTkFrame):
                 frs[7], frs[8], frs[9], dette_str
             ), tags=(tag,))
 
-    def sort_by_column(self, column):
-        if self.sort_column == column:
-            self.sort_ascending = not self.sort_ascending
-        else:
-            self.sort_column = column
-            self.sort_ascending = True
-
+    def _on_frs_header_sort(self, column, desc):
+        self.sort_column = column
+        self.sort_ascending = not desc
         if not self.all_frs_data:
             return
-
         col_index = {
             "Nom du Fournisseur": 1, "Contact": 2, "Adresse": 3,
             "Nom Banque": 4, "Compte Bancaire": 5, "Adresse Banque": 6,
@@ -327,14 +332,19 @@ class PageFournisseur(ctk.CTkFrame):
         }
 
         if column == "Dette en cours":
-            sorted_data = sorted(self.all_frs_data, key=lambda x: x[1], reverse=not self.sort_ascending)
+            sorted_data = sorted(self.all_frs_data, key=lambda x: x[1], reverse=desc)
         else:
             idx = col_index.get(column, 1)
-            sorted_data = sorted(self.all_frs_data,
-                                 key=lambda x: str(x[0][idx] or "").lower(),
-                                 reverse=not self.sort_ascending)
-
+            sorted_data = sorted(
+                self.all_frs_data,
+                key=lambda x: str(x[0][idx] or "").lower(),
+                reverse=desc,
+            )
         self.display_fournisseurs(sorted_data)
+
+    def sort_by_column(self, column):
+        if self._frs_sort:
+            self._frs_sort.click(column)
 
     def add_fournisseur(self):
         if not self.conn:

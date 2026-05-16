@@ -1270,8 +1270,9 @@ class PageSortie(ctk.CTkFrame):
             "Motif": (300, True), "Utilisateur": (150, True), "Nb Lignes": (80, True),
         }
         for col, (w, stretch) in col_w.items():
-            tree.heading(col, text=col)
             tree.column(col, width=w, stretch=stretch)
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(tree, list(col_w.keys()), configure_columns=False)
 
         scrollbar = ctk.CTkScrollbar(tree_frame, command=tree.yview)
         tree.configure(yscrollcommand=scrollbar.set)

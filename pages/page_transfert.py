@@ -426,8 +426,9 @@ class PageTransfert(ctk.CTkFrame):
             "Description": (260, "w"),
         }
         for col, (w, anchor) in col_config.items():
-            self.tree.heading(col, text=col)
             self.tree.column(col, width=w, anchor=anchor)
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(col_config.keys()), configure_columns=False)
 
         # Scrollbar CTk
         scrollbar = ctk.CTkScrollbar(frame, command=self.tree.yview)
@@ -1320,8 +1321,9 @@ class PageTransfert(ctk.CTkFrame):
             "Utilisateur": (100, True), "Description": (260, True),
         }
         for col, (w, stretch) in col_w.items():
-            self.tree_transferts.heading(col, text=col)
             self.tree_transferts.column(col, width=w, stretch=stretch)
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree_transferts, list(col_w.keys()), configure_columns=False)
 
         sb = ctk.CTkScrollbar(tree_frame, command=self.tree_transferts.yview)
         self.tree_transferts.configure(yscrollcommand=sb.set)

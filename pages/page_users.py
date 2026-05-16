@@ -178,14 +178,15 @@ class PageUsers(ctk.CTkFrame):
         
         # Configuration des colonnes
         for col in columns:
-            self.tree.heading(col, text=col)
             width = 100
             if col in ["ID", "Actif"]:
                 width = 50
             elif col == "Date":
                 width = 120
             self.tree.column(col, width=width)
-        
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, columns, column_types={"Date": "date"}, configure_columns=False)
+
         self.tree.pack(fill="both", expand=True, pady=10)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
         

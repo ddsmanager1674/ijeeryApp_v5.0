@@ -454,9 +454,10 @@ class PageStockAlerte(ctk.CTkFrame):
                   "Magasin": 140, "Seuil Mag.": 85, "Stock Mag.": 85,
                   "Seuil Gén.": 85, "Stock Gén.": 85}
         for col in cols:
-            self.tree.heading(col, text=col)
             self.tree.column(col, width=widths.get(col, 90), anchor="center")
 
+        from treeview_sort_utils import attach_tree_sort
+        attach_tree_sort(self.tree, list(cols), configure_columns=False)
         sy = ctk.CTkScrollbar(tbl, orientation="vertical",
                               command=self.tree.yview)
         sx = ctk.CTkScrollbar(tbl, orientation="horizontal",
