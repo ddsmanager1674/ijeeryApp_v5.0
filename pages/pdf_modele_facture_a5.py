@@ -104,9 +104,16 @@ def generer_pdf_a5_modele_ventedepot(
     """
     fmt_pdf = formater_nombre_pdf or formater_nombre_pdf_defaut
 
+    _util = utilisateur or {}
+    user_name = (
+        f"{_util.get('prenomuser', '') or ''} {_util.get('nomuser', '') or ''}".strip()
+    )
+
     MAX_P1 = 25
     MAX_PN = 30
     MARGIN = 10 * mm
+    HEADER_ANCHOR = 42 * mm
+    OP_GAP = 5 * mm
 
     c = rl_canvas.Canvas(filename, pagesize=A5)
     width, height = A5
@@ -152,9 +159,15 @@ def generer_pdf_a5_modele_ventedepot(
             )
         )
         ht.wrapOn(c, width, height)
-        ht.drawOn(c, MARGIN, height - 42 * mm)
+        ht.drawOn(c, MARGIN, height - HEADER_ANCHOR)
         if overlay_apres_entete:
             overlay_apres_entete(c, width, height)
+
+    def draw_operateur(table_top_y: float):
+        if not user_name:
+            return
+        c.setFont("Helvetica", 7)
+        c.drawRightString(width - MARGIN, table_top_y + 1.2 * mm, f"Op: {user_name}")
 
     def draw_footer(total_m: float, table_bottom: float):
         usable = width - 2 * MARGIN
@@ -326,7 +339,9 @@ def generer_pdf_a5_modele_ventedepot(
         last = idx == len(pages) - 1
         draw_verset()
         draw_header(ptype == "cont")
-        t_top = height - 45 * mm
+        t_top = height - HEADER_ANCHOR - OP_GAP
+        if ptype == "first":
+            draw_operateur(t_top)
         t_bot = 69 * mm if last else 15 * mm
         tb = draw_table(t_top, t_bot, rows, last, total_m)
         if last:
@@ -355,7 +370,7 @@ def html_entete_droite_facture(
     return (
         f"<b>Facture N°: {refvente}{{SUITE}}</b><br/>"
         f"{dateregistre}<br/><b>MAGASIN {magasin}</b><br/><br/>"
-        f"<i>Client: {nom_client}</i><br/><font size='7'>Op: {user_name}</font>"
+        f"<i>Client: {nom_client}</i>"
     )
 
 
@@ -372,5 +387,5 @@ def html_entete_droite_avoir(
         f"<b>AVOIR N°: {refavoir}{{SUITE}}</b><br/>"
         f"<b>Du Ref: {refvente_associe}</b><br/>"
         f"{date_texte}<br/><b>MAGASIN {magasin}</b><br/><br/>"
-        f"<i>Client: {nom_client}</i><br/><font size='7'>Op: {user_name}</font>"
+        f"<i>Client: {nom_client}</i>"
     )

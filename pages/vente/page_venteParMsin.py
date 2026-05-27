@@ -2179,6 +2179,8 @@ class PageVenteParMsin(ctk.CTkFrame):
         from reportlab.platypus import Table as RLTable, TableStyle as RLTableStyle, Paragraph
 
         MAX_P1 = 25; MAX_PN = 30; MARGIN = 10 * mm
+        HEADER_ANCHOR = 42 * mm
+        OP_GAP = 5 * mm
         c = rl_canvas.Canvas(filename, pagesize=A5)
         width, height = A5
         soc  = data['societe']
@@ -2213,7 +2215,7 @@ class PageVenteParMsin(ctk.CTkFrame):
             d_ = Paragraph(
                 f"<b>Facture N°: {vte['refvente']}{suite}</b><br/>"
                 f"{vte['dateregistre']}<br/><b>MAGASIN {mag}</b><br/><br/>"
-                f"<i>Client: {cli_n}</i><br/><font size='7'>Op: {user_n}</font>", sp)
+                f"<i>Client: {cli_n}</i>", sp)
             ht = RLTable([[g, d_]], colWidths=[64*mm, 64*mm])
             ht.setStyle(RLTableStyle([
                 ('GRID', (0,0),(-1,-1), 1, rl_colors.black),
@@ -2222,7 +2224,13 @@ class PageVenteParMsin(ctk.CTkFrame):
                 ('TOPPADDING',(0,0),(-1,-1),5),
                 ('BOTTOMPADDING',(0,0),(-1,-1),5),
             ]))
-            ht.wrapOn(c, width, height); ht.drawOn(c, MARGIN, height-42*mm)
+            ht.wrapOn(c, width, height); ht.drawOn(c, MARGIN, height-HEADER_ANCHOR)
+
+        def draw_operateur(table_top_y):
+            if not user_n:
+                return
+            c.setFont("Helvetica", 7)
+            c.drawRightString(width - MARGIN, table_top_y + 1.2 * mm, f"Op: {user_n}")
 
         def draw_footer(total_m, table_bottom):
             usable = width - 2*MARGIN
@@ -2350,7 +2358,10 @@ class PageVenteParMsin(ctk.CTkFrame):
         for idx, (ptype, rows) in enumerate(pages):
             last = (idx == len(pages)-1)
             draw_verset(); draw_header(ptype == 'cont')
-            t_top = height-45*mm; t_bot = 69*mm if last else 15*mm
+            t_top = height - HEADER_ANCHOR - OP_GAP
+            if ptype == 'first':
+                draw_operateur(t_top)
+            t_bot = 69*mm if last else 15*mm
             tb = draw_table(t_top, t_bot, rows, last, total_m)
             if last: draw_footer(total_m, tb)
             if len(pages) > 1:

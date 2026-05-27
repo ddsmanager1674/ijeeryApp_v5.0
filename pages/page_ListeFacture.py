@@ -203,7 +203,7 @@ def _generate_pdf_a5_avoir_duplicata(data, filename, duplicata=True):
         html_entete_droite_avoir,
         formater_nombre_pdf_defaut,
     )
-    from pages.page_venteParMsin import nombre_en_lettres_fr
+    from pages.vente.vente_utils import nombre_en_lettres_fr
 
     avoir = data.get("avoir") or {}
     util = data.get("utilisateur") or {}
@@ -703,7 +703,7 @@ class _FactureDetailCore:
             html_entete_droite_facture,
             formater_nombre_pdf_defaut,
         )
-        from pages.page_venteParMsin import nombre_en_lettres_fr
+        from pages.vente.vente_utils import nombre_en_lettres_fr
 
         dname = os.path.dirname(os.path.abspath(filename))
         if dname:
