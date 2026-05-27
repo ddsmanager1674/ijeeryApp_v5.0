@@ -81,12 +81,14 @@ class PageStock(ctk.CTkFrame):
     def __init__(self, master, db_conn=None, session_data=None, iduser=None):
         super().__init__(master, fg_color=C.BG_PAGE)
         self._db_conn_shared = db_conn
+        self._session_data = session_data or {}
         if iduser is not None:
             self.iduser = iduser
         elif session_data and 'user_id' in session_data:
             self.iduser = session_data['user_id']
         else:
             self.iduser = 1
+        self.idfonction = self._session_data.get('fonction_id')
 
         self.magasins            = []
         self.colonnes_dynamiques = []
@@ -115,10 +117,29 @@ class PageStock(ctk.CTkFrame):
         # ── En-tête ───────────────────────────────────────────────────────
         hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
         hdr.grid(row=0, column=0, sticky="ew")
+
+        bar = ctk.CTkFrame(hdr, fg_color="transparent")
+        bar.pack(fill="x", padx=16, pady=10)
+
         ctk.CTkLabel(
-            hdr, text="Gestion des Stocks",
-            font=self._f(18, "bold"), text_color="#FFFFFF"
-        ).pack(side="left", padx=16, pady=10)
+            bar, text="Gestion des Stocks",
+            font=self._f(18, "bold"), text_color="#FFFFFF",
+        ).pack(side="left")
+
+        link_font = self._f(11)
+        if _T:
+            link_font = ctk.CTkFont(
+                family=getattr(Fonts, "_family", "Segoe UI"),
+                size=11, underline=True,
+            )
+        color_param = getattr(C, "PRIMARY_LIGHT", C.PRIMARY)
+
+        lbl_param = ctk.CTkLabel(
+            bar, text="⚙  Paramètres",
+            font=link_font, text_color=color_param, cursor="hand2",
+        )
+        lbl_param.pack(side="right")
+        lbl_param.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
 
         # ── Barre filtres + actions ────────────────────────────────────────
         panel = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
@@ -193,6 +214,17 @@ class PageStock(ctk.CTkFrame):
     # ====================================================================
     # LOGIQUE MÉTIER — inchangée
     # ====================================================================
+
+    def _ouvrir_parametres(self):
+        try:
+            from pages.window_parametres_stock import ParametresStockWindow
+        except ImportError:
+            from window_parametres_stock import ParametresStockWindow
+        ParametresStockWindow(
+            self,
+            db_conn=self._db_conn_shared,
+            id_user=self.iduser,
+        )
 
     def connect_db(self):
         """Connexion à la base de données PostgreSQL via module db."""
@@ -576,6 +608,21 @@ class PageStock(ctk.CTkFrame):
 
     def ouvrir_inventaire_double_clic(self, event):
         """Ouvre la fenêtre d'inventaire lors d'un double-clic sur une ligne"""
+        try:
+            from pages.stock_config import est_fonction_autorisee_inventaire
+        except ImportError:
+            from stock_config import est_fonction_autorisee_inventaire
+        if not est_fonction_autorisee_inventaire(self.idfonction):
+            fonction_nom = self._session_data.get("fonction_name") or "—"
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "l'inventaire article depuis le stock (double-clic).\n\n"
+                f"Fonction : {fonction_nom}\n\n"
+                "Contactez un administrateur (Paramètres — Gestion des stocks).",
+            )
+            return
+
         selection = self.tree.selection()
         if not selection:
             return

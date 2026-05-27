@@ -53,5 +53,16 @@
     "AfficherVariationPrixParUtilisateur": {
       "26": true
     }
+  },
+  "StockArticle": {
+    "_comment": "Paramètres globaux du menu Stock Article. Liste vide = toutes les fonctions autorisées au double-clic inventaire.",
+    "FonctionsAutoriseesInventaire": [
+      12,
+      13,
+      14,
+      15,
+      16,
+      19
+    ]
   }
 }
