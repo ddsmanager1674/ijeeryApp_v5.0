@@ -325,11 +325,21 @@ class Theme:
         """
         window.configure(fg_color=Colors.BG_PAGE)
         Fonts.load()
+        try:
+            from app_icon_utils import apply_window_icon
+            apply_window_icon(window, delay_ms=50)
+        except Exception:
+            pass
 
     @staticmethod
     def apply_toplevel(window: ctk.CTkToplevel):
         """Même chose pour les fenêtres secondaires."""
         window.configure(fg_color=Colors.BG_PAGE)
+        try:
+            from app_icon_utils import apply_window_icon
+            apply_window_icon(window, delay_ms=50)
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -4,6 +4,11 @@ from resource_utils import init_app_data_files
 
 init_app_data_files()
 try:
+    from app_icon_utils import init_app_icon
+    init_app_icon()
+except Exception:
+    pass
+try:
     from app_runtime_log import init_runtime_log
     init_runtime_log()
 except Exception:

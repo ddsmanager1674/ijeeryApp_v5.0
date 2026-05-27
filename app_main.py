@@ -32,6 +32,12 @@ from tkinter import messagebox
 import psycopg2
 from log_utils import AppLogger
 
+try:
+    from app_icon_utils import init_app_icon
+    init_app_icon()
+except Exception:
+    pass
+
 # ── Chemins ──────────────────────────────────────────────────────────────────
 _BASE = os.path.dirname(os.path.abspath(__file__))
 if _BASE not in sys.path:

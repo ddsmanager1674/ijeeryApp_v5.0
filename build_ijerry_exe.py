@@ -26,7 +26,11 @@ Sortie
   Copie des modèles config.json / config.ini à côté de l'exe (writable).
   NE PAS embarquer settings.json ni session.json (créés au 1er lancement).
 
-Icône : icons/iconeIjeery.ico
+Icône application
+  - Fichier source : icons/iconeIjeery.ico
+  - Embarquée dans l'EXE (barre des tâches / raccourci Windows)
+  - Copiée dans dist/.../_internal/icons/ (runtime app_icon_utils.py)
+
 Point d'entrée : page_login.py
 ================================================================================
 """
@@ -49,6 +53,7 @@ from typing import Iterable
 APP_NAME = "iJeery_V5.0"
 ENTRY_SCRIPT = "page_login.py"
 ICON_REL = os.path.join("icons", "iconeIjeery.ico")
+ICON_FILENAME = "iconeIjeery.ico"
 SPEC_FILENAME = f"{APP_NAME}.spec"
 VENV_DIRNAME = ".venv-build"
 
@@ -87,6 +92,7 @@ ROOT_HIDDEN_IMPORTS = (
     "config_db",
     "configDataBase",
     "resource_utils",
+    "app_icon_utils",
     "app_runtime_log",
     "settings_utils",
     "stock_service",
@@ -128,6 +134,22 @@ CLEAN_PATTERNS = ("build", "dist", SPEC_FILENAME)
 # ─────────────────────────────────────────────────────────────────────────────
 # Utilitaires
 # ─────────────────────────────────────────────────────────────────────────────
+
+def ensure_app_icon(root: Path) -> Path:
+    """
+    Vérifie la présence de icons/iconeIjeery.ico avant compilation.
+    Utilisée pour l'EXE PyInstaller et le runtime (app_icon_utils).
+    """
+    icon = root / ICON_REL
+    if not icon.is_file():
+        raise FileNotFoundError(
+            f"Icône introuvable : {icon}\n"
+            f"Placez {ICON_FILENAME} dans le dossier icons/ à la racine du projet."
+        )
+    size_kb = icon.stat().st_size / 1024
+    print(f"[OK] Icône application : {icon} ({size_kb:.1f} Ko)")
+    return icon
+
 
 def project_root() -> Path:
     return Path(__file__).resolve().parent
@@ -265,17 +287,13 @@ def write_spec_file(
     windowed: bool,
     hiddenimports: list[str],
     datas: list[tuple[str, str]],
+    icon: Path,
 ) -> Path:
-    icon = root / ICON_REL
-    if not icon.is_file():
-        raise FileNotFoundError(
-            f"Icône introuvable : {icon}\n"
-            f"Placez iconeIjeery.ico dans icons/"
-        )
     entry = root / ENTRY_SCRIPT
     if not entry.is_file():
         raise FileNotFoundError(f"Point d'entrée introuvable : {entry}")
 
+    print(f"[INFO] Icône EXE PyInstaller : {icon}")
     collect_all_block = "\n".join(
         f"tmpret = collect_all({pkg!r})\n"
         f"datas += tmpret[0]; binaries += tmpret[1]; hiddenimports += tmpret[2]"
@@ -375,7 +393,7 @@ def run_pyinstaller(py: Path, root: Path, spec_path: Path) -> None:
     )
 
 
-def post_build_copy_templates(root: Path) -> Path:
+def post_build_copy_templates(root: Path, icon: Path) -> Path:
     dist_app = root / "dist" / APP_NAME
     if not dist_app.is_dir():
         raise FileNotFoundError(f"Dossier de sortie introuvable : {dist_app}")
@@ -389,10 +407,19 @@ def post_build_copy_templates(root: Path) -> Path:
     exe = dist_app / f"{APP_NAME}.exe"
     if not exe.is_file():
         raise FileNotFoundError(f"EXE introuvable : {exe}")
+    internal_icon = dist_app / "_internal" / "icons" / ICON_FILENAME
+    if internal_icon.is_file():
+        print(f"[POST] Icône runtime embarquée : {internal_icon.relative_to(dist_app)}")
+    else:
+        print(
+            f"[AVERTISSEMENT] {ICON_FILENAME} absent de _internal/icons/ "
+            f"(barre de titre en runtime peut échouer)."
+        )
     print(f"\n{'=' * 72}")
     print("  BUILD TERMINÉ")
     print(f"{'=' * 72}")
     print(f"  Exécutable : {exe}")
+    print(f"  Icône EXE  : {icon.name} (barre des tâches Windows / raccourci)")
     print(f"  Dossier    : {dist_app}")
     print()
     print("  Fichiers créés au 1er lancement (à côté de l'exe, modifiables) :")
@@ -405,7 +432,7 @@ def post_build_copy_templates(root: Path) -> Path:
 
 
 def verify_dist(dist_app: Path) -> None:
-    """Contrôles rapides sur le bundle (présence des libs critiques)."""
+    """Contrôles rapides sur le bundle (présence des libs critiques + icône)."""
     internal = dist_app / "_internal"
     search_roots = [dist_app, internal] if internal.is_dir() else [dist_app]
     checks = (
@@ -423,12 +450,21 @@ def verify_dist(dist_app: Path) -> None:
         found = any((root / name).exists() for root in search_roots)
         if not found:
             missing.append(name)
+    icon_ok = any(
+        (root / "icons" / ICON_FILENAME).is_file()
+        for root in search_roots
+    )
+    if not icon_ok:
+        missing.append(f"icons/{ICON_FILENAME}")
     if missing:
         print("[VÉRIFICATION] Éléments non trouvés dans dist (à contrôler) :")
         for m in missing:
             print(f"  - {m}")
     else:
-        print("[VÉRIFICATION] Dossiers / paquets critiques présents dans dist.")
+        print(
+            "[VÉRIFICATION] Dossiers / paquets critiques présents dans dist "
+            f"(icône {ICON_FILENAME} incluse)."
+        )
 
 
 def collect_hidden_imports(root: Path) -> list[str]:
@@ -471,6 +507,12 @@ def parse_args() -> argparse.Namespace:
         help="Génère uniquement le fichier .spec sans lancer PyInstaller.",
     )
     p.add_argument(
+        "--icon",
+        metavar="CHEMIN",
+        default=None,
+        help=f"Icône .ico pour l'EXE (défaut : {ICON_REL}).",
+    )
+    p.add_argument(
         "--skip-verify",
         action="store_true",
         help="Ne pas vérifier la présence des libs dans dist/.",
@@ -496,6 +538,17 @@ def main() -> int:
     if not args.no_clean:
         clean_artifacts(root)
 
+    if args.icon is None:
+        icon_path = ensure_app_icon(root)
+    else:
+        custom = Path(args.icon)
+        if not custom.is_file():
+            custom = root / args.icon
+        if not custom.is_file():
+            raise FileNotFoundError(f"Icône personnalisée introuvable : {args.icon}")
+        icon_path = custom.resolve()
+        print(f"[OK] Icône personnalisée : {icon_path} ({icon_path.stat().st_size / 1024:.1f} Ko)")
+
     py = ensure_venv(root, args.skip_venv)
     if not args.dry_run:
         pip_install(py, root)
@@ -509,6 +562,7 @@ def main() -> int:
         windowed=not args.console,
         hiddenimports=hidden,
         datas=datas,
+        icon=icon_path,
     )
 
     if args.dry_run:
@@ -516,7 +570,7 @@ def main() -> int:
         return 0
 
     run_pyinstaller(py, root, spec_path)
-    dist_app = post_build_copy_templates(root)
+    dist_app = post_build_copy_templates(root, icon_path)
     if not args.skip_verify:
         verify_dist(dist_app)
     return 0

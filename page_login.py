@@ -40,6 +40,12 @@ from resource_utils import (get_resource_path, get_config_path,
                              get_session_path, safe_file_read)
 from log_utils import AppLogger
 
+try:
+    from app_icon_utils import init_app_icon
+    init_app_icon()
+except Exception:
+    pass
+
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
     from app_theme import Colors, Fonts, Theme, init_theme

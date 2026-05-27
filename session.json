@@ -49,6 +49,10 @@
             ""
         ],
         [
+            "BLOC: PARAMÈTRES MODULES",
+            ""
+        ],
+        [
             "BLOC: PERSONNEL",
             ""
         ],
@@ -71,6 +75,18 @@
         [
             "Client",
             "PageClient"
+        ],
+        [
+            "Configuration Liste mouvements",
+            ""
+        ],
+        [
+            "Configuration Mouvement Stock",
+            ""
+        ],
+        [
+            "Configuration Prix Article",
+            ""
         ],
         [
             "Etat de Salaire",
@@ -142,6 +158,30 @@
         ],
         [
             "Paramètres",
+            ""
+        ],
+        [
+            "Paramètres Bon de Livraison",
+            ""
+        ],
+        [
+            "Paramètres Commande Fournisseur",
+            ""
+        ],
+        [
+            "Paramètres Liste mouvements",
+            ""
+        ],
+        [
+            "Paramètres Mouvement Stock",
+            ""
+        ],
+        [
+            "Paramètres Prix Article",
+            ""
+        ],
+        [
+            "Paramètres Stock Article",
             ""
         ],
         [
