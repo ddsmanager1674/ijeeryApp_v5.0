@@ -12,6 +12,11 @@ from app_theme import Colors, Fonts, Layout, styled
 from log_utils import AppLogger
 from resource_utils import get_config_path
 
+try:
+    from pages.menu_auth_utils import noms_menus_param_modules
+except ImportError:
+    from menu_auth_utils import noms_menus_param_modules
+
 
 @dataclass(frozen=True)
 class MenuGroup:
@@ -66,6 +71,21 @@ class PageAutorisation(ctk.CTkFrame):
             (
                 "Autorisation", "Evenements", "Sauvegarde", "Fonction", "Utilisateurs",
                 "Paramètres", "Menu", "Base Liste", "Autorisation Admin",
+            ),
+        ),
+        MenuGroup(
+            "PARAMÈTRES MODULES",
+            "BLOC: PARAMÈTRES MODULES",
+            (
+                "Paramètres Stock Article",
+                "Paramètres Bon de Livraison",
+                "Paramètres Mouvement Stock",
+                "Paramètres Commande Fournisseur",
+                "Paramètres Liste mouvements",
+                "Paramètres Prix Article",
+                "Configuration Mouvement Stock",
+                "Configuration Liste mouvements",
+                "Configuration Prix Article",
             ),
         ),
     )
@@ -274,6 +294,9 @@ class PageAutorisation(ctk.CTkFrame):
         cur.execute("SELECT id, designationmenu FROM tb_menu")
         existing = {str(name): int(menu_id) for menu_id, name in cur.fetchall() if name}
 
+        newly_inserted: set[int] = set()
+        param_names = set(noms_menus_param_modules())
+
         for name in self._required_menu_names():
             if name in existing:
                 continue
@@ -281,7 +304,33 @@ class PageAutorisation(ctk.CTkFrame):
                 "INSERT INTO tb_menu (designationmenu, page) VALUES (%s, %s) RETURNING id",
                 (name, ""),
             )
-            existing[name] = int(cur.fetchone()[0])
+            menu_id = int(cur.fetchone()[0])
+            existing[name] = menu_id
+            newly_inserted.add(menu_id)
+
+        if newly_inserted:
+            param_new_ids = [
+                existing[n] for n in param_names
+                if n in existing and existing[n] in newly_inserted
+            ]
+            if param_new_ids:
+                cur.execute(
+                    "SELECT idfonction FROM tb_fonction WHERE COALESCE(deleted, 0) = 0"
+                )
+                fonction_ids = [int(r[0]) for r in cur.fetchall()]
+                for fid in fonction_ids:
+                    for mid in param_new_ids:
+                        cur.execute(
+                            """
+                            INSERT INTO tb_autorisation (idfonction, idmenu)
+                            SELECT %s, %s
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM tb_autorisation
+                                WHERE idfonction = %s AND idmenu = %s
+                            )
+                            """,
+                            (fid, mid, fid, mid),
+                        )
 
         cur.connection.commit()
         return existing

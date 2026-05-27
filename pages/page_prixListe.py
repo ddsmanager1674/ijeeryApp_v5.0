@@ -369,19 +369,37 @@ class PagePrixListe(ctk.CTkFrame):
         color_param = getattr(C, "PRIMARY_LIGHT", C.PRIMARY)
         color_conf = getattr(C, "INFO_LIGHT", C.PRIMARY)
 
-        lbl_param = ctk.CTkLabel(
+        try:
+            from pages.menu_auth_utils import (
+                CLE_CONF_PRIX,
+                CLE_PARAM_PRIX,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_CONF_PRIX,
+                CLE_PARAM_PRIX,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        _sd = resolve_session_data(self)
+
+        self.lbl_parametres = ctk.CTkLabel(
             links, text="⚙  Paramètres",
             font=link_font, text_color=color_param, cursor="hand2",
         )
-        lbl_param.pack(side="left", padx=(0, 14))
-        lbl_param.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
+        if est_lien_param_autorise(_sd, CLE_PARAM_PRIX):
+            self.lbl_parametres.pack(side="left", padx=(0, 14))
+        self.lbl_parametres.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
 
-        lbl_conf = ctk.CTkLabel(
+        self.lbl_configuration = ctk.CTkLabel(
             links, text="🔧  Configuration",
             font=link_font, text_color=color_conf, cursor="hand2",
         )
-        lbl_conf.pack(side="left")
-        lbl_conf.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
+        if est_lien_param_autorise(_sd, CLE_CONF_PRIX):
+            self.lbl_configuration.pack(side="left")
+        self.lbl_configuration.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
 
         # ── Barre de filtres ─────────────────────────────────────────────────
         panel = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
@@ -508,6 +526,23 @@ class PagePrixListe(ctk.CTkFrame):
         self.load_data_async(self._var_search.get().strip())
 
     def _ouvrir_parametres(self):
+        try:
+            from pages.menu_auth_utils import (
+                CLE_PARAM_PRIX,
+                est_lien_param_autorise,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_PARAM_PRIX,
+                est_lien_param_autorise,
+            )
+        if not est_lien_param_autorise(self.session_data, CLE_PARAM_PRIX):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "les paramètres du menu Prix Article.",
+            )
+            return
         path = get_config_path("settings.json")
         try:
             os.startfile(path)
@@ -529,6 +564,23 @@ class PagePrixListe(ctk.CTkFrame):
         self.load_data_async(self._var_search.get().strip())
 
     def _ouvrir_configuration(self):
+        try:
+            from pages.menu_auth_utils import (
+                CLE_CONF_PRIX,
+                est_lien_param_autorise,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_CONF_PRIX,
+                est_lien_param_autorise,
+            )
+        if not est_lien_param_autorise(self.session_data, CLE_CONF_PRIX):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "la configuration du menu Prix Article.",
+            )
+            return
         try:
             from pages.window_configuration_prix_article import (
                 ConfigurationPrixArticleWindow,

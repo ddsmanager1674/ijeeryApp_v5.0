@@ -93,6 +93,19 @@ class PageBonDeLivraison(ctk.CTkFrame):
         styled.label_heading(tb, text="Bon de Livraison", size=18).pack(anchor="w")
 
         family = Fonts._family if getattr(Fonts, "_loaded", False) else "Segoe UI"
+        try:
+            from pages.menu_auth_utils import (
+                CLE_PARAM_LIVRAISON,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_PARAM_LIVRAISON,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+
         self.lbl_parametres = ctk.CTkLabel(
             tb,
             text="⚙  Paramètres",
@@ -100,7 +113,8 @@ class PageBonDeLivraison(ctk.CTkFrame):
             text_color=Colors.PRIMARY,
             cursor="hand2",
         )
-        self.lbl_parametres.pack(anchor="w", pady=(2, 0))
+        if est_lien_param_autorise(resolve_session_data(self), CLE_PARAM_LIVRAISON):
+            self.lbl_parametres.pack(anchor="w", pady=(2, 0))
         self.lbl_parametres.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
 
         styled.label_muted(
@@ -177,6 +191,25 @@ class PageBonDeLivraison(ctk.CTkFrame):
     def _ouvrir_parametres(self):
         if self.user_id is None:
             messagebox.showerror("Erreur", "Utilisateur non connecté.")
+            return
+        try:
+            from pages.menu_auth_utils import (
+                CLE_PARAM_LIVRAISON,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_PARAM_LIVRAISON,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        if not est_lien_param_autorise(resolve_session_data(self), CLE_PARAM_LIVRAISON):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "les paramètres du bon de livraison.",
+            )
             return
         ParametresLivraisonWindow(
             self,

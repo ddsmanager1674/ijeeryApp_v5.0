@@ -1513,6 +1513,11 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         super().__init__(parent, fg_color=Colors.BG_PAGE, corner_radius=0, **kwargs)
 
         self.iduser = iduser
+        try:
+            from pages.menu_auth_utils import resolve_session_data
+        except ImportError:
+            from menu_auth_utils import resolve_session_data
+        self.session_data = resolve_session_data(parent)
         self._db_conn_initial = db_conn
         self._sidebar_collapsed = self._lire_sidebar_hamburger_defaut()
         self._current_menu_label: Optional[str] = None
@@ -1715,7 +1720,6 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             text_color=Colors.PRIMARY_LIGHT,
             cursor="hand2",
         )
-        self.lbl_parametres.pack(side="left", padx=(0, 14))
         self.lbl_parametres.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
 
         self.lbl_configuration = ctk.CTkLabel(
@@ -1725,8 +1729,41 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             text_color=Colors.INFO_LIGHT,
             cursor="hand2",
         )
-        self.lbl_configuration.pack(side="left")
         self.lbl_configuration.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
+        self._maj_liens_param_config()
+
+    def _maj_liens_param_config(self):
+        try:
+            from pages.menu_auth_utils import (
+                CLE_CONF_MOUVEMENT,
+                CLE_PARAM_COMMANDE_FRS,
+                CLE_PARAM_MOUVEMENT,
+                est_lien_param_autorise,
+                appliquer_visibilite_lien_pack,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_CONF_MOUVEMENT,
+                CLE_PARAM_COMMANDE_FRS,
+                CLE_PARAM_MOUVEMENT,
+                est_lien_param_autorise,
+                appliquer_visibilite_lien_pack,
+            )
+        sd = self.session_data
+        on_bon_cmd = self._current_menu_label == "Bon de commande"
+        cle_param = (
+            CLE_PARAM_COMMANDE_FRS if on_bon_cmd else CLE_PARAM_MOUVEMENT
+        )
+        appliquer_visibilite_lien_pack(
+            self.lbl_parametres,
+            est_lien_param_autorise(sd, cle_param),
+            padx=(0, 14),
+        )
+        appliquer_visibilite_lien_pack(
+            self.lbl_configuration,
+            est_lien_param_autorise(sd, CLE_CONF_MOUVEMENT),
+            padx=0,
+        )
 
     def _on_param_commande_saved(self):
         page = self.pages.get("Bon de commande")
@@ -1734,7 +1771,28 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             page.appliquer_fournisseur_defaut_param()
 
     def _ouvrir_parametres(self):
-        if self._current_menu_label == "Bon de commande":
+        try:
+            from pages.menu_auth_utils import (
+                CLE_PARAM_COMMANDE_FRS,
+                CLE_PARAM_MOUVEMENT,
+                est_lien_param_autorise,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_PARAM_COMMANDE_FRS,
+                CLE_PARAM_MOUVEMENT,
+                est_lien_param_autorise,
+            )
+        on_bon_cmd = self._current_menu_label == "Bon de commande"
+        cle_param = CLE_PARAM_COMMANDE_FRS if on_bon_cmd else CLE_PARAM_MOUVEMENT
+        if not est_lien_param_autorise(self.session_data, cle_param):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "les paramètres de ce sous-menu mouvement stock.",
+            )
+            return
+        if on_bon_cmd:
             try:
                 from pages.window_parametres_commande_frs import (
                     ParametresCommandeFrsWindow,
@@ -1766,6 +1824,23 @@ class PageInfoMouvementStock(ctk.CTkFrame):
             self.show_page(label)
 
     def _ouvrir_configuration(self):
+        try:
+            from pages.menu_auth_utils import (
+                CLE_CONF_MOUVEMENT,
+                est_lien_param_autorise,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_CONF_MOUVEMENT,
+                est_lien_param_autorise,
+            )
+        if not est_lien_param_autorise(self.session_data, CLE_CONF_MOUVEMENT):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "la configuration du menu Mouvement Stock.",
+            )
+            return
         try:
             from pages.window_configuration_mouvement_stock import (
                 ConfigurationMouvementStockWindow,
@@ -1843,6 +1918,7 @@ class PageInfoMouvementStock(ctk.CTkFrame):
         self.lbl_main_title.configure(
             text=f"Mouvement de stock - {menu_label}",
         )
+        self._maj_liens_param_config()
 
         if self.current_page:
             self.current_page.grid_remove()

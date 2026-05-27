@@ -134,12 +134,26 @@ class PageStock(ctk.CTkFrame):
             )
         color_param = getattr(C, "PRIMARY_LIGHT", C.PRIMARY)
 
-        lbl_param = ctk.CTkLabel(
+        try:
+            from pages.menu_auth_utils import (
+                CLE_PARAM_STOCK,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_PARAM_STOCK,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+
+        self.lbl_parametres = ctk.CTkLabel(
             bar, text="⚙  Paramètres",
             font=link_font, text_color=color_param, cursor="hand2",
         )
-        lbl_param.pack(side="right")
-        lbl_param.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
+        if est_lien_param_autorise(resolve_session_data(self), CLE_PARAM_STOCK):
+            self.lbl_parametres.pack(side="right")
+        self.lbl_parametres.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
 
         # ── Barre filtres + actions ────────────────────────────────────────
         panel = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
@@ -216,6 +230,25 @@ class PageStock(ctk.CTkFrame):
     # ====================================================================
 
     def _ouvrir_parametres(self):
+        try:
+            from pages.menu_auth_utils import (
+                CLE_PARAM_STOCK,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_PARAM_STOCK,
+                est_lien_param_autorise,
+                resolve_session_data,
+            )
+        if not est_lien_param_autorise(resolve_session_data(self), CLE_PARAM_STOCK):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "les paramètres du stock article.",
+            )
+            return
         try:
             from pages.window_parametres_stock import ParametresStockWindow
         except ImportError:

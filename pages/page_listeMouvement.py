@@ -74,6 +74,11 @@ class PageListeMouvement(ctk.CTkFrame):
         super().__init__(master, fg_color=Colors.BG_PAGE)
 
         self.iduser = iduser
+        try:
+            from pages.menu_auth_utils import resolve_session_data
+        except ImportError:
+            from menu_auth_utils import resolve_session_data
+        self.session_data = resolve_session_data(master)
         self.type_mouvement_actif = "entree"
         self.data_df = pd.DataFrame()
         self._nav_buttons: dict = {}
@@ -270,27 +275,59 @@ class PageListeMouvement(ctk.CTkFrame):
         family = Fonts._family if getattr(Fonts, "_loaded", False) else "Segoe UI"
         link_font = ctk.CTkFont(family=family, size=11, underline=True)
 
-        lbl_param = ctk.CTkLabel(
+        try:
+            from pages.menu_auth_utils import (
+                CLE_CONF_LISTE_MVT,
+                CLE_PARAM_LISTE_MVT,
+                est_lien_param_autorise,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_CONF_LISTE_MVT,
+                CLE_PARAM_LISTE_MVT,
+                est_lien_param_autorise,
+            )
+
+        self.lbl_parametres = ctk.CTkLabel(
             links,
             text="⚙  Paramètres",
             font=link_font,
             text_color=Colors.PRIMARY_LIGHT,
             cursor="hand2",
         )
-        lbl_param.pack(side="left", padx=(0, 14))
-        lbl_param.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
+        if est_lien_param_autorise(self.session_data, CLE_PARAM_LISTE_MVT):
+            self.lbl_parametres.pack(side="left", padx=(0, 14))
+        self.lbl_parametres.bind("<Button-1>", lambda _e: self._ouvrir_parametres())
 
-        lbl_conf = ctk.CTkLabel(
+        self.lbl_configuration = ctk.CTkLabel(
             links,
             text="🔧  Configuration",
             font=link_font,
             text_color=Colors.INFO_LIGHT,
             cursor="hand2",
         )
-        lbl_conf.pack(side="left")
-        lbl_conf.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
+        if est_lien_param_autorise(self.session_data, CLE_CONF_LISTE_MVT):
+            self.lbl_configuration.pack(side="left")
+        self.lbl_configuration.bind("<Button-1>", lambda _e: self._ouvrir_configuration())
 
     def _ouvrir_parametres(self):
+        try:
+            from pages.menu_auth_utils import (
+                CLE_PARAM_LISTE_MVT,
+                est_lien_param_autorise,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_PARAM_LISTE_MVT,
+                est_lien_param_autorise,
+            )
+        if not est_lien_param_autorise(self.session_data, CLE_PARAM_LISTE_MVT):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "les paramètres du menu Liste mouvements.",
+            )
+            return
         from resource_utils import get_settings_path
         path = get_settings_path("settings.json")
         try:
@@ -311,6 +348,23 @@ class PageListeMouvement(ctk.CTkFrame):
             self._select_type(cle)
 
     def _ouvrir_configuration(self):
+        try:
+            from pages.menu_auth_utils import (
+                CLE_CONF_LISTE_MVT,
+                est_lien_param_autorise,
+            )
+        except ImportError:
+            from menu_auth_utils import (
+                CLE_CONF_LISTE_MVT,
+                est_lien_param_autorise,
+            )
+        if not est_lien_param_autorise(self.session_data, CLE_CONF_LISTE_MVT):
+            messagebox.showwarning(
+                "Accès refusé",
+                "Votre fonction utilisateur n'est pas autorisée à ouvrir "
+                "la configuration du menu Liste mouvements.",
+            )
+            return
         try:
             from pages.window_configuration_liste_mouvements import (
                 ConfigurationListeMouvementsWindow,
