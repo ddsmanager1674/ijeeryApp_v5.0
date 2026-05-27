@@ -258,60 +258,39 @@ def _generate_pdf_a5_avoir_duplicata(data, filename, duplicata=True):
 
 
 # ====================================================================
-# PageDetailFacture
+# Logique métier partagée — détail facture / avoir
 # ====================================================================
 
-class PageDetailFacture(ctk.CTkToplevel):
-    """Fenêtre affichant les articles d'une facture spécifique"""
+_BADGE_STATUT = {
+    "VALIDEE":    (C.SUCCESS_DARK, "#FFFFFF"),
+    "EN_ATTENTE": (C.WARNING,      "#FFFFFF"),
+    "ANNULE":     (C.DANGER,       "#FFFFFF"),
+    "AVOIR":      (C.PREMIUM_DARK, "#FFFFFF"),
+}
 
-    def __init__(self, master, idvente, refvente,
-                 statut="EN_ATTENTE", parent_page=None, mode_avoir=False):
-        super().__init__(master)
-        self.mode_avoir = mode_avoir
-        titre_doc = "Avoir" if mode_avoir else "Facture"
-        self.title(f"Détails {titre_doc} : {refvente}")
-        self.geometry("860x560")
-        if _T:
-            Theme.apply_toplevel(self)
-        self.attributes('-topmost', True)
 
-        self.idvente      = idvente
-        self.refvente     = refvente
-        self.statut       = statut
-        self.parent_page  = parent_page
-        self.montant_total= 0
-        self.mode_paiement= "N/A"
+class _FactureDetailCore:
+    """Méthodes communes popup et panneau embarqué."""
 
-        _apply_tree_style("Detail")
+    def _init_detail_state(self, idvente, refvente, statut, parent_page, mode_avoir):
+        self.idvente       = idvente
+        self.refvente      = refvente
+        self.statut        = statut
+        self.parent_page   = parent_page
+        self.mode_avoir    = mode_avoir
+        self.montant_total = 0
+        self.mode_paiement = "N/A"
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+    def _init_detail_logger(self, session_data=None):
+        try:
+            if session_data is None and self.parent_page and hasattr(self.parent_page, "session_data"):
+                session_data = self.parent_page.session_data
+            self._logger = AppLogger(session_data=session_data or {})
+        except Exception:
+            self._logger = None
 
-        # ── En-tête ───────────────────────────────────────────────────────────
-        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
-        hdr.grid(row=0, column=0, sticky="ew")
-        ctk.CTkLabel(
-            hdr, text=f"Détails {titre_doc} — {refvente}",
-            font=_f(16, "bold"), text_color="#FFFFFF"
-        ).pack(side="left", padx=16, pady=10)
-
-        # Badge statut
-        badge_colors = {
-            "VALIDEE":    (C.SUCCESS_DARK, "#FFFFFF"),
-            "EN_ATTENTE": (C.WARNING,      "#FFFFFF"),
-            "ANNULE":     (C.DANGER,       "#FFFFFF"),
-            "AVOIR":      (C.PREMIUM_DARK, "#FFFFFF"),
-        }
-        bg_s, fg_s = badge_colors.get(statut, (C.TEXT_MUTED, "#FFFFFF"))
-        ctk.CTkLabel(
-            hdr, text=f"  {statut}  ",
-            font=_f(9, "bold"), text_color=fg_s,
-            fg_color=bg_s, corner_radius=4
-        ).pack(side="right", padx=16, pady=10)
-
-        # ── Treeview ──────────────────────────────────────────────────────────
-        tbl = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
-        tbl.grid(row=1, column=0, sticky="nsew", padx=12, pady=6)
+    def _setup_detail_tree(self, parent, style_name):
+        tbl = ctk.CTkFrame(parent, fg_color=C.BG_CARD, corner_radius=8)
         tbl.grid_rowconfigure(0, weight=1)
         tbl.grid_columnconfigure(0, weight=1)
 
@@ -332,7 +311,7 @@ class PageDetailFacture(ctk.CTkToplevel):
 
         cols = ("code", "designation", "qte", "prix", "p_remise", "total")
         self.tree = ttk.Treeview(tbl, columns=cols, show="headings",
-                                 style="Detail.Treeview")
+                                 style=f"{style_name}.Treeview")
         self.tree.tag_configure("even", background=C.BG_CARD)
         self.tree.tag_configure("odd",  background="#F0F4F8")
 
@@ -352,66 +331,46 @@ class PageDetailFacture(ctk.CTkToplevel):
 
         sy = ctk.CTkScrollbar(tbl, orientation="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sy.set)
-
         self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
         sy.grid(row=0, column=1, sticky="ns", pady=6)
+        return tbl
 
-        # ── Footer ────────────────────────────────────────────────────────────
-        footer = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
-        footer.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
-
-        left = ctk.CTkFrame(footer, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True, padx=16, pady=12)
-
-        ctk.CTkLabel(
-            left, text="Montant Total",
-            font=_f(9), text_color=C.TEXT_MUTED
-        ).pack(anchor="w")
-        self.lbl_montant = ctk.CTkLabel(
-            left, text="0,00 Ar",
-            font=_f(16, "bold"), text_color=C.SUCCESS_DARK)
-        self.lbl_montant.pack(anchor="w")
-
-        right = ctk.CTkFrame(footer, fg_color="transparent")
-        right.pack(side="right", padx=16, pady=12)
+    def _populate_action_buttons(self, container):
+        for w in container.winfo_children():
+            w.destroy()
 
         if self.statut == "VALIDEE" or self.mode_avoir:
-            lbl_dup = "🖨️  Réimprimer Avoir (Duplicata)" if self.mode_avoir else "🖨️  Réimprimer (Duplicata)"
+            lbl_dup = (
+                "🖨️  Duplicata Avoir" if self.mode_avoir
+                else "🖨️  Duplicata"
+            )
             ctk.CTkButton(
-                right, text=lbl_dup,
+                container, text=lbl_dup,
                 command=self.reimprimer_duplicata,
                 fg_color=C.PRIMARY, hover_color=C.PRIMARY_HOVER,
-                text_color="#FFFFFF", height=32, width=230 if self.mode_avoir else 210,
-                font=_f(10, "bold")
-            ).pack(pady=(0, 4))
+                text_color="#FFFFFF", height=28,
+                width=150 if self.mode_avoir else 130,
+                font=_f(9, "bold"),
+            ).pack(side="left", padx=(0, 6))
 
         if self.statut == "EN_ATTENTE" and not self.mode_avoir:
             ctk.CTkButton(
-                right, text="❌  Annuler Facture",
+                container, text="❌  Annuler",
                 command=self.annuler_facture,
                 fg_color=C.DANGER, hover_color=C.DANGER_DARK,
-                text_color="#FFFFFF", height=32, width=180,
-                font=_f(10, "bold")
-            ).pack(pady=(0, 4))
+                text_color="#FFFFFF", height=28, width=110,
+                font=_f(9, "bold"),
+            ).pack(side="left", padx=(0, 6))
 
         if self.statut == "ANNULE":
             ctk.CTkLabel(
-                right, text="⚠️  Facture Annulée",
-                text_color=C.DANGER, font=_f(11, "bold")
-            ).pack(pady=4)
+                container, text="⚠️  Facture Annulée",
+                text_color=C.DANGER, font=_f(10, "bold"),
+            ).pack(side="left")
 
-        self.charger_details(idvente)
-        try:
-            session_data = {}
-            if parent_page and hasattr(parent_page, "session_data") and isinstance(parent_page.session_data, dict):
-                session_data = parent_page.session_data
-            self._logger = AppLogger(session_data=session_data)
-        except Exception:
-            self._logger = None
-
-    # ====================================================================
-    # LOGIQUE MÉTIER — inchangée
-    # ====================================================================
+    def _close_if_popup(self):
+        if isinstance(self, ctk.CTkToplevel):
+            self.destroy()
 
     def formater_montant(self, valeur):
         """Transforme un nombre en format 1.000,00 Ar"""
@@ -610,7 +569,7 @@ class PageDetailFacture(ctk.CTkToplevel):
             except Exception:
                 pass
             
-            self.destroy()
+            self._close_if_popup()
 
         except Exception as e:
             messagebox.showerror("Erreur",
@@ -676,7 +635,7 @@ class PageDetailFacture(ctk.CTkToplevel):
             except Exception:
                 pass
 
-            self.destroy()
+            self._close_if_popup()
 
         except Exception as e:
             messagebox.showerror(
@@ -714,11 +673,14 @@ class PageDetailFacture(ctk.CTkToplevel):
                 except Exception:
                     pass
                 self.statut = "ANNULE"
-                if hasattr(self, 'btn_annuler'):
-                    self.btn_annuler.pack_forget()
+                if hasattr(self, "actions_frame"):
+                    self._populate_action_buttons(self.actions_frame)
+                if hasattr(self, "lbl_badge") and self.lbl_badge.winfo_exists():
+                    bg_s, fg_s = _BADGE_STATUT.get("ANNULE", (C.TEXT_MUTED, "#FFFFFF"))
+                    self.lbl_badge.configure(text="  ANNULE  ", fg_color=bg_s, text_color=fg_s)
                 if self.parent_page:
                     self.parent_page.charger_donnees()
-                self.destroy()
+                self._close_if_popup()
             except Exception as e:
                 messagebox.showerror("Erreur",
                                      f"Erreur lors de l'annulation : {str(e)}")
@@ -789,6 +751,170 @@ class PageDetailFacture(ctk.CTkToplevel):
     # Fin génération duplicata A5
     # --------------------------------------------------------------------
 
+
+# ====================================================================
+# PageDetailFacture — popup (double-clic)
+# ====================================================================
+
+class PageDetailFacture(_FactureDetailCore, ctk.CTkToplevel):
+    """Fenêtre affichant les articles d'une facture spécifique"""
+
+    def __init__(self, master, idvente, refvente,
+                 statut="EN_ATTENTE", parent_page=None, mode_avoir=False):
+        super().__init__(master)
+        self.mode_avoir = mode_avoir
+        titre_doc = "Avoir" if mode_avoir else "Facture"
+        self.title(f"Détails {titre_doc} : {refvente}")
+        self.geometry("860x560")
+        if _T:
+            Theme.apply_toplevel(self)
+        self.attributes('-topmost', True)
+
+        self._init_detail_state(idvente, refvente, statut, parent_page, mode_avoir)
+        _apply_tree_style("Detail")
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=0)
+        hdr.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(
+            hdr, text=f"Détails {titre_doc} — {refvente}",
+            font=_f(16, "bold"), text_color="#FFFFFF"
+        ).pack(side="left", padx=16, pady=10)
+
+        bg_s, fg_s = _BADGE_STATUT.get(statut, (C.TEXT_MUTED, "#FFFFFF"))
+        self.lbl_badge = ctk.CTkLabel(
+            hdr, text=f"  {statut}  ",
+            font=_f(9, "bold"), text_color=fg_s,
+            fg_color=bg_s, corner_radius=4
+        )
+        self.lbl_badge.pack(side="right", padx=16, pady=10)
+
+        tbl = self._setup_detail_tree(self, "Detail")
+        tbl.grid(row=1, column=0, sticky="nsew", padx=12, pady=6)
+
+        footer = ctk.CTkFrame(self, fg_color=C.BG_CARD, corner_radius=8)
+        footer.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
+
+        left = ctk.CTkFrame(footer, fg_color="transparent")
+        left.pack(side="left", fill="x", expand=True, padx=16, pady=12)
+        ctk.CTkLabel(
+            left, text="Montant Total",
+            font=_f(9), text_color=C.TEXT_MUTED
+        ).pack(anchor="w")
+        self.lbl_montant = ctk.CTkLabel(
+            left, text="0,00 Ar",
+            font=_f(16, "bold"), text_color=C.SUCCESS_DARK)
+        self.lbl_montant.pack(anchor="w")
+
+        self.actions_frame = ctk.CTkFrame(footer, fg_color="transparent")
+        self.actions_frame.pack(side="right", padx=16, pady=12)
+        self._populate_action_buttons(self.actions_frame)
+
+        self.charger_details(idvente)
+        session_data = {}
+        if parent_page and hasattr(parent_page, "session_data"):
+            session_data = parent_page.session_data
+        self._init_detail_logger(session_data)
+
+
+# ====================================================================
+# PanelDetailFacture — panneau bas (simple clic)
+# ====================================================================
+
+class PanelDetailFacture(_FactureDetailCore, ctk.CTkFrame):
+    """Panneau embarqué affichant le détail d'une facture sélectionnée."""
+
+    def __init__(self, master, parent_page=None, session_data=None):
+        super().__init__(master, fg_color=C.BG_CARD, corner_radius=8)
+        self.parent_page = parent_page
+        self._visible = False
+        _apply_tree_style("DetailPanel")
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        hdr = ctk.CTkFrame(self, fg_color=C.BG_HEADER, corner_radius=6)
+        hdr.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+        hdr.grid_columnconfigure(0, weight=1)
+
+        self.lbl_titre = ctk.CTkLabel(
+            hdr, text="Détail facture",
+            font=_f(12, "bold"), text_color="#FFFFFF",
+        )
+        self.lbl_titre.grid(row=0, column=0, sticky="w", padx=12, pady=8)
+
+        right_hdr = ctk.CTkFrame(hdr, fg_color="transparent")
+        right_hdr.grid(row=0, column=1, sticky="e", padx=(0, 4), pady=4)
+
+        self.lbl_badge = ctk.CTkLabel(
+            right_hdr, text="  —  ",
+            font=_f(9, "bold"), text_color="#FFFFFF",
+            fg_color=C.TEXT_MUTED, corner_radius=4,
+        )
+        self.lbl_badge.pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            right_hdr, text="✕", width=28, height=28,
+            command=self.masquer,
+            fg_color=C.DANGER, hover_color=C.DANGER_DARK,
+            text_color="#FFFFFF", font=_f(12, "bold"),
+        ).pack(side="left")
+
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 4))
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+
+        tbl = self._setup_detail_tree(body, "DetailPanel")
+        tbl.grid(row=0, column=0, sticky="nsew")
+
+        footer = ctk.CTkFrame(self, fg_color=C.BG_INPUT, corner_radius=6)
+        footer.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
+
+        left = ctk.CTkFrame(footer, fg_color="transparent")
+        left.pack(side="left", padx=12, pady=8)
+        ctk.CTkLabel(
+            left, text="Montant Total",
+            font=_f(8), text_color=C.TEXT_MUTED,
+        ).pack(anchor="w")
+        self.lbl_montant = ctk.CTkLabel(
+            left, text="0,00 Ar",
+            font=_f(13, "bold"), text_color=C.SUCCESS_DARK,
+        )
+        self.lbl_montant.pack(anchor="w")
+
+        self.actions_frame = ctk.CTkFrame(footer, fg_color="transparent")
+        self.actions_frame.pack(side="right", padx=12, pady=8)
+
+        self._init_detail_state("", "", "EN_ATTENTE", parent_page, False)
+        self._init_detail_logger(session_data)
+
+    def masquer(self):
+        self._visible = False
+        self.grid_remove()
+        if self.parent_page:
+            self.parent_page._detail_row_weight(show=False)
+
+    def afficher(self, idvente, refvente, statut, mode_avoir=False):
+        self._visible = True
+        self._init_detail_state(idvente, refvente, statut, self.parent_page, mode_avoir)
+
+        titre_doc = "Avoir" if mode_avoir else "Facture"
+        self.lbl_titre.configure(text=f"Détail {titre_doc} — {refvente}")
+
+        bg_s, fg_s = _BADGE_STATUT.get(statut, (C.TEXT_MUTED, "#FFFFFF"))
+        self.lbl_badge.configure(text=f"  {statut}  ", fg_color=bg_s, text_color=fg_s)
+
+        self._populate_action_buttons(self.actions_frame)
+        self.charger_details(idvente)
+
+        self.grid()
+        if self.parent_page:
+            self.parent_page._detail_row_weight(show=True)
+
+
 class PageListeFacture(ctk.CTkFrame):
 
     def __init__(self, parent, session_data=None):
@@ -802,6 +928,8 @@ class PageListeFacture(ctk.CTkFrame):
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=0, minsize=0)
+        self._detail_selection = None
 
         self.setup_ui()
         self.charger_donnees()
@@ -923,11 +1051,21 @@ class PageListeFacture(ctk.CTkFrame):
         self.tree.configure(yscrollcommand=sy.set)
         self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
         sy.grid(row=0, column=1, sticky="ns", pady=6)
+        self.tree.bind("<ButtonRelease-1>", self.on_row_click)
         self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<KeyRelease-Up>", self.on_tree_key_nav)
+        self.tree.bind("<KeyRelease-Down>", self.on_tree_key_nav)
+
+        # ── Panneau détail (caché par défaut) ─────────────────────────────
+        self.panel_detail = PanelDetailFacture(
+            self, parent_page=self, session_data=self.session_data,
+        )
+        self.panel_detail.grid(row=3, column=0, sticky="nsew", padx=12, pady=(0, 4))
+        self.panel_detail.grid_remove()
 
         # ── Footer ────────────────────────────────────────────────────────
         footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 8))
+        footer.grid(row=4, column=0, sticky="ew", padx=12, pady=(2, 8))
 
         self.lbl_count = ctk.CTkLabel(
             footer, text="Factures : 0",
@@ -1025,7 +1163,17 @@ class PageListeFacture(ctk.CTkFrame):
         finally:
             conn.close()
 
+    def _detail_row_weight(self, show=True):
+        if show:
+            self.grid_rowconfigure(2, weight=2)
+            self.grid_rowconfigure(3, weight=1, minsize=220)
+        else:
+            self.grid_rowconfigure(2, weight=1)
+            self.grid_rowconfigure(3, weight=0, minsize=0)
+            self._detail_selection = None
+
     def charger_donnees(self):
+        selection_avant = self._detail_selection
         for item in self.tree.get_children():
             self.tree.delete(item)
 
@@ -1142,8 +1290,53 @@ class PageListeFacture(ctk.CTkFrame):
             self.lbl_count.configure(text=f"{libelle} : {len(rows)}")
             self.lbl_total_mt.configure(
                 text=f"Total : {self.formater_montant(total)} Ar")
+
+            if selection_avant and self.tree.exists(selection_avant):
+                self._afficher_detail_ligne(selection_avant)
+            elif self.panel_detail._visible:
+                self.panel_detail.masquer()
         finally:
             conn.close()
+
+    def _afficher_detail_ligne(self, iid):
+        if not iid or not self.tree.exists(iid):
+            return
+        values = self.tree.item(iid)['values']
+        if not values:
+            return
+        ref_facture = values[1]
+        statut = values[5]
+        mode_avoir = statut == "AVOIR" or self.combo_statut.get() == "AVOIR"
+        self._detail_selection = iid
+        self.tree.selection_set(iid)
+        self.tree.focus(iid)
+        self.tree.see(iid)
+        self.panel_detail.afficher(
+            iid, ref_facture, statut, mode_avoir=mode_avoir,
+        )
+
+    def on_row_click(self, event):
+        iid = self.tree.identify_row(event.y)
+        if not iid:
+            return
+        self._afficher_detail_ligne(iid)
+
+    def on_tree_key_nav(self, event):
+        if event.keysym not in ("Up", "Down"):
+            return
+        if not self.panel_detail._visible:
+            return
+        self.after_idle(self._sync_detail_keyboard)
+
+    def _sync_detail_keyboard(self):
+        if not self.panel_detail._visible:
+            return
+        iid = self.tree.focus()
+        if not iid:
+            sel = self.tree.selection()
+            iid = sel[0] if sel else None
+        if iid:
+            self._afficher_detail_ligne(iid)
 
     def on_double_click(self, event):
         selected_item = self.tree.focus()
