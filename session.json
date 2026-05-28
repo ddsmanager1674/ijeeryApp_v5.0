@@ -125,10 +125,6 @@
             "AppMain"
         ],
         [
-            "Livraison Client",
-            "PageLivraisonClient"
-        ],
-        [
             "Magasin",
             "PageMagasin"
         ],
@@ -173,10 +169,6 @@
             ""
         ],
         [
-            "Paramètres Mouvement Stock",
-            ""
-        ],
-        [
             "Paramètres Prix Article",
             ""
         ],
@@ -211,10 +203,6 @@
         [
             "Stock Article",
             "PageStock"
-        ],
-        [
-            "Stock Livraison",
-            "PageStockLivraison"
         ],
         [
             "Suivi de présence",

@@ -1844,7 +1844,9 @@ CREATE TABLE public.tb_livraisoncli (
     dateregistre timestamp without time zone,
     iduser integer,
     qtvente double precision,
-    idclient integer
+    idclient integer,
+    idtransporteur integer,
+    description_livraison character varying(250)
 );
 
 
@@ -5065,6 +5067,60 @@ ALTER TABLE ONLY public.tb_param_commande_frs
     ADD CONSTRAINT tb_param_commande_frs_idfrs_defaut_fkey
     FOREIGN KEY (idfrs_defaut) REFERENCES public.tb_fournisseur(idfrs)
     ON UPDATE CASCADE ON DELETE SET NULL;
+
+-- ---------------------------------------------------------------------------
+-- Historique des sauvegardes (page Sauvegarde)
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE public.tb_save_history (
+    id integer NOT NULL,
+    datetime timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    libelle character varying(255) NOT NULL,
+    appareil character varying(200),
+    description text,
+    taille_mo numeric(14, 2),
+    utilisateur character varying(150)
+);
+
+CREATE SEQUENCE public.tb_save_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.tb_save_history_id_seq OWNED BY public.tb_save_history.id;
+
+ALTER TABLE ONLY public.tb_save_history
+    ALTER COLUMN id SET DEFAULT nextval('public.tb_save_history_id_seq'::regclass);
+
+ALTER TABLE ONLY public.tb_save_history
+    ADD CONSTRAINT tb_save_history_pkey PRIMARY KEY (id);
+
+CREATE INDEX idx_tb_save_history_datetime
+    ON public.tb_save_history USING btree (datetime DESC);
+
+CREATE INDEX idx_tb_save_history_utilisateur
+    ON public.tb_save_history USING btree (utilisateur);
+
+COMMENT ON TABLE public.tb_save_history IS
+    'Historique des sauvegardes PostgreSQL effectuées depuis la page Sauvegarde.';
+
+COMMENT ON COLUMN public.tb_save_history.libelle IS
+    'Nom du fichier de sauvegarde.';
+
+COMMENT ON COLUMN public.tb_save_history.appareil IS
+    'Nom du poste / IP (format host/ip).';
+
+COMMENT ON COLUMN public.tb_save_history.description IS
+    'Chemin complet d''enregistrement du fichier.';
+
+COMMENT ON COLUMN public.tb_save_history.taille_mo IS
+    'Taille du fichier en mégaoctets.';
+
+COMMENT ON COLUMN public.tb_save_history.utilisateur IS
+    'Utilisateur ayant lancé la sauvegarde.';
 
 COMMIT;
 

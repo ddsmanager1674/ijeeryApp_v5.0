@@ -42,7 +42,7 @@
   "ListeMouvements": {
     "_comment": "Préférences personnelles Liste mouvements (par id utilisateur). MenuDefaut : clé entree, sortie, transfert, entree_stock, consommation, changement.",
     "MenuDefautParUtilisateur": {
-      "0": "changement"
+      "0": "entree_stock"
     },
     "SidebarHamburgerParUtilisateur": {
       "0": true
