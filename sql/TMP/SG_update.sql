@@ -2,13 +2,18 @@
 -- iJeery V5.0 — SG_update.sql
 -- =============================================================================
 -- But:
---   Aligner la base production (dump: sql/TMP/SG0505.sql) sur la référence
---   (dump: sql/Structure database.sql).
+--   Aligner une base "ancienne structure" (ex: dumps `sql/TMP/SG0505.sql` et `sql/TMP/AM0505.sql`)
+--   sur la référence `sql/Structure database.sql`.
+--
+-- Référence utilisée:
+--   - `sql/Structure database.sql` (pg_dump) : contient la structure attendue par le logiciel
+--   - `sql/TMP/SG0505.sql` et `sql/TMP/AM0505.sql` : exemples de structures prod “anciennes”
 --
 -- Propriétés:
 --   - Idempotent: ré-exécutable sans erreur si déjà appliqué.
---   - Additif: crée les objets manquants + ajoute les colonnes manquantes.
---   - Ne supprime rien.
+--   - Additif: crée les objets manquants, ajoute les colonnes manquantes, corrige certains typos.
+--   - Ne supprime rien (pas de DROP).
+--   - Safe FK: n'ajoute une FK que si la PK/UNIQUE existe côté table référencée.
 --
 -- Exécution (exemple):
 --   psql -v ON_ERROR_STOP=1 -U postgres -d <votre_base> -f sql/TMP/SG_update.sql
@@ -19,7 +24,7 @@ SET client_min_messages = warning;
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 1) Tables absentes dans SG0505 (référence -> prod)
+-- 1) Tables/objets absents des dumps anciens (référence -> prod)
 -- ---------------------------------------------------------------------------
 
 -- Logs (présents dans la référence)
@@ -297,17 +302,112 @@ INSERT INTO public.tb_param_commande_frs (id, idfrs_defaut)
 VALUES (1, NULL)
 ON CONFLICT (id) DO NOTHING;
 
+-- Assurer l'unicité côté tables référencées (sinon FK impossible)
+DO $$
+BEGIN
+    -- tb_transporteur(idtransporteur) doit être UNIQUE/PK
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public'
+          AND t.relname = 'tb_transporteur'
+          AND c.contype IN ('p','u')
+          AND pg_get_constraintdef(c.oid) ILIKE '%(idtransporteur)%'
+    ) THEN
+        BEGIN
+            ALTER TABLE IF EXISTS public.tb_transporteur
+                ADD CONSTRAINT tb_transporteur_pkey PRIMARY KEY (idtransporteur);
+        EXCEPTION WHEN others THEN
+            RAISE NOTICE 'Impossible d''ajouter la PK tb_transporteur(idtransporteur) (doublons/NULL ?). FK tb_param_livraison_client sera ignorée si nécessaire.';
+        END;
+    END IF;
+
+    -- tb_fournisseur(idfrs) doit être UNIQUE/PK
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public'
+          AND t.relname = 'tb_fournisseur'
+          AND c.contype IN ('p','u')
+          AND pg_get_constraintdef(c.oid) ILIKE '%(idfrs)%'
+    ) THEN
+        BEGIN
+            ALTER TABLE IF EXISTS public.tb_fournisseur
+                ADD CONSTRAINT tb_fournisseur_pkey PRIMARY KEY (idfrs);
+        EXCEPTION WHEN others THEN
+            RAISE NOTICE 'Impossible d''ajouter la PK tb_fournisseur(idfrs) (doublons/NULL ?). FK tb_param_commande_frs sera ignorée si nécessaire.';
+        END;
+    END IF;
+
+    -- Assurer les DEFAULT nextval(...) sur les identifiants si la séquence existe
+    -- (certaines bases ont la séquence mais pas le DEFAULT sur la colonne)
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tb_transporteur'
+          AND column_name = 'idtransporteur'
+          AND column_default IS NULL
+    )
+    AND to_regclass('public.tb_transporteur_idtransporteur_seq') IS NOT NULL
+    THEN
+        BEGIN
+            ALTER TABLE IF EXISTS public.tb_transporteur
+                ALTER COLUMN idtransporteur SET DEFAULT nextval('public.tb_transporteur_idtransporteur_seq'::regclass);
+        EXCEPTION WHEN others THEN
+            RAISE NOTICE 'Impossible de définir le DEFAULT de tb_transporteur.idtransporteur.';
+        END;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tb_fournisseur'
+          AND column_name = 'idfrs'
+          AND column_default IS NULL
+    )
+    AND to_regclass('public.tb_fournisseur_idfrs_seq') IS NOT NULL
+    THEN
+        BEGIN
+            ALTER TABLE IF EXISTS public.tb_fournisseur
+                ALTER COLUMN idfrs SET DEFAULT nextval('public.tb_fournisseur_idfrs_seq'::regclass);
+        EXCEPTION WHEN others THEN
+            RAISE NOTICE 'Impossible de définir le DEFAULT de tb_fournisseur.idfrs.';
+        END;
+    END IF;
+END $$;
+
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'tb_param_livraison_client_idtransporteur_fkey'
     ) THEN
-        ALTER TABLE IF EXISTS public.tb_param_livraison_client
-            ADD CONSTRAINT tb_param_livraison_client_idtransporteur_fkey
-            FOREIGN KEY (idtransporteur_defaut)
-            REFERENCES public.tb_transporteur(idtransporteur)
-            ON UPDATE CASCADE ON DELETE SET NULL;
+        -- FK possible uniquement si idtransporteur est UNIQUE/PK
+        IF EXISTS (
+            SELECT 1
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            WHERE n.nspname = 'public'
+              AND t.relname = 'tb_transporteur'
+              AND c.contype IN ('p','u')
+              AND pg_get_constraintdef(c.oid) ILIKE '%(idtransporteur)%'
+        ) THEN
+            ALTER TABLE IF EXISTS public.tb_param_livraison_client
+                ADD CONSTRAINT tb_param_livraison_client_idtransporteur_fkey
+                FOREIGN KEY (idtransporteur_defaut)
+                REFERENCES public.tb_transporteur(idtransporteur)
+                ON UPDATE CASCADE ON DELETE SET NULL;
+        ELSE
+            RAISE NOTICE 'FK tb_param_livraison_client_idtransporteur_fkey ignorée: tb_transporteur.idtransporteur n''est pas UNIQUE/PK.';
+        END IF;
     END IF;
 END $$;
 
@@ -317,16 +417,30 @@ BEGIN
         SELECT 1 FROM pg_constraint
         WHERE conname = 'tb_param_commande_frs_idfrs_defaut_fkey'
     ) THEN
-        ALTER TABLE IF EXISTS public.tb_param_commande_frs
-            ADD CONSTRAINT tb_param_commande_frs_idfrs_defaut_fkey
-            FOREIGN KEY (idfrs_defaut)
-            REFERENCES public.tb_fournisseur(idfrs)
-            ON UPDATE CASCADE ON DELETE SET NULL;
+        -- FK possible uniquement si idfrs est UNIQUE/PK
+        IF EXISTS (
+            SELECT 1
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            WHERE n.nspname = 'public'
+              AND t.relname = 'tb_fournisseur'
+              AND c.contype IN ('p','u')
+              AND pg_get_constraintdef(c.oid) ILIKE '%(idfrs)%'
+        ) THEN
+            ALTER TABLE IF EXISTS public.tb_param_commande_frs
+                ADD CONSTRAINT tb_param_commande_frs_idfrs_defaut_fkey
+                FOREIGN KEY (idfrs_defaut)
+                REFERENCES public.tb_fournisseur(idfrs)
+                ON UPDATE CASCADE ON DELETE SET NULL;
+        ELSE
+            RAISE NOTICE 'FK tb_param_commande_frs_idfrs_defaut_fkey ignorée: tb_fournisseur.idfrs n''est pas UNIQUE/PK.';
+        END IF;
     END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 2) Colonnes manquantes sur tables existantes (SG0505 -> référence)
+-- 2) Colonnes manquantes sur tables existantes (dumps anciens -> référence)
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE IF EXISTS public.tb_magasin
@@ -351,7 +465,7 @@ ALTER TABLE IF EXISTS public.tb_livraisoncli
     ADD COLUMN IF NOT EXISTS description_livraison character varying(250);
 
 -- ---------------------------------------------------------------------------
--- 3) Ajustement type (référence): tb_avancepers.datepmt date -> timestamp
+-- 3) Ajustement de type (référence): tb_avancepers.datepmt date -> timestamp
 -- ---------------------------------------------------------------------------
 
 DO $$
@@ -371,7 +485,7 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 4) FK personnel -> poste (si non présent)
+-- 4) FK personnel -> poste (si non présente)
 -- ---------------------------------------------------------------------------
 
 DO $$
@@ -381,6 +495,32 @@ BEGIN
             ADD CONSTRAINT tb_personnel_idposte_fkey
             FOREIGN KEY (idposte) REFERENCES public.tb_postepersonnel(idposte)
             ON UPDATE CASCADE ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 5) Corrections de noms (typos historiques) — AM0505 -> référence
+-- ---------------------------------------------------------------------------
+
+-- AM0505: tb_transfertdetail.qttranfertsortie  -> référence: qttransfertsortie
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tb_transfertdetail'
+          AND column_name = 'qttranfertsortie'
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tb_transfertdetail'
+          AND column_name = 'qttransfertsortie'
+    ) THEN
+        ALTER TABLE IF EXISTS public.tb_transfertdetail
+            RENAME COLUMN qttranfertsortie TO qttransfertsortie;
     END IF;
 END $$;
 
