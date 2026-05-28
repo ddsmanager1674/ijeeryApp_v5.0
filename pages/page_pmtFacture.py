@@ -705,6 +705,12 @@ class PagePmtFacture(ctk.CTkToplevel):
                 WHERE idarticle = %s AND COALESCE(deleted, 0) = 0
                 ORDER BY idarticle, qtunite ASC, idunite ASC
             ),
+            ent AS (
+                SELECT ed.idarticle, ed.idunite, ed.idmag, SUM(ed.qtentree) AS quantite
+                FROM tb_entreedetail ed
+                WHERE ed.idarticle = %s AND ed.idmag = %s AND ed.deleted = 0
+                GROUP BY ed.idarticle, ed.idunite, ed.idmag
+            ),
             rec AS (
                 SELECT lf.idarticle, lf.idunite, lf.idmag, SUM(lf.qtlivrefrs) AS quantite
                 FROM tb_livraisonfrs lf
@@ -721,7 +727,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             sor AS (
                 SELECT sd.idarticle, sd.idunite, sd.idmag, SUM(sd.qtsortie) AS quantite
                 FROM tb_sortiedetail sd
-                WHERE sd.idarticle = %s AND sd.idmag = %s
+                WHERE sd.idarticle = %s AND sd.idmag = %s AND sd.deleted = 0
                 GROUP BY sd.idarticle, sd.idunite, sd.idmag
             ),
             tin AS (
@@ -770,6 +776,8 @@ class PagePmtFacture(ctk.CTkToplevel):
                 GROUP BY dcs.idarticle, dcs.idunite, dcs.idmagasin
             ),
             mouvements_agreges AS (
+                SELECT idarticle, idunite, idmag, quantite, 'entree' AS type_mouvement FROM ent
+                UNION ALL
                 SELECT idarticle, idunite, idmag, quantite, 'reception' AS type_mouvement FROM rec
                 UNION ALL
                 SELECT idarticle, idunite, idmag, quantite, 'vente' AS type_mouvement FROM ven
@@ -796,6 +804,7 @@ class PagePmtFacture(ctk.CTkToplevel):
                     ma.idmag,
                     SUM(
                         CASE ma.type_mouvement
+                            WHEN 'entree'               THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
                             WHEN 'reception'            THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
                             WHEN 'transfert_in'         THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
                             WHEN 'inventaire'           THEN  ma.quantite * COALESCE(uc.coeff_hierarchique, 1)
@@ -831,6 +840,7 @@ class PagePmtFacture(ctk.CTkToplevel):
             params = [
                 idarticle,
                 idarticle,
+                idarticle, idmag,      # ent
                 idarticle, idmag,      # rec
                 idarticle, idmag,      # ven
                 idarticle, idmag,      # sor
