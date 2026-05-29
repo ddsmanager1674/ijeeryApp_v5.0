@@ -49,6 +49,10 @@
             ""
         ],
         [
+            "BLOC: LOGISTIQUE",
+            ""
+        ],
+        [
             "BLOC: PARAMÈTRES MODULES",
             ""
         ],
@@ -69,8 +73,16 @@
             ""
         ],
         [
+            "Bons Sortie",
+            "pages.page_bonsSortie"
+        ],
+        [
             "Caisse",
             "PageCaisse"
+        ],
+        [
+            "Carburant",
+            "pages.page_carburant"
         ],
         [
             "CHAT INTERNE",
@@ -121,6 +133,10 @@
             "PageInventaireJour"
         ],
         [
+            "Itineraires",
+            "pages.page_itineraires"
+        ],
+        [
             "Liste Facture",
             "PageFactureListe"
         ],
@@ -135,6 +151,10 @@
         [
             "Magasin",
             "PageMagasin"
+        ],
+        [
+            "Maintenance",
+            "pages.page_maintenance"
         ],
         [
             "Marge Commerciale",
@@ -189,8 +209,16 @@
             ""
         ],
         [
+            "Parc Vehicule",
+            "pages.page_parcVehicule"
+        ],
+        [
             "Péremption d'article",
             "PageGestionPeremption"
+        ],
+        [
+            "Pieces Detachees",
+            "pages.page_piecesDetachees"
         ],
         [
             "Prix d'article",
@@ -199,6 +227,10 @@
         [
             "Prix de revient",
             "PagePrixRevient"
+        ],
+        [
+            "Rapport Logistique",
+            "pages.page_rapportLogistique"
         ],
         [
             "Salaire Horaire",

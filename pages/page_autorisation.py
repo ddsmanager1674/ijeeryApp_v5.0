@@ -66,6 +66,14 @@ class PageAutorisation(ctk.CTkFrame):
             ),
         ),
         MenuGroup(
+            "LOGISTIQUE",
+            "BLOC: LOGISTIQUE",
+            (
+                "Parc Vehicule", "Pieces Detachees", "Carburant",
+                "Itineraires", "Bons Sortie", "Maintenance", "Rapport Logistique",
+            ),
+        ),
+        MenuGroup(
             "BASE DE DONNÉES",
             "BLOC: BASE DE DONNÉES",
             (

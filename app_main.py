@@ -207,6 +207,22 @@ MENU_STRUCTURE = [
             ("🔐  Autorisation Admin",  "Autorisation Admin",    "pages.page_CodeAutorisation", "PageCodeAutorisation", None),
         ],
     },
+    # ── LOGISTIQUE ─────────────────────────────────────────────────────────
+    {
+        "id":    "LOGISTIQUE",
+        "label": "🚛  LOGISTIQUE",
+        "color": "#1A6B3C",
+        "hover": "#27AE60",
+        "subs": [
+            ("🚗  Parc Véhicule",      "Parc Vehicule",     "pages.page_parcVehicule",    "PageParcVehicule",    None),
+            ("🔩  Pièces Détachées",   "Pieces Detachees",  "pages.page_piecesDetachees", "PagePiecesDetachees", None),
+            ("⛽  Carburant",          "Carburant",         "pages.page_carburant",       "PageCarburant",       None),
+            ("🗺️  Itinéraires",        "Itineraires",       "pages.page_itineraires",     "PageItineraires",     None),
+            ("📋  Bons de Sortie",     "Bons Sortie",       "pages.page_bonsSortie",      "PageBonsSortie",      None),
+            ("🔧  Maintenance",        "Maintenance",       "pages.page_maintenance",     "PageMaintenance",     None),
+            ("📊  Rapport Logistique", "Rapport Logistique","pages.page_rapportLogistique","PageRapportLogistique",None),
+        ],
+    },
     # ── EXAMEN BLANC ───────────────────────────────────────────────────────
     {
         "id":    "EXAMEN_BLANC",
@@ -563,6 +579,7 @@ class Sidebar(ctk.CTkFrame):
             "COMMERCIALE":"BLOC: COMMERCIALE",
             "PERSONNEL":  "BLOC: PERSONNEL",
             "TRESORERIE": "BLOC: TRÉSORERIE",
+            "LOGISTIQUE": "BLOC: LOGISTIQUE",
             "DATABASE":   "BLOC: BASE DE DONNÉES",
         }
         return mapping.get(cfg.get("id"))
@@ -1215,6 +1232,8 @@ def _dummy_session() -> dict:
         "Taux Horaire", "Paiement Salaire",
         "Caisse", "Facture Liste", "Banque", "Ajout Banque",
         "Transfert Banque", "Transfert Caisse",
+        "Parc Vehicule", "Pieces Detachees", "Carburant",
+        "Itineraires", "Bons Sortie", "Maintenance", "Rapport Logistique",
         "Autorisation", "Evenements", "Sauvegarde", "Fonction", "Utilisateurs",
         "Paramètres", "Menu", "Base Liste", "Autorisation Admin",
     ]
