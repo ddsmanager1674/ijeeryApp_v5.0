@@ -7,7 +7,7 @@ import threading
 from tkinter import ttk
 import os
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 from stock_manager import StockManager
 from db import ensure_connection, get_connection, load_db_config
 
@@ -82,12 +82,11 @@ class PageStock(ctk.CTkFrame):
         super().__init__(master, fg_color=C.BG_PAGE)
         self._db_conn_shared = db_conn
         self._session_data = session_data or {}
-        if iduser is not None:
-            self.iduser = iduser
-        elif session_data and 'user_id' in session_data:
-            self.iduser = session_data['user_id']
-        else:
-            self.iduser = 1
+        self.iduser = (
+            iduser
+            if iduser is not None
+            else resolve_connected_user_id(master=master, session_data=session_data)
+        )
         self.idfonction = self._session_data.get('fonction_id')
 
         self.magasins            = []

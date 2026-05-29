@@ -27,7 +27,7 @@ from resource_utils import get_config_path, safe_file_read
 from settings_utils import is_global_print_enabled, open_file_if_enabled
 
 from app_theme import Colors, Fonts
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 # ── ReportLab ────────────────────────────────────────────────────────────────
 from reportlab.pdfgen import canvas
@@ -91,7 +91,7 @@ class PagePmtFacture(ctk.CTkToplevel):
         self.refvente           = self.data.get('refvente', 'N/A')
         self.montant_total_str  = self.data.get('montant_total', '0,00')
         self.client             = self.data.get('client', 'Client Inconnu')
-        self.iduser             = iduser if iduser is not None else 1
+        self.iduser             = iduser if iduser is not None else resolve_connected_user_id(master=master)
         self.session_data       = getattr(master, "session_data", None) or {"user_id": self.iduser}
         self._logger            = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
 

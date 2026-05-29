@@ -9,7 +9,7 @@ import os
 import subprocess
 from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 
 # --- BIBLIOTHÈQUES POUR LE PDF ---
@@ -42,7 +42,7 @@ class PagePmtCredit(ctk.CTkToplevel):
 
         self.client_nom = self.data.get('client', 'Client Inconnu')
         self.id_client_db = self.data.get('id_client_reel')
-        self.iduser = iduser if iduser is not None else 1
+        self.iduser = iduser if iduser is not None else resolve_connected_user_id(master=master)
         self.session_data = getattr(master, "session_data", None) or {"user_id": self.iduser}
         self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.iduser)
 

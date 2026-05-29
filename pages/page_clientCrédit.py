@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from resource_utils import get_config_path, safe_file_read
+from log_utils import resolve_connected_user_id
 
 
 # IMPORTER LA CLASSE DE PAIEMENT
@@ -21,6 +22,7 @@ class PageClientCrédit(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master)
         self.grid(row=0, column=0, sticky="nsew")
+        self._connected_user_id = resolve_connected_user_id(master=master)
         
         # 1. Configuration de la grille
         self.grid_rowconfigure(1, weight=1)      
@@ -251,7 +253,9 @@ class PageClientCrédit(ctk.CTkFrame):
         }
 
         try:
-            pmt_window = PagePmtCredit(self.master, paiement_data)
+            pmt_window = PagePmtCredit(
+                self.master, paiement_data, iduser=self._connected_user_id
+            )
             if pmt_window.winfo_exists():
                 self.master.wait_window(pmt_window)
             self.load_data(self.search_entry.get())

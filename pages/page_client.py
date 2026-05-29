@@ -34,7 +34,7 @@ except ImportError:
             super().__init__(master)
             from tkinter import messagebox as _mb
             _mb.showerror("Erreur", "Le fichier 'page_retardCredit.py' est manquant ou contient une erreur.")
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 from treeview_sort_utils import attach_tree_sort, new_sort_state
 
 
@@ -1209,11 +1209,12 @@ Solde Restant: {self._formater_nombre(float(solde_restant or 0))} Ar"""
                 idmode_sel = mode_map.get(selected_mode) if selected_mode else None
 
                 date_pmt = datetime.now()
+                iduser_pmt = self._get_connected_user_id()
                 self.cursor.execute("""
                     INSERT INTO tb_pmtcredit 
                     (datepmt, mtpaye, observation, idtypeoperation, idclient, idmode, idpaiment, iduser)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (date_pmt, montant_paiement, observation, 1, idclient, idmode_sel, None, 1))
+                """, (date_pmt, montant_paiement, observation, 1, idclient, idmode_sel, None, iduser_pmt))
                 self.conn.commit()
                 
                 messagebox.showinfo("Succès", f"Paiement de {self._formater_nombre(montant_paiement)} Ar enregistré avec succès!")
@@ -1473,11 +1474,12 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                 
                 date_pmt = datetime.now()
                 ref_ticket = f"PMTC-{idclient}-{date_pmt.strftime('%Y%m%d%H%M%S')}"
+                iduser_pmt = self._get_connected_user_id()
                 self.cursor.execute("""
                     INSERT INTO tb_pmtcredit 
                     (datepmt, mtpaye, observation, idtypeoperation, idclient, refvente, idmode, idpaiment, refpmt, id_banque, iduser)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (date_pmt, montant_global, observation, 1, idclient, None, idmode_sel_global, None, ref_ticket, None, 1))
+                """, (date_pmt, montant_global, observation, 1, idclient, None, idmode_sel_global, None, ref_ticket, None, iduser_pmt))
                 
                 self.conn.commit()
 
@@ -1777,7 +1779,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
         except Exception as e:
             messagebox.showerror("Erreur", f"Erreur génération ticket créance: {e}")
 
-    def _get_username_by_id(self, iduser=1):
+    def _get_username_by_id(self, iduser=None):
         if iduser is None:
             iduser = self._get_connected_user_id()
         if not self.conn:
@@ -1794,20 +1796,13 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
             return "Utilisateur"
 
     def _get_connected_user_id(self):
-        if self.id_user_connecte is not None:
-            return self.id_user_connecte
-        session_id = self.session_data.get("user_id") or self.session_data.get("iduser")
-        if session_id is not None:
-            self.id_user_connecte = session_id
-            return self.id_user_connecte
-        parent = self.master
-        while parent is not None:
-            parent_id = getattr(parent, "id_user_connecte", None)
-            if parent_id is not None:
-                self.id_user_connecte = parent_id
-                return self.id_user_connecte
-            parent = getattr(parent, "master", None)
-        return 1
+        uid = resolve_connected_user_id(
+            master=self.master,
+            session_data=self.session_data,
+            id_user_connecte=self.id_user_connecte,
+        )
+        self.id_user_connecte = uid
+        return uid
 
     def _get_client_name(self, idclient):
         if not self.conn:

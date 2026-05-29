@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import threading
 from tkinter import ttk
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -80,12 +80,11 @@ class PageStock(ctk.CTkFrame):
         self.clignotement_actif = False
         self.couleur_alerte     = C.DANGER
 
-        if iduser is not None:
-            self.iduser = iduser
-        elif session_data and 'user_id' in session_data:
-            self.iduser = session_data['user_id']
-        else:
-            self.iduser = 1
+        self.iduser = (
+            iduser
+            if iduser is not None
+            else resolve_connected_user_id(master=master, session_data=session_data)
+        )
 
         self.session_data = session_data or getattr(master, "session_data", None) or {"user_id": self.iduser}
         self._logger = AppLogger(conn=db_conn, session_data=self.session_data, fallback_user_id=self.iduser)

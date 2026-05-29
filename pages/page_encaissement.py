@@ -11,7 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -532,16 +532,12 @@ class PageEncaissement(ctk.CTkToplevel):
                         print(f"DEBUG: iduser trouvé = {iduser}")
                     else:
                         print(f"ATTENTION: Utilisateur '{self.current_user}' introuvable")
-                        # Essayer de récupérer l'ID 1 (utilisateur par défaut)
-                        self.cursor.execute("SELECT iduser FROM tb_users WHERE iduser = 1")
-                        default_user = self.cursor.fetchone()
-
-                        if default_user:
-                            iduser = 1
-                            print(f"DEBUG: Utilisation de l'utilisateur par défaut (ID=1)")
-                        else:
-                            messagebox.showerror("Erreur", f"Aucun utilisateur trouvé dans la base de données")
-                            return
+                        iduser = resolve_connected_user_id(
+                            master=self.master_app,
+                            session_data=self.session_data,
+                            id_user_connecte=getattr(self, "current_user_id", None),
+                        )
+                        print(f"DEBUG: Utilisation id session: {iduser}")
                 except Exception as e:
                     print(f"DEBUG: erreur lors de la recherche d'utilisateur: {e}")
                     messagebox.showerror("Erreur", f"Erreur lors de la recherche de l'utilisateur: {e}")

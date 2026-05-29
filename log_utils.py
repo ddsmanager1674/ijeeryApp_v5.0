@@ -1,7 +1,66 @@
+import json
 import os
 from typing import Any, Optional
 
 from db import get_connection
+
+
+def resolve_connected_user_id(
+    master=None,
+    session_data=None,
+    id_user_connecte=None,
+    *,
+    default: int = 1,
+) -> int:
+    """Retourne l'ID de l'utilisateur connecté (session app, parent, session.json)."""
+    if id_user_connecte is not None:
+        try:
+            return int(id_user_connecte)
+        except (TypeError, ValueError):
+            pass
+
+    session_data = session_data or {}
+    for key in ("user_id", "iduser"):
+        val = session_data.get(key)
+        if val is not None:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                continue
+
+    parent = master
+    while parent is not None:
+        pid = getattr(parent, "id_user_connecte", None)
+        if pid is not None:
+            try:
+                return int(pid)
+            except (TypeError, ValueError):
+                return pid
+        ps = getattr(parent, "session_data", None) or {}
+        for key in ("user_id", "iduser"):
+            val = ps.get(key)
+            if val is not None:
+                try:
+                    return int(val)
+                except (TypeError, ValueError):
+                    continue
+        parent = getattr(parent, "master", None)
+
+    try:
+        from resource_utils import get_config_path
+
+        session_path = get_config_path("session.json")
+        if session_path and os.path.exists(session_path):
+            with open(session_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for key in ("user_id", "iduser", "id"):
+                val = data.get(key)
+                if val is not None:
+                    return int(val)
+    except Exception:
+        pass
+
+    return default
 
 
 def _build_description(

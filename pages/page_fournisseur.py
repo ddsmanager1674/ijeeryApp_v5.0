@@ -27,7 +27,7 @@ try:
 except ImportError:
     _T = False
 
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 from treeview_sort_utils import attach_tree_sort, new_sort_state
 
 # ── Constantes de police (cohérence globale) ─────────────────────────────────
@@ -1840,7 +1840,7 @@ class PageFournisseur(ctk.CTkFrame):
             except: pass
             return defaults
 
-    def _get_username_by_id(self, iduser=1):
+    def _get_username_by_id(self, iduser=None):
         if iduser is None: iduser = self._get_connected_user_id()
         if not self.conn: return "Utilisateur"
         try:
@@ -1853,19 +1853,13 @@ class PageFournisseur(ctk.CTkFrame):
             return "Utilisateur"
 
     def _get_connected_user_id(self):
-        if self.id_user_connecte is not None: return self.id_user_connecte
-        session_id = self.session_data.get("user_id") or self.session_data.get("iduser")
-        if session_id is not None:
-            self.id_user_connecte = session_id
-            return self.id_user_connecte
-        parent = self.master
-        while parent is not None:
-            parent_id = getattr(parent, "id_user_connecte", None)
-            if parent_id is not None:
-                self.id_user_connecte = parent_id
-                return self.id_user_connecte
-            parent = getattr(parent, "master", None)
-        return 1
+        uid = resolve_connected_user_id(
+            master=self.master,
+            session_data=self.session_data,
+            id_user_connecte=self.id_user_connecte,
+        )
+        self.id_user_connecte = uid
+        return uid
 
     def _get_frs_name(self, idfrs):
         if not self.conn: return "FOURNISSEUR"

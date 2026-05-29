@@ -16,6 +16,7 @@ from date_picker_utils import (
     set_date_on_widget,
 )
 from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
+from log_utils import resolve_connected_user_id
 
 # Thème UI iJeery
 from app_theme import Colors, Fonts, Theme, styled, Layout
@@ -53,7 +54,7 @@ class PageAVQ(ctk.CTkFrame):
         self.master = master
         self.id_prof_selectionne = None
         self.selected_personnel_var = ctk.StringVar(value="")
-        self.iduser = iduser
+        self.iduser = iduser if iduser is not None else resolve_connected_user_id(master=master)
         self._avances_raw = []
         self._sort_state = new_sort_state()
         self._table_sort = None
@@ -764,7 +765,7 @@ class PageAVQ(ctk.CTkFrame):
             df.to_excel("avances_personnel.xlsx", index=False)
             messagebox.showinfo("Exportation", "Exportation Excel réussie !")
             try:
-                from log_utils import AppLogger
+                from log_utils import AppLogger, resolve_connected_user_id
                 AppLogger(session_data=getattr(self, "session_data", {}) or {}).log(
                     action="Export Excel",
                     element="Avance 15e",

@@ -36,7 +36,7 @@
       "26": "Changements"
     },
     "SidebarHamburgerParUtilisateur": {
-      "26": true
+      "26": false
     }
   },
   "ListeMouvements": {
@@ -51,12 +51,13 @@
   "PrixArticle": {
     "_comment": "Préférences personnelles Prix Article (par id utilisateur tb_users.iduser).",
     "AfficherVariationPrixParUtilisateur": {
-      "26": true
+      "26": false
     }
   },
   "StockArticle": {
     "_comment": "Paramètres globaux du menu Stock Article. Liste vide = toutes les fonctions autorisées au double-clic inventaire.",
     "FonctionsAutoriseesInventaire": [
+      1,
       12,
       13,
       14,

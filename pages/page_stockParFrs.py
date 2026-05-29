@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 import threading
 from resource_utils import get_config_path, safe_file_read
+from log_utils import resolve_connected_user_id
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -68,12 +69,11 @@ class PageStockParFrs(ctk.CTkFrame):
 
     def __init__(self, master, db_conn=None, session_data=None, iduser=None):
         super().__init__(master, fg_color=C.BG_PAGE)
-        if iduser is not None:
-            self.iduser = iduser
-        elif session_data and 'user_id' in session_data:
-            self.iduser = session_data['user_id']
-        else:
-            self.iduser = 1
+        self.iduser = (
+            iduser
+            if iduser is not None
+            else resolve_connected_user_id(master=master, session_data=session_data)
+        )
 
         self._frs_map = {}   # {nom_frs: idfrs}
         self.all_data = []

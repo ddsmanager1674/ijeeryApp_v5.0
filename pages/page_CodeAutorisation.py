@@ -4,7 +4,7 @@ import psycopg2
 import json
 import os
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 
 class PageCodeAutorisation(ctk.CTkFrame):
@@ -110,8 +110,11 @@ class PageCodeAutorisation(ctk.CTkFrame):
         if conn:
             try:
                 cur = conn.cursor()
-                # On utilise iduser = 1 par défaut comme demandé
-                cur.execute("INSERT INTO tb_codeautorisation (code, iduser) VALUES (%s, %s)", (code, 1))
+                iduser = resolve_connected_user_id(
+                    master=self,
+                    session_data=self.session_data,
+                )
+                cur.execute("INSERT INTO tb_codeautorisation (code, iduser) VALUES (%s, %s)", (code, iduser))
                 conn.commit()
                 conn.close()
                 messagebox.showinfo("Succès", "Code enregistré avec succès !")

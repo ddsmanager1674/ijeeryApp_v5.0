@@ -12,6 +12,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
+from log_utils import resolve_connected_user_id
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -856,14 +857,12 @@ class PageDecaissement(ctk.CTkToplevel):
                     print(f"DEBUG: iduser trouvé = {iduser}")
                 else:
                     print(f"ATTENTION: Utilisateur '{self.current_user}' introuvable")
-                    self.cursor.execute("SELECT iduser FROM tb_users WHERE iduser = 1")
-                    default_user = self.cursor.fetchone()
-                    if default_user:
-                        iduser = 1
-                        print(f"DEBUG: Utilisation de l'utilisateur par défaut (ID=1)")
-                    else:
-                        messagebox.showerror("Erreur", "Aucun utilisateur trouvé dans la base de données")
-                        return
+                    iduser = resolve_connected_user_id(
+                        master=self.master_app,
+                        session_data=getattr(self, "session_data", None),
+                        id_user_connecte=getattr(self, "current_user_id", None),
+                    )
+                    print(f"DEBUG: Utilisation id session: {iduser}")
 
             query = """
             INSERT INTO tb_decaissement (refpmt, idcc, mtpaye, observation, idtypeoperation, datepmt, iduser, idmode)

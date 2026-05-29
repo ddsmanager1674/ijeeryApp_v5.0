@@ -148,3 +148,32 @@
 2026-05-29 12:00:00 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
 2026-05-29 12:00:02 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
 2026-05-29 12:00:02 | INFO     | ijeery | [DB] Connexion établie.
+2026-05-29 13:43:39 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 13:43:42 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 13:43:42 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 13:43:45 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 13:43:46 | INFO     | ijeery | [DB] Connexion établie.
+2026-05-29 13:49:26 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 13:49:30 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 13:49:30 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 13:49:33 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 13:49:33 | INFO     | ijeery | [DB] Connexion établie.
+2026-05-29 14:03:14 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 14:04:01 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 14:04:01 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 14:04:04 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 14:04:05 | INFO     | ijeery | [DB] Connexion établie.
+2026-05-29 14:30:16 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 14:30:19 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 14:30:19 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 14:30:22 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 14:30:23 | INFO     | ijeery | [DB] Connexion établie.
+2026-05-29 14:41:18 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 15:53:43 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 15:53:49 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 15:53:49 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 15:53:52 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 15:53:53 | INFO     | ijeery | [DB] Connexion établie.
+2026-05-29 16:04:53 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-05-29 16:04:57 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-05-29 16:04:57 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)

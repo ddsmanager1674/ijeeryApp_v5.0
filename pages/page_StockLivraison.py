@@ -6,18 +6,17 @@ import os
 from datetime import datetime
 
 from app_theme import Colors, Fonts, Layout, styled
+from log_utils import resolve_connected_user_id
 
 class PageStockLivraison(ctk.CTkFrame):
     def __init__(self, master, db_conn=None, session_data=None, iduser=None):
         super().__init__(master, fg_color=Colors.BG_PAGE, corner_radius=0)
         
-        # Gestion de l'ID utilisateur
-        if iduser is not None:
-            self.iduser = iduser
-        elif session_data and 'user_id' in session_data:
-            self.iduser = session_data['user_id']
-        else:
-            self.iduser = 1
+        self.iduser = (
+            iduser
+            if iduser is not None
+            else resolve_connected_user_id(master=master, session_data=session_data)
+        )
         
         self.magasins = []
         self.setup_ui()

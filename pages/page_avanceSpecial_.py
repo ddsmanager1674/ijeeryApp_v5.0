@@ -16,6 +16,7 @@ from date_picker_utils import (
     set_date_on_widget,
 )
 from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
+from log_utils import resolve_connected_user_id
 
 # Thème UI iJeery
 from app_theme import Colors, Fonts, Theme, styled, Layout
@@ -54,7 +55,7 @@ class FenetreAvanceSpec(ctk.CTkFrame):
         super().__init__(master, fg_color=Colors.BG_PAGE)
         self.master = master
         # Stocker l'iduser passé en paramètre
-        self.iduser = iduser
+        self.iduser = iduser if iduser is not None else resolve_connected_user_id(master=master)
         
         # Afficher l'iduser pour le débogage
         if self.iduser:

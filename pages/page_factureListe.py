@@ -28,7 +28,7 @@ from tkcalendar import DateEntry
 from resource_utils import get_config_path, safe_file_read
 
 from app_theme import Colors, Fonts
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 # ── Import page paiement ──────────────────────────────────────────────────────
 try:
@@ -63,6 +63,7 @@ class PageFactureListe(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color=Colors.BG_PAGE)
         self.grid(row=0, column=0, sticky="nsew")
+        self._connected_user_id = resolve_connected_user_id(master=master)
 
         # ── Grid principale ───────────────────────────────────────────────────
         self.grid_columnconfigure(0, weight=1)
@@ -347,7 +348,9 @@ class PageFactureListe(ctk.CTkFrame):
             )
         except Exception:
             pass
-        pay_win = PagePmtFacture(self.master, paiement_data)
+        pay_win = PagePmtFacture(
+            self.master, paiement_data, iduser=self._connected_user_id
+        )
 
         def _after_payment_closed(event=None):
             if event is not None and event.widget is not pay_win:

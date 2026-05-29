@@ -16,6 +16,7 @@ import psycopg2
 import json
 import threading
 from resource_utils import get_config_path
+from log_utils import resolve_connected_user_id
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
 try:
@@ -404,14 +405,18 @@ class HistoriquePrixWindow(ctk.CTkToplevel):
 # ─────────────────────────────────────────────────────────────────────────────
 class PagePrixRevient(ctk.CTkFrame):
 
-    def __init__(self, parent, db_connector=None, iduser=1):
+    def __init__(self, parent, db_connector=None, iduser=None, session_data=None):
         super().__init__(parent, fg_color=C.BG_PAGE)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
         self.db_connector       = db_connector
-        self.iduser             = iduser
+        self.iduser = (
+            iduser
+            if iduser is not None
+            else resolve_connected_user_id(master=parent, session_data=session_data)
+        )
         self.is_opening_window  = False
         self._destroyed         = False
         self.code_mapping       = {}

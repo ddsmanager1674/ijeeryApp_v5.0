@@ -14,7 +14,7 @@ from tkinter import ttk, messagebox, StringVar, BooleanVar
 import psycopg2, psycopg2.extras, json
 from datetime import datetime, timedelta
 from resource_utils import get_config_path
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
 
 # ── Thème iJeery ──────────────────────────────────────────────────────────────
@@ -244,13 +244,17 @@ class PageGestionPeremption(ctk.CTkFrame):
         "sans_lot": C.TEXT_SECONDARY,
     }
 
-    def __init__(self, parent, iduser=1):
+    def __init__(self, parent, iduser=None, session_data=None):
         super().__init__(parent, fg_color=C.BG_PAGE)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        self.iduser       = iduser
+        self.iduser = (
+            iduser
+            if iduser is not None
+            else resolve_connected_user_id(master=parent, session_data=session_data)
+        )
         self._logger      = AppLogger(session_data={"user_id": self.iduser} if self.iduser else {})
         self.all_rows     = []
         self.item_meta    = {}

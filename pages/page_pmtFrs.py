@@ -9,7 +9,7 @@ import tempfile
 import os
 import subprocess
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 
 # Importation pour la génération PDF
@@ -18,13 +18,13 @@ from reportlab.lib.pagesizes import A6 # Format ticket
 from reportlab.lib.units import mm
 
 class PagePmtFrs(ctk.CTkToplevel):
-    def __init__(self, master, paiement_data: Dict[str, str], id_user_connecte: int = 1):
+    def __init__(self, master, paiement_data: Dict[str, str], id_user_connecte=None):
         super().__init__(master)
-        self.id_user = id_user_connecte
+        self.id_user = id_user_connecte if id_user_connecte is not None else resolve_connected_user_id(master=master)
         
         self.master = master
         self.data = paiement_data
-        self.current_user = id_user_connecte # Récupéré depuis la page_login
+        self.current_user = self.id_user
         
         self.id_cmd = self.data.get('id_cmd')
         self.factfrs = self.data.get('factfrs', 'N/A')

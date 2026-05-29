@@ -13,18 +13,18 @@ except ImportError:
     except ImportError:
         PageLivraisonClient = None
 
+from log_utils import resolve_connected_user_id
+
 
 class PageLivraisonEnAttente(ctk.CTkFrame):
     def __init__(self, master, db_conn=None, session_data=None, iduser=None):
         super().__init__(master)
 
-        # Gestion de l'ID utilisateur
-        if iduser is not None:
-            self.iduser = iduser
-        elif session_data and 'user_id' in session_data:
-            self.iduser = session_data['user_id']
-        else:
-            self.iduser = 1
+        self.iduser = (
+            iduser
+            if iduser is not None
+            else resolve_connected_user_id(master=master, session_data=session_data)
+        )
 
         self.magasins = []
         self._data_cache = {}   # iid Treeview → (idclient, idmag, idarticle, idunite, reste)

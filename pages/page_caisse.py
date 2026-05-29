@@ -894,7 +894,7 @@ class PageCaisse(ctk.CTkFrame):
             )
         except Exception:
             pass
-        win = PageEncaissement(self.master, username="VotreUsername")
+        win = PageEncaissement(self.master, username=self.current_username)
         self.master.wait_window(win)
         self.appliquer_filtres()
 

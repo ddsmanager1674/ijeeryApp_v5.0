@@ -11,7 +11,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from resource_utils import get_config_path, safe_file_read
-from log_utils import AppLogger
+from log_utils import AppLogger, resolve_connected_user_id
 
 
 # Ensure the parent directory is in the Python path for absolute imports
@@ -72,11 +72,15 @@ class PageEncaissementBq(ctk.CTkToplevel):
         self.grab_set()
 
         self.master_app = master
-        self.current_user = username  # Stockage du nom d'utilisateur réel
+        self.current_user_id = resolve_connected_user_id(master=master)
+        sd = getattr(master, "session_data", None) or {}
+        if username in (None, "", "Système") and sd.get("username"):
+            username = sd["username"]
+        self.current_user = username
         self.bank_id = bank_id  # Store the passed bank_id
         self.categories = {}  # Dictionnaire NOM -> ID
-        self.session_data = getattr(master, "session_data", None) or {"username": self.current_user}
-        self._logger = AppLogger(session_data=self.session_data)
+        self.session_data = sd or {"user_id": self.current_user_id, "username": self.current_user}
+        self._logger = AppLogger(session_data=self.session_data, fallback_user_id=self.current_user_id)
 
         # Use the DatabaseManager class to handle connections
         self.db_manager = DatabaseManager()
@@ -407,34 +411,21 @@ class PageEncaissementBq(ctk.CTkToplevel):
             # DEBUG: Afficher le nom d'utilisateur actuel
             print(f"DEBUG: current_user = '{self.current_user}'")
             
-            # CORRECTION 2: Récupérer l'ID numérique de l'utilisateur
-            self.cursor.execute("SELECT iduser, username FROM tb_users")
-            all_users = self.cursor.fetchall()
-            print(f"DEBUG: Utilisateurs dans la base: {all_users}")
-            
-            # Chercher l'utilisateur (insensible à la casse)
-            self.cursor.execute(
-                "SELECT iduser FROM tb_users WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))", 
-                (self.current_user,)
-            )
-            result = self.cursor.fetchone()
-            
-            if result:
-                iduser = result[0]
-                print(f"DEBUG: iduser trouvé = {iduser}")
+            if getattr(self, "current_user_id", None):
+                iduser = self.current_user_id
             else:
-                print(f"ATTENTION: Utilisateur '{self.current_user}' introuvable")
-                
-                # Utiliser l'utilisateur par défaut (ID=1)
-                self.cursor.execute("SELECT iduser FROM tb_users WHERE iduser = 1")
-                default_user = self.cursor.fetchone()
-                
-                if default_user:
-                    iduser = 1
-                    print(f"DEBUG: Utilisation de l'utilisateur par défaut (ID=1)")
+                self.cursor.execute(
+                    "SELECT iduser FROM tb_users WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s))",
+                    (self.current_user,),
+                )
+                result = self.cursor.fetchone()
+                if result:
+                    iduser = result[0]
                 else:
-                    messagebox.showerror("Erreur", "Aucun utilisateur trouvé dans la base de données")
-                    return
+                    iduser = resolve_connected_user_id(
+                        master=self.master_app,
+                        session_data=self.session_data,
+                    )
                 
             # INSERTION AVEC LES BONNES VALEURS (ID numériques)
             query = """
