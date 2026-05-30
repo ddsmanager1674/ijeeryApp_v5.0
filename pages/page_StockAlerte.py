@@ -94,6 +94,11 @@ WITH RECURSIVE
     ),
 
     tous_mouvements AS (
+        SELECT ed.idunite, ed.idmag, ed.qtentree AS quantite, 1 AS signe
+        FROM tb_entreedetail ed
+        JOIN tb_entree e ON e.id = ed.identree
+        WHERE ed.deleted = 0 AND e.deleted = 0
+        UNION ALL
         SELECT lf.idunite, lf.idmag, lf.qtlivrefrs  AS quantite, 1 AS signe
         FROM tb_livraisonfrs lf WHERE lf.deleted = 0
         UNION ALL
