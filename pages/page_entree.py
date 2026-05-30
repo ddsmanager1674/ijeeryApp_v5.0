@@ -992,8 +992,10 @@ class PageEntree(ctk.CTkFrame):
             self.entry_ref_entree.insert(0, entree[1])
             self.entry_ref_entree.configure(state="readonly")
 
+            self.entry_date_entree.configure(state="normal")
             self.entry_date_entree.delete(0, "end")
             self.entry_date_entree.insert(0, entree[2].strftime("%d/%m/%Y") if entree[2] else "")
+            self.entry_date_entree.configure(state="readonly")
 
             self.detail_entree = []
             for d in details:
@@ -1123,8 +1125,10 @@ class PageEntree(ctk.CTkFrame):
         self.mode_modification = False
         self.identree_charge = None
 
+        self.entry_date_entree.configure(state="normal")
         self.entry_date_entree.delete(0, "end")
         self.entry_date_entree.insert(0, datetime.now().strftime("%d/%m/%Y"))
+        self.entry_date_entree.configure(state="normal")
         self.entry_motif.delete(0, "end")
 
         self.charger_magasins()

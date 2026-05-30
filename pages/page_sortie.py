@@ -1399,8 +1399,10 @@ class PageSortie(ctk.CTkFrame):
             self.entry_ref_sortie.insert(0, sortie[1])
             self.entry_ref_sortie.configure(state="readonly")
 
+            self.entry_date_sortie.configure(state="normal")
             self.entry_date_sortie.delete(0, "end")
             self.entry_date_sortie.insert(0, sortie[2].strftime("%d/%m/%Y"))
+            self.entry_date_sortie.configure(state="readonly")
 
             self.detail_sortie = []
             for d in details:
@@ -1624,8 +1626,10 @@ class PageSortie(ctk.CTkFrame):
         self.mode_modification        = False
         self.idsortie_charge          = None
 
+        self.entry_date_sortie.configure(state="normal")
         self.entry_date_sortie.delete(0, "end")
         self.entry_date_sortie.insert(0, datetime.now().strftime("%d/%m/%Y"))
+        self.entry_date_sortie.configure(state="normal")
         self.entry_motif.delete(0, "end")
 
         self.charger_magasins()

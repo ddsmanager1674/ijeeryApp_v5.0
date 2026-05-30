@@ -1694,6 +1694,7 @@ class PageAvoir(ctk.CTkFrame):
             self.entry_date_avoir.configure(state="normal")
             self.entry_date_avoir.delete(0, "end")
             self.entry_date_avoir.insert(0, vente[2].strftime("%d/%m/%Y %H:%M:%S"))
+            self.entry_date_avoir.configure(state="readonly")
 
             self.entry_client.configure(state="normal")
             self.entry_client.delete(0, "end")
