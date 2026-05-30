@@ -1262,19 +1262,19 @@ class PageFournisseur(ctk.CTkFrame):
                     open_after=open_a5, output_format="A5",
                     open_setting_key="Fournisseur_PmtDette_OpenA5", open_setting_default=0,
                 )
-                if facture_path:
-                    messagebox.showinfo("Confirmation", "Le PDF de paiement a été généré.")
-                    open_ticket = is_setting_enabled("Fournisseur_PmtDette_OpenTicket80", default=0, settings=settings)
-                    ticket_path = self._generer_ticket_pdf_paiement_dette(
-                        societe=societe_tuple, username=username, articles=articles,
-                        montant=float(montant_global), mode_nom=selected_mode or "Espèces",
-                        refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
-                        observation=observation_full, date_paiement=date_pmt,
-                        open_after=open_ticket, output_format="ticket80",
-                        open_setting_key="Fournisseur_PmtDette_OpenTicket80", open_setting_default=0,
-                    )
-                    if open_ticket and ticket_path:
-                        messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
+                if open_a5 and facture_path:
+                    messagebox.showinfo("Confirmation", "La facture PDF de paiement A5 a été générée et ouverte.")
+                open_ticket = is_setting_enabled("Fournisseur_PmtDette_OpenTicket80", default=0, settings=settings)
+                ticket_path = self._generer_ticket_pdf_paiement_dette(
+                    societe=societe_tuple, username=username, articles=articles,
+                    montant=float(montant_global), mode_nom=selected_mode or "Espèces",
+                    refpmt=ref_ticket, idfrs=idfrs, frs_nom=frs_nom,
+                    observation=observation_full, date_paiement=date_pmt,
+                    open_after=open_ticket, output_format="ticket80",
+                    open_setting_key="Fournisseur_PmtDette_OpenTicket80", open_setting_default=0,
+                )
+                if open_ticket and ticket_path:
+                    messagebox.showinfo("Confirmation", "Le ticket 80mm a été généré et ouvert.")
 
                 self._render_dette_table(tree_dettes, idfrs, label_montant_restant)
                 self.load_fournisseur()
@@ -1572,8 +1572,8 @@ class PageFournisseur(ctk.CTkFrame):
                     open_file_if_enabled(
                         path,
                         operation="open",
-                        setting_key="Fournisseur_PmtDette_OpenTicket80",
-                        setting_default=0,
+                        setting_key=(open_setting_key or "Fournisseur_PmtDette_OpenTicket80"),
+                        setting_default=open_setting_default,
                     )
                 return path
 

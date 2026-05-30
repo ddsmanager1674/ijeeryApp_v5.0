@@ -9,9 +9,6 @@ import subprocess
 import tempfile
 from resource_utils import get_config_path, safe_file_read
 from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
-from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
-from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
-from settings_utils import load_settings, is_setting_enabled, open_file_if_enabled
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A5, landscape
@@ -1515,19 +1512,19 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     open_after=open_a5, output_format="A5",
                     open_setting_key="Client_PmtCredit_OpenA5", open_setting_default=0,
                 )
-                if facture_path:
-                    messagebox.showinfo("Confirmation", "La facture PDF de paiement A5 a été générée.")
-                    open_ticket = is_setting_enabled("Client_PmtCredit_OpenTicket80", default=0, settings=settings)
-                    ticket_path = self._generer_ticket_pdf_paiement_credit(
-                        societe=societe_tuple, username=username, articles=articles,
-                        montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
-                        refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
-                        observation=observation, date_paiement=date_pmt,
-                        open_after=open_ticket, output_format="ticket80",
-                        open_setting_key="Client_PmtCredit_OpenTicket80", open_setting_default=0,
-                    )
-                    if open_ticket and ticket_path:
-                        messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
+                if open_a5 and facture_path:
+                    messagebox.showinfo("Confirmation", "La facture PDF de paiement A5 a été générée et ouverte.")
+                open_ticket = is_setting_enabled("Client_PmtCredit_OpenTicket80", default=0, settings=settings)
+                ticket_path = self._generer_ticket_pdf_paiement_credit(
+                    societe=societe_tuple, username=username, articles=articles,
+                    montant=float(montant_global), mode_nom=selected_mode_global or "Credit",
+                    refpmt=ref_ticket, idclient=idclient, client_nom=client_nom,
+                    observation=observation, date_paiement=date_pmt,
+                    open_after=open_ticket, output_format="ticket80",
+                    open_setting_key="Client_PmtCredit_OpenTicket80", open_setting_default=0,
+                )
+                if open_ticket and ticket_path:
+                    messagebox.showinfo("Confirmation", "Le ticket de paiement 80mm a été généré et ouvert.")
 
                 self._render_credit_table(tree_credits, idclient, label_montant_restant)
                 self.load_client()

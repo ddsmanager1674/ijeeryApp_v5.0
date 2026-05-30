@@ -34,6 +34,7 @@ PDF_PRINT_SETTINGS: Tuple[PdfPrintSetting, ...] = (
     PdfPrintSetting("Credit_Acceptation_OpenA5", "Crédit - Acceptation A5 (PDF)", 1, "a5"),
     PdfPrintSetting("Credit_Temporaire_OpenA5", "Crédit - État temporaire A5 (PDF)", 0, "a5"),
     PdfPrintSetting("Client_Creance_OpenA5", "Client créance - Ouverture A5 (PDF)", 0, "a5"),
+    PdfPrintSetting("Client_PmtCredit_OpenA5", "Client paiement crédit - A5 (PDF)", 0, "a5"),
     PdfPrintSetting("Fournisseur_PmtDette_OpenA5", "Fournisseur paiement dette - A5 (PDF)", 0, "a5"),
     PdfPrintSetting("Fournisseur_Dette_OpenA5", "Fournisseur dette - A5 (PDF)", 0, "a5"),
     PdfPrintSetting("Livraison_BL_OpenA5", "Livraison client - Bon de livraison A5 (PDF)", 1, "a5"),
