@@ -107,7 +107,6 @@ ROOT_HIDDEN_IMPORTS = (
     "pdf_print_settings_registry",
     "theme",
     "app_theme",
-    "date_picker_utils",
     "treeview_sort_utils",
     "user_settings_window",
     "action_tracer",

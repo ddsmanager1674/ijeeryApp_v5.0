@@ -25,8 +25,7 @@ from datetime import datetime
 import os
 
 from resource_utils import get_config_path, safe_file_read
-from app_theme import Colors, Fonts, styled
-from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_datetime
+from app_theme import Colors, Fonts
 from db import ensure_connection, get_connection
 from stock_service import get_snapshot_cached, invalidate_snapshot
 from stock_snapshot import format_nombre_auto
@@ -143,8 +142,9 @@ class PageTransfert(ctk.CTkFrame):
         # — Date —
         ctk.CTkLabel(card, text="Date", **lbl_kw).grid(
             row=0, column=1, padx=4, pady=(8, 0), sticky="w")
-        self.entry_date = styled.datetime_entry(card, width=10)
+        self.entry_date = ctk.CTkEntry(card, **entry_kw)
         self.entry_date.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="ew")
+        self.entry_date.insert(0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
         # — Magasin Sortie —
         ctk.CTkLabel(card, text="Magasin Sortie  ➜", **lbl_kw).grid(
@@ -1420,7 +1420,8 @@ class PageTransfert(ctk.CTkFrame):
             self.entry_ref.insert(0, transfert[0])
             self.entry_ref.configure(state="readonly")
 
-            self.entry_date.set_datetime(transfert[1])
+            self.entry_date.delete(0, "end")
+            self.entry_date.insert(0, str(transfert[1]))
             self.entry_description.delete(0, "end")
             self.entry_description.insert(0, transfert[2] or '')
             self.combo_mag_sortie.set(transfert[3])
@@ -1493,7 +1494,8 @@ class PageTransfert(ctk.CTkFrame):
             self.entry_ref.insert(0, transfert[0])
             self.entry_ref.configure(state="readonly")
 
-            self.entry_date.set_datetime(transfert[1])
+            self.entry_date.delete(0, "end")
+            self.entry_date.insert(0, str(transfert[1]))
             self.entry_description.delete(0, "end")
             self.entry_description.insert(0, transfert[2] or '')
             self.combo_mag_sortie.set(transfert[3])
@@ -1549,7 +1551,8 @@ class PageTransfert(ctk.CTkFrame):
         *** LOGIQUE MÉTIER — NE PAS MODIFIER ***
         """
         # Vider les champs texte
-        self.entry_date.set_datetime(datetime.now())
+        self.entry_date.delete(0, "end")
+        self.entry_date.insert(0, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self.entry_description.delete(0, "end")
         self.entry_quantite.delete(0, "end")
 

@@ -33,7 +33,6 @@ from decimal import Decimal, InvalidOperation
 from resource_utils import get_config_path, safe_file_read
 from impression_pdf_utils import build_impression_output_path
 from app_theme import Colors, Fonts, styled
-from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_datetime
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
 from db import ensure_connection, get_connection  # noqa: F401 — connect_db
@@ -350,8 +349,9 @@ class PageAvoir(ctk.CTkFrame):
         # — Date —
         ctk.CTkLabel(card, text="Date Avoir", **lbl_kw).grid(
             row=0, column=1, padx=4, pady=(8, 0), sticky="w")
-        self.entry_date_avoir = styled.datetime_entry(card, width=10)
+        self.entry_date_avoir = ctk.CTkEntry(card, **entry_kw, width=150)
         self.entry_date_avoir.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="ew")
+        self.entry_date_avoir.insert(0, datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
         # — Magasin (masqué par défaut, visible en mode modification) —
         self.label_magasin = ctk.CTkLabel(card, text="Magasin de", **lbl_kw)
@@ -1500,7 +1500,8 @@ class PageAvoir(ctk.CTkFrame):
         )
         entry_search.pack(side="left", padx=5, fill="x", expand=True)
         ctk.CTkLabel(search_frame, text="Date (YYYY-MM-DD) :").pack(side="left", padx=(10, 5))
-        entry_date = styled.date_entry(search_frame, width=11)
+        entry_date = ctk.CTkEntry(search_frame, width=130)
+        entry_date.insert(0, datetime.now().strftime("%Y-%m-%d"))
         entry_date.pack(side="left", padx=5)
 
         # Treeview factures
@@ -1556,8 +1557,10 @@ class PageAvoir(ctk.CTkFrame):
             try:
                 cursor = conn.cursor()
                 filtre_like = f"%{filtre}%"
-                date_filtre = get_date_from_widget(entry_date)
-                if not date_filtre:
+                date_str = entry_date.get().strip()
+                try:
+                    date_filtre = datetime.strptime(date_str, "%Y-%m-%d").date()
+                except ValueError:
                     return
 
                 cursor.execute(
@@ -1688,7 +1691,9 @@ class PageAvoir(ctk.CTkFrame):
 
             self.generer_reference()
 
-            self.entry_date_avoir.set_datetime(vente[2])
+            self.entry_date_avoir.configure(state="normal")
+            self.entry_date_avoir.delete(0, "end")
+            self.entry_date_avoir.insert(0, vente[2].strftime("%d/%m/%Y %H:%M:%S"))
 
             self.entry_client.configure(state="normal")
             self.entry_client.delete(0, "end")
@@ -1799,7 +1804,8 @@ class PageAvoir(ctk.CTkFrame):
             self.entry_ref_avoir.insert(0, avoir[1])
             self.entry_ref_avoir.configure(state="readonly")
 
-            self.entry_date_avoir.set_datetime(avoir[2])
+            self.entry_date_avoir.delete(0, "end")
+            self.entry_date_avoir.insert(0, avoir[2].strftime("%d/%m/%Y %H:%M:%S"))
 
             self.entry_client.delete(0, "end")
             self.entry_client.insert(0, avoir[4] or "Client Inconnu")
@@ -1897,17 +1903,14 @@ class PageAvoir(ctk.CTkFrame):
             self.mode_modification  = False
             self.idvente_charge     = idvente
 
-            self.entry_date_avoir.set_datetime(datetime.now())
+            self.entry_date_avoir.delete(0, "end")
+            self.entry_date_avoir.insert(0, datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
             self.entry_client.delete(0, "end")
             self.entry_client.insert(0, vente[4] or "Client Inconnu")
             self.entry_designation.delete(0, "end")
             self.entry_designation.insert(0, f"Avoir de la facture {vente[1]}")
             self.entry_designation.configure(state="readonly")
-            try:
-                self.entry_date_avoir._date_picker._date_widget.configure(state="disabled")
-                self.entry_date_avoir._time_entry.configure(state="readonly")
-            except Exception:
-                pass
+            self.entry_date_avoir.configure(state="readonly")
 
             self.detail_avoir = []
             for d in details:
@@ -2004,7 +2007,13 @@ class PageAvoir(ctk.CTkFrame):
                 return
 
             ref_avoir    = self.entry_ref_avoir.get()
-            datereg = parse_datetime(self.entry_date_avoir.get())
+            date_str     = self.entry_date_avoir.get()
+            try:
+                datereg = datetime.strptime(date_str, "%d/%m/%Y %H:%M:%S")
+            except ValueError:
+                MessageDialog("Erreur de Date",
+                              "Format attendu : JJ/MM/AAAA HH:MM:SS", type_='error')
+                return
             description  = self.entry_designation.get().strip() + " (Ref: " + ref_avoir + ")"
             client_nom   = self.entry_client.get().strip()
 
@@ -2637,12 +2646,9 @@ class PageAvoir(ctk.CTkFrame):
         self.idvente_charge           = None
 
         # Champs d'en-tête
-        self.entry_date_avoir.set_datetime(datetime.now())
-        try:
-            self.entry_date_avoir._date_picker._date_widget.configure(state="normal")
-            self.entry_date_avoir._time_entry.configure(state="normal")
-        except Exception:
-            pass
+        self.entry_date_avoir.configure(state="normal")
+        self.entry_date_avoir.delete(0, "end")
+        self.entry_date_avoir.insert(0, datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
         self.entry_designation.configure(state="normal")
         self.entry_designation.delete(0, "end")

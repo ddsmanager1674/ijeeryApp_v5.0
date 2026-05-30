@@ -5,8 +5,6 @@ import json
 from datetime import datetime
 
 from resource_utils import get_config_path
-from app_theme import styled
-
 
 class PageChangementArticle(ctk.CTkFrame):
     """
@@ -145,12 +143,11 @@ class PageChangementArticle(ctk.CTkFrame):
 
         # Date
         ctk.CTkLabel(frame_entete, text="Date:").grid(row=1, column=2, padx=10, pady=5, sticky="w")
-        self.entry_date = styled.date_entry(frame_entete, width=11)
+        self.entry_date = ctk.CTkEntry(frame_entete, width=150, state="readonly")
+        self.entry_date.configure(state="normal")
+        self.entry_date.insert(0, datetime.now().strftime("%d/%m/%Y"))
+        self.entry_date.configure(state="readonly")
         self.entry_date.grid(row=1, column=3, padx=10, pady=5)
-        try:
-            self.entry_date._date_widget.configure(state="disabled")
-        except Exception:
-            pass
 
         # Bouton Charger Changement
         btn_charger = ctk.CTkButton(frame_entete, text="📂 Charger",

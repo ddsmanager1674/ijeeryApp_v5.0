@@ -33,8 +33,7 @@ import subprocess
 from settings_utils import open_file_if_enabled
 
 from resource_utils import get_config_path, get_session_path, safe_file_read
-from app_theme import Colors, Fonts, styled
-from date_picker_utils import get_date_from_widget, set_date_on_widget, parse_date, format_date_fr
+from app_theme import Colors, Fonts
 from log_utils import AppLogger
 from db import ensure_connection, get_connection
 from stock_service import get_snapshot_cached, invalidate_snapshot
@@ -198,8 +197,9 @@ class PageSortie(ctk.CTkFrame):
         # — Date —
         ctk.CTkLabel(card, text="Date Sortie", **lbl_kw).grid(
             row=0, column=1, padx=4, pady=(8, 0), sticky="w")
-        self.entry_date_sortie = styled.date_entry(card, width=11)
+        self.entry_date_sortie = ctk.CTkEntry(card, **entry_kw)
         self.entry_date_sortie.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="ew")
+        self.entry_date_sortie.insert(0, datetime.now().strftime("%d/%m/%Y"))
 
         # — Magasin —
         ctk.CTkLabel(card, text="Magasin de", **lbl_kw).grid(
@@ -1399,7 +1399,8 @@ class PageSortie(ctk.CTkFrame):
             self.entry_ref_sortie.insert(0, sortie[1])
             self.entry_ref_sortie.configure(state="readonly")
 
-            set_date_on_widget(self.entry_date_sortie, sortie[2])
+            self.entry_date_sortie.delete(0, "end")
+            self.entry_date_sortie.insert(0, sortie[2].strftime("%d/%m/%Y"))
 
             self.detail_sortie = []
             for d in details:
@@ -1446,11 +1447,17 @@ class PageSortie(ctk.CTkFrame):
             return
 
         ref_sortie       = self.entry_ref_sortie.get()
-        date_sortie = get_date_from_widget(self.entry_date_sortie)
+        date_sortie_str  = self.entry_date_sortie.get()
         designationmag   = self.combo_magasin.get()
 
-        if not ref_sortie or not date_sortie or not designationmag:
+        if not ref_sortie or not date_sortie_str or not designationmag:
             messagebox.showwarning("Attention", "Remplissez tous les champs obligatoires.")
+            return
+
+        try:
+            date_sortie = datetime.strptime(date_sortie_str, "%d/%m/%Y").date()
+        except ValueError:
+            messagebox.showerror("Erreur de Date", "Format attendu : JJ/MM/AAAA")
             return
 
         montant_total_ci  = sum(d.get('montant_total', 0) for d in self.detail_sortie)
@@ -1617,7 +1624,8 @@ class PageSortie(ctk.CTkFrame):
         self.mode_modification        = False
         self.idsortie_charge          = None
 
-        set_date_on_widget(self.entry_date_sortie, datetime.now().date())
+        self.entry_date_sortie.delete(0, "end")
+        self.entry_date_sortie.insert(0, datetime.now().strftime("%d/%m/%Y"))
         self.entry_motif.delete(0, "end")
 
         self.charger_magasins()

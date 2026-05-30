@@ -10,7 +10,6 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from resource_utils import get_config_path, safe_file_read
 from app_theme import Colors, Fonts, styled
-from date_picker_utils import set_date_on_widget
 from settings_utils import open_file_if_enabled
 from log_utils import AppLogger
 from db import ensure_connection, get_connection
@@ -183,12 +182,10 @@ class PageChangementArticle(ctk.CTkFrame):
         # — Date —
         ctk.CTkLabel(card, text="Date", **lbl_kw).grid(
             row=0, column=1, padx=4, pady=(8, 0), sticky="w")
-        self.entry_date = styled.date_entry(card, width=11)
+        self.entry_date = ctk.CTkEntry(card, **entry_kw, font=Fonts.input(12))
         self.entry_date.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="ew")
-        try:
-            self.entry_date._date_widget.configure(state="disabled")
-        except Exception:
-            pass
+        self.entry_date.insert(0, datetime.now().strftime("%d/%m/%Y"))
+        self.entry_date.configure(state="readonly")
 
         # — Espace élastique —
         card.grid_columnconfigure(2, weight=3)

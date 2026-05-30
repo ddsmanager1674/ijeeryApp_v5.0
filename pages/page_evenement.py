@@ -1,11 +1,10 @@
 import customtkinter as ctk
 from tkinter import ttk, messagebox
 import psycopg2
-from datetime import datetime, date
+from datetime import datetime
 import json
 from resource_utils import get_config_path
-from app_theme import Colors, Fonts, styled
-from date_picker_utils import format_date_iso, get_date_from_widget, set_date_on_widget
+from app_theme import Colors, Fonts
 from log_utils import AppLogger
 from treeview_sort_utils import TreeColumn, TreeSortController, new_sort_state
 
@@ -102,13 +101,15 @@ class PageEvenement(ctk.CTkFrame):
         self.user_filter.set("Tous")
         self.user_filter.configure(command=lambda _v: self.refresh_data())
 
-        ctk.CTkLabel(header, text="Date de (jj/mm/aaaa)", **label_style).grid(row=1, column=5, padx=4, sticky="w")
-        self.date_from_entry = styled.date_entry(header, width=11)
+        ctk.CTkLabel(header, text="Date de (YYYY-MM-DD)", **label_style).grid(row=1, column=5, padx=4, sticky="w")
+        self.date_from_entry = ctk.CTkEntry(header, placeholder_text="2026-01-01", **entry_style)
         self.date_from_entry.grid(row=2, column=5, padx=4, pady=(0, 8), sticky="ew")
+        self.date_from_entry.bind("<KeyRelease>", lambda _e: self.refresh_data())
 
-        ctk.CTkLabel(header, text="Date à (jj/mm/aaaa)", **label_style).grid(row=1, column=6, padx=4, sticky="w")
-        self.date_to_entry = styled.date_entry(header, width=11, initial=date.today())
+        ctk.CTkLabel(header, text="Date à (YYYY-MM-DD)", **label_style).grid(row=1, column=6, padx=4, sticky="w")
+        self.date_to_entry = ctk.CTkEntry(header, placeholder_text="2026-12-31", **entry_style)
         self.date_to_entry.grid(row=2, column=6, padx=4, pady=(0, 8), sticky="ew")
+        self.date_to_entry.bind("<KeyRelease>", lambda _e: self.refresh_data())
 
         ctk.CTkButton(
             header,
@@ -234,8 +235,8 @@ class PageEvenement(ctk.CTkFrame):
     def reset_filters(self):
         self.search_entry.delete(0, "end")
         self.user_filter.set("Tous")
-        set_date_on_widget(self.date_from_entry, None)
-        set_date_on_widget(self.date_to_entry, date.today())
+        self.date_from_entry.delete(0, "end")
+        self.date_to_entry.delete(0, "end")
         self._sort_state = new_sort_state()
         self._sort_state["col"] = "datetime"
         self._sort_state["desc"] = True
@@ -291,15 +292,23 @@ class PageEvenement(ctk.CTkFrame):
             where_parts.append('COALESCE("user", \'\') = %s')
             params.append(selected_user)
 
-        date_from_d = get_date_from_widget(self.date_from_entry)
-        if date_from_d:
-            where_parts.append("datetime >= %s::date")
-            params.append(format_date_iso(date_from_d))
+        date_from = self.date_from_entry.get().strip()
+        if date_from:
+            try:
+                datetime.strptime(date_from, "%Y-%m-%d")
+                where_parts.append("datetime >= %s::date")
+                params.append(date_from)
+            except ValueError:
+                pass
 
-        date_to_d = get_date_from_widget(self.date_to_entry)
-        if date_to_d:
-            where_parts.append("datetime < (%s::date + INTERVAL '1 day')")
-            params.append(format_date_iso(date_to_d))
+        date_to = self.date_to_entry.get().strip()
+        if date_to:
+            try:
+                datetime.strptime(date_to, "%Y-%m-%d")
+                where_parts.append("datetime < (%s::date + INTERVAL '1 day')")
+                params.append(date_to)
+            except ValueError:
+                pass
 
         if where_parts:
             return f"WHERE {' AND '.join(where_parts)}", params

@@ -21,8 +21,7 @@ import subprocess
 
 from settings_utils import open_file_if_enabled
 from resource_utils import get_config_path, get_session_path
-from app_theme import Colors, Fonts, styled
-from date_picker_utils import get_date_from_widget, set_date_on_widget
+from app_theme import Colors, Fonts
 from log_utils import AppLogger
 
 from db import ensure_connection, get_connection
@@ -125,8 +124,9 @@ class PageEntree(ctk.CTkFrame):
         self.entry_ref_entree.grid(row=1, column=0, padx=(10, 4), pady=(0, 8), sticky="ew")
 
         ctk.CTkLabel(card, text="Date Entrée", **lbl_kw).grid(row=0, column=1, padx=4, pady=(8, 0), sticky="w")
-        self.entry_date_entree = styled.date_entry(card, width=11)
+        self.entry_date_entree = ctk.CTkEntry(card, **entry_kw)
         self.entry_date_entree.grid(row=1, column=1, padx=4, pady=(0, 8), sticky="ew")
+        self.entry_date_entree.insert(0, datetime.now().strftime("%d/%m/%Y"))
 
         ctk.CTkLabel(card, text="Magasin", **lbl_kw).grid(row=0, column=2, padx=4, pady=(8, 0), sticky="w")
         self.combo_magasin = ctk.CTkComboBox(
@@ -992,8 +992,8 @@ class PageEntree(ctk.CTkFrame):
             self.entry_ref_entree.insert(0, entree[1])
             self.entry_ref_entree.configure(state="readonly")
 
-            if entree[2]:
-                set_date_on_widget(self.entry_date_entree, entree[2])
+            self.entry_date_entree.delete(0, "end")
+            self.entry_date_entree.insert(0, entree[2].strftime("%d/%m/%Y") if entree[2] else "")
 
             self.detail_entree = []
             for d in details:
@@ -1037,10 +1037,16 @@ class PageEntree(ctk.CTkFrame):
             return
 
         ref_entree = self.entry_ref_entree.get()
-        date_entree = get_date_from_widget(self.entry_date_entree)
+        date_entree_str = self.entry_date_entree.get()
         designationmag = self.combo_magasin.get()
-        if not ref_entree or not date_entree or not designationmag:
+        if not ref_entree or not date_entree_str or not designationmag:
             messagebox.showwarning("Attention", "Remplissez tous les champs obligatoires.")
+            return
+
+        try:
+            _ = datetime.strptime(date_entree_str, "%d/%m/%Y").date()
+        except ValueError:
+            messagebox.showerror("Erreur de Date", "Format attendu : JJ/MM/AAAA")
             return
 
         msg_conf = (
@@ -1117,7 +1123,8 @@ class PageEntree(ctk.CTkFrame):
         self.mode_modification = False
         self.identree_charge = None
 
-        set_date_on_widget(self.entry_date_entree, datetime.now().date())
+        self.entry_date_entree.delete(0, "end")
+        self.entry_date_entree.insert(0, datetime.now().strftime("%d/%m/%Y"))
         self.entry_motif.delete(0, "end")
 
         self.charger_magasins()

@@ -4,9 +4,7 @@
 import threading
 import customtkinter as ctk
 from tkinter import ttk, messagebox
-from datetime import datetime, date
-
-from date_picker_utils import format_date_iso, get_date_from_widget
+from datetime import datetime
 from typing import List, Optional
 
 from app_theme import Colors, Fonts, Layout, styled
@@ -83,6 +81,8 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
         filt.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 10))
         filt.grid_columnconfigure(1, weight=1)
 
+        today = datetime.now().strftime("%Y-%m-%d")
+
         styled.label_muted(filt, text="Magasin", size=11).grid(
             row=0, column=0, sticky="w", padx=(14, 6), pady=(12, 2),
         )
@@ -104,12 +104,14 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
         self.ent_search.bind("<KeyRelease>", lambda e: self._appliquer_filtre_local())
 
         styled.label_muted(filt, text="Du", size=11).grid(row=0, column=2, padx=6, pady=(12, 2))
-        self.ent_du = styled.date_entry(filt, width=11, initial=date.today())
+        self.ent_du = styled.entry(filt, placeholder="AAAA-MM-JJ", width=110, height=Layout.INPUT_H)
         self.ent_du.grid(row=1, column=2, padx=6, pady=(0, 12))
+        self.ent_du.insert(0, today)
 
         styled.label_muted(filt, text="Au", size=11).grid(row=0, column=3, padx=6, pady=(12, 2))
-        self.ent_au = styled.date_entry(filt, width=11, initial=date.today())
+        self.ent_au = styled.entry(filt, placeholder="AAAA-MM-JJ", width=110, height=Layout.INPUT_H)
         self.ent_au.grid(row=1, column=3, padx=6, pady=(0, 12))
+        self.ent_au.insert(0, today)
 
         styled.button_primary(
             filt, text="Appliquer", width=110, height=Layout.INPUT_H,
@@ -205,14 +207,24 @@ class PageHistoriqueLivraison(ctk.CTkFrame):
     def charger_donnees(self):
         where_parts = []
         params = []
-        du_d = get_date_from_widget(self.ent_du)
-        au_d = get_date_from_widget(self.ent_au)
-        if du_d:
-            where_parts.append("AND CAST(l.dateregistre AS DATE) >= %s")
-            params.append(format_date_iso(du_d))
-        if au_d:
-            where_parts.append("AND CAST(l.dateregistre AS DATE) <= %s")
-            params.append(format_date_iso(au_d))
+        du = self.ent_du.get().strip()
+        au = self.ent_au.get().strip()
+        if du:
+            try:
+                datetime.strptime(du, "%Y-%m-%d")
+                where_parts.append("AND CAST(l.dateregistre AS DATE) >= %s")
+                params.append(du)
+            except ValueError:
+                messagebox.showwarning("Date", "Date « Du » invalide (AAAA-MM-JJ).")
+                return
+        if au:
+            try:
+                datetime.strptime(au, "%Y-%m-%d")
+                where_parts.append("AND CAST(l.dateregistre AS DATE) <= %s")
+                params.append(au)
+            except ValueError:
+                messagebox.showwarning("Date", "Date « Au » invalide (AAAA-MM-JJ).")
+                return
 
         self.lbl_count.configure(text="Chargement…")
 

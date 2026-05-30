@@ -115,8 +115,18 @@ class PageBanque(ctk.CTkFrame):
         )
 
     def _make_date_entry(self, parent):
-        from date_picker_utils import make_tk_date_entry
-        return make_tk_date_entry(parent, width=12)
+        return DateEntry(
+            parent,
+            width=12,
+            date_pattern="dd/mm/yyyy",
+            background=Colors.PRIMARY,
+            foreground=Colors.TEXT_ON_DARK,
+            borderwidth=1,
+            selectbackground=Colors.PRIMARY_HOVER,
+            selectforeground=Colors.TEXT_ON_DARK,
+            normalbackground=Colors.BG_INPUT,
+            normalforeground=Colors.TEXT_PRIMARY,
+        )
 
     def _update_responsive_layout(self, width: int):
         mode = "narrow" if width < 980 else "wide"
