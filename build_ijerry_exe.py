@@ -11,15 +11,20 @@ Objectif
   chargés dynamiquement (importlib) — évite « page introuvable » en production.
 
 Usage (depuis la racine du projet) :
+  build_exe.bat                               # détecte Python 3.12 / 3.11 / 3.13 automatiquement
   python build_ijerry_exe.py
   python build_ijerry_exe.py --console          # fenêtre console pour déboguer
   python build_ijerry_exe.py --skip-venv        # utilise le Python actuel
   python build_ijerry_exe.py --clean-only       # supprime build/ dist/ spec
   python build_ijerry_exe.py --dry-run          # affiche le .spec sans compiler
 
+  Variable d'environnement (build_exe.bat) :
+  set IJEERY_PYTHON=C:\\chemin\\vers\\python.exe
+
 Recommandation Python
   Utiliser Python 3.11 ou 3.12 (64 bits). Le script crée .venv-build si besoin.
-  Éviter de mélanger plusieurs versions : compiler TOUJOURS avec le venv du script.
+  build_exe.bat choisit la meilleure version installée ; .venv-build est recréé
+  si la version du lanceur change (évite les conflits de wheels).
 
 Sortie
   dist/iJeery_V5.0/iJeery_V5.0.exe
@@ -182,15 +187,43 @@ def run(cmd: list[str], *, cwd: Path, env: dict | None = None) -> None:
     subprocess.run(cmd, cwd=str(cwd), env=env, check=True)
 
 
+def _python_mm(exe: Path, *, cwd: Path) -> tuple[int, int]:
+    out = subprocess.run(
+        [str(exe), "-c", "import sys; print(sys.version_info.major, sys.version_info.minor)"],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    a, b = out.stdout.strip().split()
+    return int(a), int(b)
+
+
 def ensure_venv(root: Path, skip_venv: bool) -> Path:
     if skip_venv:
         check_python_version()
         return Path(sys.executable)
 
+    venv_dir = root / VENV_DIRNAME
     py = venv_python(root)
+    launcher = Path(sys.executable).resolve()
+    if py.is_file():
+        try:
+            if _python_mm(py, cwd=root) != _python_mm(launcher, cwd=root):
+                print(
+                    f"[INFO] {VENV_DIRNAME} utilise une autre version Python — recréation "
+                    f"avec {launcher.name} ({sys.version.split()[0]})"
+                )
+                shutil.rmtree(venv_dir, ignore_errors=True)
+                py = venv_python(root)
+        except (subprocess.CalledProcessError, ValueError, OSError):
+            print(f"[INFO] {VENV_DIRNAME} invalide — recréation")
+            shutil.rmtree(venv_dir, ignore_errors=True)
+            py = venv_python(root)
+
     if not py.is_file():
-        print(f"[INFO] Création du virtualenv : {root / VENV_DIRNAME}")
-        run([sys.executable, "-m", "venv", str(root / VENV_DIRNAME)], cwd=root)
+        print(f"[INFO] Création du virtualenv : {venv_dir}")
+        run([str(launcher), "-m", "venv", str(venv_dir)], cwd=root)
     check_python_version()
     return py
 
