@@ -546,14 +546,6 @@ class PageChat(ctk.CTkFrame):
         self.scroll_contacts.grid(row=2, column=0, sticky="nsew")
         self.scroll_contacts.grid_columnconfigure(0, weight=1)
 
-        # Label "aucun contact" affiché si liste vide
-        self.lbl_no_contact = ctk.CTkLabel(
-            self.scroll_contacts,
-            text="Aucun collaborateur trouvé",
-            font=Fonts.label(11),
-            text_color=Colors.TEXT_MUTED,
-        )
-
     def _build_chat_panel(self):
         """
         Construit la colonne droite :
@@ -1045,13 +1037,14 @@ class PageChat(ctk.CTkFrame):
             # Stocker référence
             self.contacts[iduser]["btn"] = row_frame
 
-        # Message si aucun résultat
+        # Message si aucun résultat (label recréé : les vidages ci-dessus détruisent les enfants)
         if visible == 0:
-            self.lbl_no_contact.configure(
-                master=self.scroll_contacts,
+            ctk.CTkLabel(
+                self.scroll_contacts,
                 text="Aucun collaborateur trouvé" if filtre_lower else "Aucun utilisateur",
-            )
-            self.lbl_no_contact.grid(padx=10, pady=20)
+                font=Fonts.label(11),
+                text_color=Colors.TEXT_MUTED,
+            ).grid(padx=10, pady=20)
 
     def _on_search_change(self, *args):
         """Déclenché à chaque frappe dans la barre de recherche."""

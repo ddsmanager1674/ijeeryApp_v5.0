@@ -1,16 +1,32 @@
 {
-    "user_id": 26,
-    "username": "brian",
+    "user_id": 1,
+    "username": "admin",
     "fonction_id": 1,
     "fonction_name": "Administration",
     "menus": [
+        [
+            "Absence",
+            "PageAbsence"
+        ],
         [
             "Ajout Banque",
             "PageBanqueNv"
         ],
         [
+            "Article",
+            "PageArticle"
+        ],
+        [
+            "Article Fournisseur",
+            "PageArticleFrs"
+        ],
+        [
             "Article Liste",
             "page_listeArticle"
+        ],
+        [
+            "Article Mouvement",
+            "PageArticleMouvement"
         ],
         [
             "Autorisation",
@@ -27,6 +43,10 @@
         [
             "Avance Spéciale",
             "FenetreAvanceSpec"
+        ],
+        [
+            "Avoir",
+            "PageAvoir"
         ],
         [
             "Banque",
@@ -73,8 +93,28 @@
             ""
         ],
         [
+            "Bon de Réceptio",
+            "PageBonReception"
+        ],
+        [
+            "Bons Sortie",
+            "pages.page_bonsSortie"
+        ],
+        [
             "Caisse",
             "PageCaisse"
+        ],
+        [
+            "Carburant",
+            "pages.page_carburant"
+        ],
+        [
+            "Catégorie Articl",
+            "PageCategorieArticle"
+        ],
+        [
+            "Catégorie Compt",
+            "PageCategorieCompte"
         ],
         [
             "CHAT INTERNE",
@@ -83,6 +123,18 @@
         [
             "Client",
             "PageClient"
+        ],
+        [
+            "Client Crédi",
+            "PageClientCredit"
+        ],
+        [
+            "Commande Frs",
+            "PageCommandeFrs"
+        ],
+        [
+            "Config DB",
+            "DatabaseConfig"
         ],
         [
             "Configuration Liste mouvements",
@@ -97,12 +149,32 @@
             ""
         ],
         [
+            "Decaissement",
+            "PageDecaissement"
+        ],
+        [
+            "DecaissementBq",
+            "PageDecaissementBq"
+        ],
+        [
+            "Encaissement",
+            "PageEncaissement"
+        ],
+        [
+            "EncaissementBq",
+            "PageEncaissementBq"
+        ],
+        [
             "Etat de Salaire",
             "PageSalaireEtatSB"
         ],
         [
             "Evenements",
             "PageEvenement"
+        ],
+        [
+            "Facturation",
+            "PageFacturation"
         ],
         [
             "Facture Liste",
@@ -117,8 +189,24 @@
             "PageFournisseur"
         ],
         [
+            "Fournisseur Dettes",
+            "PageFrsDette"
+        ],
+        [
+            "Gérer Personnels",
+            "PagePersonnelCRUD"
+        ],
+        [
             "Historiques livraison",
             ""
+        ],
+        [
+            "Information Article",
+            "PageInfoArticle"
+        ],
+        [
+            "Init DB",
+            "DBInitializerApp"
         ],
         [
             "Inventaire du Jour",
@@ -141,8 +229,16 @@
             "AppMain"
         ],
         [
+            "Livraison Client",
+            "PageLivraisonClient"
+        ],
+        [
             "Magasin",
             "PageMagasin"
+        ],
+        [
+            "Maintenance",
+            "pages.page_maintenance"
         ],
         [
             "Marge Commerciale",
@@ -163,6 +259,14 @@
         [
             "Nouveau SB",
             "PageSalaireBase"
+        ],
+        [
+            "Paiement Client",
+            "PagePmtFacture"
+        ],
+        [
+            "Paiement Fournisseur",
+            "PagePmtFrs"
         ],
         [
             "Paiement Salaire",
@@ -193,12 +297,28 @@
             ""
         ],
         [
+            "Paramètres Stock Article",
+            ""
+        ],
+        [
+            "Parc Vehicule",
+            "pages.page_parcVehicule"
+        ],
+        [
             "Péremption d'article",
             "PageGestionPeremption"
         ],
         [
             "Pieces Detachees",
             "pages.page_piecesDetachees"
+        ],
+        [
+            "Présence",
+            "PagePresence"
+        ],
+        [
+            "Présence Personnel",
+            "PagePresencePersonnel"
         ],
         [
             "Prix d'article",
@@ -209,6 +329,26 @@
             "PagePrixRevient"
         ],
         [
+            "Prix Liste",
+            "PagePrixListe"
+        ],
+        [
+            "Prix Saisie",
+            "PagePrixSaisie"
+        ],
+        [
+            "Proforma",
+            "PageCommandeCli"
+        ],
+        [
+            "Rapport Logistique",
+            "pages.page_rapportLogistique"
+        ],
+        [
+            "Salaire Base",
+            "PageSalaireBase"
+        ],
+        [
             "Salaire Horaire",
             "PageEtatSalaireHoraire"
         ],
@@ -217,12 +357,24 @@
             "PageSauvegarde"
         ],
         [
+            "Sortie Article",
+            "PageSortie"
+        ],
+        [
             "Stock Alerte",
             "PageStockAlerte"
         ],
         [
             "Stock Article",
             "PageStock"
+        ],
+        [
+            "Stock Livraison",
+            "PageStockLivraison"
+        ],
+        [
+            "Suivi Commande",
+            "PageSuiviCommande"
         ],
         [
             "Suivi de présence",
@@ -237,6 +389,10 @@
             "PageTauxHoraire"
         ],
         [
+            "Transfert Article",
+            "PageTransfert"
+        ],
+        [
             "Transfert Banque",
             "PageTransfertBanque"
         ],
@@ -245,8 +401,24 @@
             "PageTransfertCaisse"
         ],
         [
+            "Type de paiement",
+            "PageTypePmt"
+        ],
+        [
+            "Unité Articl",
+            "PageUnite"
+        ],
+        [
+            "Users",
+            "PageUsers"
+        ],
+        [
             "Utilisateurs",
             "PageUsers"
+        ],
+        [
+            "Ventes",
+            "PageVente"
         ],
         [
             "Ventes par Dépôt",
