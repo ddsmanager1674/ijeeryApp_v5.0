@@ -33,6 +33,8 @@ import time
 import threading
 import subprocess
 import base64
+import socket
+import re
 
 from configDataBase import ConfigDataBase
 from user_settings_window import UserSettingsWindow
@@ -89,6 +91,44 @@ _WIN_BG      = C.BG_PAGE
 
 def _tk_font(size=11, weight="normal"):
     return (_FONT_FAM, size, weight)
+
+
+def _get_ethernet_ip() -> str:
+    """Retourne l'IPv4 Ethernet active sous Windows, sinon loopback."""
+    if os.name != "nt":
+        return "127.0.0.1"
+
+    try:
+        output = subprocess.check_output(
+            ["ipconfig"],
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    except Exception:
+        return "127.0.0.1"
+
+    current_is_ethernet = False
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if raw_line and not raw_line.startswith((" ", "\t")) and line.endswith(":"):
+            current_is_ethernet = "ethernet" in line.lower()
+            continue
+        if current_is_ethernet and "IPv4" in line:
+            match = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", line)
+            if match and not match.group(1).startswith("169.254."):
+                return match.group(1)
+
+    return "127.0.0.1"
+
+
+def _get_machine_signature() -> str:
+    """Retourne un libellé court nom machine / IP Ethernet pour le footer."""
+    hostname = socket.gethostname() or "PC"
+    return f"{hostname} / {_get_ethernet_ip()}"
 
 # ── Init thème ────────────────────────────────────────────────────────────────
 if _T:
@@ -401,8 +441,8 @@ class LoginWindow(ctk.CTk):
         # ── Bouton Paramètres utilisateurs ───────────────────────────────
         self._build_user_settings_btn(card)
 
-        # Padding bas
-        tk.Frame(card, height=20, bg=_WIN_BG).pack()
+        # ── Footer machine ───────────────────────────────────────────────
+        self._build_machine_footer(card)
 
     def _build_close_btn(self, parent):
         """Bouton ✕ discret en haut à droite."""
@@ -520,6 +560,21 @@ class LoginWindow(ctk.CTk):
             corner_radius=6,
         )
         self._user_settings_btn.pack(fill="x")
+
+    def _build_machine_footer(self, parent):
+        """Affiche nomPC / IPmachine centré en bas de la fenêtre."""
+        footer = tk.Frame(parent, bg=_WIN_BG)
+        footer.pack(side="bottom", fill="x", padx=3, pady=(0, 2))
+
+        tk.Frame(footer, height=1, bg=C.DIVIDER).pack(fill="x", pady=(0, 2))
+        tk.Label(
+            footer,
+            text=_get_machine_signature(),
+            font=_tk_font(9),
+            fg=C.TEXT_MUTED,
+            bg=_WIN_BG,
+            anchor="center",
+        ).pack(fill="x")
 
     # ══════════════════════════════════════════════════════════════════════
     # DRAG (déplacement fenêtre sans barre titre)
@@ -850,7 +905,12 @@ class LoginWindow(ctk.CTk):
 
     def open_database_config(self):
         w = ConfigDataBase()
-        w.focus_force()
+        try:
+            w.attributes("-topmost", True)
+            w.lift()
+            w.focus_force()
+        except Exception:
+            pass
         w.mainloop()
 
     def open_user_settings(self):

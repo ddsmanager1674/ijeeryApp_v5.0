@@ -10,12 +10,113 @@ from psycopg2 import sql
 from tkinter import messagebox, filedialog
 from resource_utils import get_config_path
 
+try:
+    from app_theme import Colors, Fonts, Theme, init_theme
+except ImportError:
+    class Colors:
+        BG_PAGE = "#ECF0F1"
+        BG_CARD = "#FFFFFF"
+        BG_INPUT = "#F4F6F8"
+        BG_HEADER = "#2C3E50"
+        PRIMARY = "#3498DB"
+        PRIMARY_HOVER = "#2980B9"
+        SUCCESS = "#2ECC71"
+        SUCCESS_DARK = "#27AE60"
+        WARNING = "#F39C12"
+        TEXT_PRIMARY = "#2C3E50"
+        TEXT_SECONDARY = "#5D6D7E"
+        TEXT_MUTED = "#95A5A6"
+        TEXT_ON_DARK = "#FFFFFF"
+        BORDER = "#D5D8DC"
+        DIVIDER = "#E8EAED"
+        CLOUDS = "#ECF0F1"
+        SILVER = "#BDC3C7"
+
+    class Fonts:
+        @staticmethod
+        def get(size=13, weight="normal"):
+            return ctk.CTkFont(family="Segoe UI", size=size, weight=weight)
+        @classmethod
+        def body(cls, size=13): return cls.get(size)
+        @classmethod
+        def label(cls, size=12): return cls.get(size)
+        @classmethod
+        def small(cls, size=11): return cls.get(size)
+        @classmethod
+        def heading(cls, size=15): return cls.get(size, "bold")
+        @classmethod
+        def title(cls, size=18): return cls.get(size, "bold")
+        @classmethod
+        def button(cls, size=13): return cls.get(size, "bold")
+        @classmethod
+        def input(cls, size=13): return cls.get(size)
+
+    class Theme:
+        @staticmethod
+        def setup():
+            ctk.set_appearance_mode("light")
+            ctk.set_default_color_theme("blue")
+        @staticmethod
+        def apply(window):
+            window.configure(fg_color=Colors.BG_PAGE)
+        @staticmethod
+        def apply_toplevel(window):
+            window.configure(fg_color=Colors.BG_PAGE)
+
+    init_theme = Theme.setup
+
+
+def _entry(parent, placeholder="", show=None):
+    entry_kwargs = dict(
+        height=36,
+        fg_color=Colors.BG_INPUT,
+        border_color=Colors.BORDER,
+        border_width=1,
+        corner_radius=8,
+        text_color=Colors.TEXT_PRIMARY,
+        placeholder_text=placeholder,
+        placeholder_text_color=Colors.TEXT_MUTED,
+        font=Fonts.input(12),
+    )
+    if show:
+        entry_kwargs["show"] = show
+    return ctk.CTkEntry(parent, **entry_kwargs)
+
+
+def _button(parent, text, command, kind="primary", state="normal"):
+    if kind == "success":
+        fg, hover = Colors.SUCCESS, Colors.SUCCESS_DARK
+    elif kind == "secondary":
+        fg, hover = Colors.CLOUDS, Colors.SILVER
+    else:
+        fg, hover = Colors.PRIMARY, Colors.PRIMARY_HOVER
+    return ctk.CTkButton(
+        parent,
+        text=text,
+        command=command,
+        state=state,
+        height=36,
+        fg_color=fg,
+        hover_color=hover,
+        text_color=Colors.TEXT_PRIMARY if kind == "secondary" else Colors.TEXT_ON_DARK,
+        border_width=1 if kind == "secondary" else 0,
+        border_color=Colors.BORDER,
+        corner_radius=8,
+        font=Fonts.button(12),
+    )
+
+
 class ConfigDataBase(ctk.CTk):
     def __init__(self):
+        try:
+            init_theme()
+        except Exception:
+            Theme.setup()
         super().__init__()
         self.title("Configuration de la base de données")
-        self.geometry("600x550")
+        self.geometry("640x600")
         self.resizable(False, False)
+        Theme.apply(self)
 
         self.config_file_path = get_config_path('config.json')
         self.config_data = self.load_config()
@@ -113,11 +214,11 @@ class ConfigDataBase(ctk.CTk):
         if missing:
             self.dev_link_label.configure(text="(⚠) Restaurer la base (il n'existe pas)")
             if not self.dev_link_label.winfo_manager():
-                self.dev_link_label.pack(pady=(2, 0))
+                self.dev_link_label.grid(row=4, column=1, sticky="w", padx=(10, 24), pady=(0, 8))
             else:
-                self.dev_link_label.pack_configure(pady=(2, 0))
+                self.dev_link_label.grid_configure(row=4, column=1, sticky="w", padx=(10, 24), pady=(0, 8))
         else:
-            self.dev_link_label.pack_forget()
+            self.dev_link_label.grid_remove()
 
     def save_config(self):
         if self.save_button.cget("state") == "disabled":
@@ -161,10 +262,10 @@ class ConfigDataBase(ctk.CTk):
         self.save_button.configure(state="normal")
 
     def _on_dev_link_enter(self, event=None):
-        self.dev_link_label.configure(text_color="#87CEEB")  # Bleu ciel
+        self.dev_link_label.configure(text_color=Colors.PRIMARY_HOVER)
 
     def _on_dev_link_leave(self, event=None):
-        self.dev_link_label.configure(text_color="#000080")  # Bleu marine
+        self.dev_link_label.configure(text_color=Colors.PRIMARY)
 
     def _on_dev_link_click(self, event=None):
         self.open_restore_window()
@@ -175,42 +276,76 @@ class ConfigDataBase(ctk.CTk):
     def open_restore_window(self):
         restore_win = ctk.CTkToplevel(self)
         restore_win.title("Restauration de la base")
-        restore_win.geometry("620x280")
+        restore_win.geometry("640x300")
         restore_win.resizable(False, False)
         restore_win.transient(self)
         restore_win.grab_set()
+        Theme.apply_toplevel(restore_win)
 
-        ctk.CTkLabel(restore_win, text="Fichier de sauvegarde PostgreSQL").pack(pady=(14, 6))
+        header = ctk.CTkFrame(restore_win, fg_color=Colors.BG_HEADER, corner_radius=0, height=54)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        ctk.CTkLabel(
+            header,
+            text="Restauration de la base",
+            font=Fonts.heading(16),
+            text_color=Colors.TEXT_ON_DARK,
+            anchor="w",
+        ).pack(side="left", padx=18)
 
-        file_row = ctk.CTkFrame(restore_win, fg_color="transparent")
-        file_row.pack(fill="x", padx=16)
+        body = ctk.CTkFrame(restore_win, fg_color=Colors.BG_PAGE, corner_radius=0)
+        body.pack(fill="both", expand=True, padx=18, pady=16)
 
-        file_entry = ctk.CTkEntry(file_row)
+        ctk.CTkLabel(
+            body,
+            text="Fichier de sauvegarde PostgreSQL",
+            font=Fonts.label(12),
+            text_color=Colors.TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(0, 6))
+
+        file_row = ctk.CTkFrame(body, fg_color="transparent")
+        file_row.pack(fill="x")
+
+        file_entry = _entry(file_row, placeholder="Sélectionner un fichier .backup, .dump ou .sql")
         file_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        browse_btn = ctk.CTkButton(
+        browse_btn = _button(
             file_row,
             text="Parcourir",
-            width=110,
-            command=lambda: self._browse_restore_file(file_entry)
+            command=lambda: self._browse_restore_file(file_entry),
+            kind="secondary",
         )
+        browse_btn.configure(width=118)
         browse_btn.pack(side="right")
 
-        status_label = ctk.CTkLabel(restore_win, text="Prêt")
-        status_label.pack(pady=(14, 4))
+        status_label = ctk.CTkLabel(
+            body,
+            text="Prêt",
+            font=Fonts.small(11),
+            text_color=Colors.TEXT_MUTED,
+        )
+        status_label.pack(anchor="w", pady=(16, 6))
 
-        progress_bar = ctk.CTkProgressBar(restore_win, mode="determinate")
-        progress_bar.pack(fill="x", padx=16)
+        progress_bar = ctk.CTkProgressBar(
+            body,
+            mode="determinate",
+            height=8,
+            fg_color=Colors.BG_INPUT,
+            progress_color=Colors.PRIMARY,
+            corner_radius=4,
+        )
+        progress_bar.pack(fill="x")
         progress_bar.set(0)
 
-        launch_btn = ctk.CTkButton(
-            restore_win,
+        launch_btn = _button(
+            body,
             text="Lancer la restauration",
             command=lambda: self._start_restore_process(
                 restore_win, file_entry, status_label, progress_bar, launch_btn, browse_btn
-            )
+            ),
+            kind="primary",
         )
-        launch_btn.pack(pady=16)
+        launch_btn.pack(pady=(18, 0))
 
     def _browse_restore_file(self, entry_widget):
         file_path = filedialog.askopenfilename(
@@ -370,61 +505,135 @@ class ConfigDataBase(ctk.CTk):
             ui(lambda: browse_btn.configure(state="normal"))
 
     def create_widgets(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(padx=20, pady=20, fill="both", expand=True)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(self, fg_color=Colors.BG_HEADER, corner_radius=0, height=78)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
+        header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            header,
+            text="Configuration base de données",
+            font=Fonts.title(19),
+            text_color=Colors.TEXT_ON_DARK,
+            anchor="w",
+        ).grid(row=0, column=0, sticky="sw", padx=24, pady=(16, 0))
+        ctk.CTkLabel(
+            header,
+            text="Paramètres de connexion PostgreSQL",
+            font=Fonts.small(11),
+            text_color=Colors.TEXT_ON_DARK,
+            anchor="w",
+        ).grid(row=1, column=0, sticky="nw", padx=24, pady=(1, 0))
+
+        frame = ctk.CTkFrame(
+            self,
+            fg_color=Colors.BG_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=Colors.BORDER,
+        )
+        frame.grid(row=1, column=0, sticky="nsew", padx=24, pady=20)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
 
         # Host
-        ctk.CTkLabel(frame, text="Host:").pack(pady=(10, 0))
-        self.host_entry = ctk.CTkEntry(frame)
+        ctk.CTkLabel(frame, text="Host", font=Fonts.label(12), text_color=Colors.TEXT_SECONDARY).grid(
+            row=0, column=0, sticky="w", padx=(24, 10), pady=(22, 6)
+        )
+        self.host_entry = _entry(frame)
         self.host_entry.insert(0, self.config_data['database']['host'])
-        self.host_entry.pack()
+        self.host_entry.grid(row=1, column=0, sticky="ew", padx=(24, 10), pady=(0, 12))
 
         # Utilisateur
-        ctk.CTkLabel(frame, text="Utilisateur:").pack(pady=(10, 0))
-        self.user_entry = ctk.CTkEntry(frame)
+        ctk.CTkLabel(frame, text="Utilisateur", font=Fonts.label(12), text_color=Colors.TEXT_SECONDARY).grid(
+            row=0, column=1, sticky="w", padx=(10, 24), pady=(22, 6)
+        )
+        self.user_entry = _entry(frame)
         self.user_entry.insert(0, self.config_data['database']['user'])
-        self.user_entry.pack()
+        self.user_entry.grid(row=1, column=1, sticky="ew", padx=(10, 24), pady=(0, 12))
 
         # Mot de passe
-        ctk.CTkLabel(frame, text="Mot de passe:").pack(pady=(10, 0))
-        self.password_entry = ctk.CTkEntry(frame, show="*")
+        ctk.CTkLabel(frame, text="Mot de passe", font=Fonts.label(12), text_color=Colors.TEXT_SECONDARY).grid(
+            row=2, column=0, sticky="w", padx=(24, 10), pady=(4, 6)
+        )
+        self.password_entry = _entry(frame, show="*")
         self.password_entry.insert(0, self.config_data['database']['password'])
-        self.password_entry.pack()
+        self.password_entry.grid(row=3, column=0, sticky="ew", padx=(24, 10), pady=(0, 12))
 
         # Base de données (Transformé en ComboBox)
-        ctk.CTkLabel(frame, text="Base de données:").pack(pady=(10, 0))
-        self.database_combo = ctk.CTkComboBox(frame, values=["Chargement..."], command=self._on_database_selected)
+        ctk.CTkLabel(frame, text="Base de données", font=Fonts.label(12), text_color=Colors.TEXT_SECONDARY).grid(
+            row=2, column=1, sticky="w", padx=(10, 24), pady=(4, 6)
+        )
+        self.database_combo = ctk.CTkComboBox(
+            frame,
+            values=["Chargement..."],
+            command=self._on_database_selected,
+            height=36,
+            fg_color=Colors.BG_INPUT,
+            border_color=Colors.BORDER,
+            border_width=1,
+            button_color=Colors.PRIMARY,
+            button_hover_color=Colors.PRIMARY_HOVER,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.BG_INPUT,
+            text_color=Colors.TEXT_PRIMARY,
+            font=Fonts.input(12),
+            dropdown_font=Fonts.body(12),
+            corner_radius=8,
+        )
         self.database_combo.set(self.config_data['database']['database'])
-        self.database_combo.pack()
+        self.database_combo.grid(row=3, column=1, sticky="ew", padx=(10, 24), pady=(0, 2))
         self.dev_link_label = ctk.CTkLabel(
             frame,
             text="Restaurer la base",
-            text_color="#000080",
-            font=ctk.CTkFont(underline=True),
+            text_color=Colors.PRIMARY,
+            font=ctk.CTkFont(family="Roboto", size=11, underline=True),
             cursor="hand2"
         )
-        self.dev_link_label.pack(pady=(2, 0))
+        self.dev_link_label.grid(row=4, column=1, sticky="w", padx=(10, 24), pady=(0, 8))
         self.dev_link_label.bind("<Enter>", self._on_dev_link_enter)
         self.dev_link_label.bind("<Leave>", self._on_dev_link_leave)
         self.dev_link_label.bind("<Button-1>", self._on_dev_link_click)
 
         # Port
-        ctk.CTkLabel(frame, text="Port:").pack(pady=(10, 0))
-        self.port_entry = ctk.CTkEntry(frame)
+        ctk.CTkLabel(frame, text="Port", font=Fonts.label(12), text_color=Colors.TEXT_SECONDARY).grid(
+            row=5, column=0, sticky="w", padx=(24, 10), pady=(4, 6)
+        )
+        self.port_entry = _entry(frame)
         self.port_entry.insert(0, str(self.config_data['database']['port']))
-        self.port_entry.pack()
+        self.port_entry.grid(row=6, column=0, sticky="ew", padx=(24, 10), pady=(0, 18))
 
-        button_frame = ctk.CTkFrame(frame)
-        button_frame.pack(pady=20)
+        divider = ctk.CTkFrame(frame, height=1, fg_color=Colors.DIVIDER, corner_radius=0)
+        divider.grid(row=7, column=0, columnspan=2, sticky="ew", padx=24, pady=(2, 16))
 
-        self.edit_button = ctk.CTkButton(button_frame, text="Modifier", command=self.enable_editing)
-        self.edit_button.pack(side="left", padx=5)
+        button_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        button_frame.grid(row=8, column=0, columnspan=2, sticky="ew", padx=24)
+        button_frame.grid_columnconfigure(0, weight=1)
+        button_frame.grid_columnconfigure(1, weight=1)
 
-        self.save_button = ctk.CTkButton(button_frame, text="Sauvegarder", command=self.save_config, state="disabled")
-        self.save_button.pack(side="left", padx=5)
+        self.edit_button = _button(button_frame, text="Modifier", command=self.enable_editing, kind="secondary")
+        self.edit_button.grid(row=0, column=0, sticky="ew", padx=(0, 8))
 
-        self.status_label = ctk.CTkLabel(frame, text="")
-        self.status_label.pack()
+        self.save_button = _button(
+            button_frame,
+            text="Sauvegarder",
+            command=self.save_config,
+            kind="success",
+            state="disabled",
+        )
+        self.save_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+
+        self.status_label = ctk.CTkLabel(
+            frame,
+            text="",
+            font=Fonts.small(11),
+            text_color=Colors.TEXT_MUTED,
+            anchor="center",
+        )
+        self.status_label.grid(row=9, column=0, columnspan=2, sticky="ew", padx=24, pady=(14, 0))
 
 if __name__ == "__main__":
     app = ConfigDataBase()
