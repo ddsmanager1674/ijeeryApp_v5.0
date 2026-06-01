@@ -13,9 +13,19 @@ from log_utils import AppLogger
 from resource_utils import get_config_path
 
 try:
-    from pages.menu_auth_utils import noms_menus_param_modules
+    from pages.menu_auth_utils import (
+        BLOC_LOGISTIQUE,
+        CLES_LOGISTIQUE,
+        PAGES_LOGISTIQUE,
+        noms_menus_param_modules,
+    )
 except ImportError:
-    from menu_auth_utils import noms_menus_param_modules
+    from menu_auth_utils import (
+        BLOC_LOGISTIQUE,
+        CLES_LOGISTIQUE,
+        PAGES_LOGISTIQUE,
+        noms_menus_param_modules,
+    )
 
 
 @dataclass(frozen=True)
@@ -65,14 +75,7 @@ class PageAutorisation(ctk.CTkFrame):
                 "Ajout Banque", "Transfert Banque", "Transfert Caisse",
             ),
         ),
-        MenuGroup(
-            "LOGISTIQUE",
-            "BLOC: LOGISTIQUE",
-            (
-                "Parc Vehicule", "Pieces Detachees", "Carburant",
-                "Itineraires", "Bons Sortie", "Maintenance", "Rapport Logistique",
-            ),
-        ),
+        MenuGroup("LOGISTIQUE", BLOC_LOGISTIQUE, CLES_LOGISTIQUE),
         MenuGroup(
             "BASE DE DONNÉES",
             "BLOC: BASE DE DONNÉES",
@@ -297,20 +300,71 @@ class PageAutorisation(ctk.CTkFrame):
             names.extend(group.items)
         return names
 
+    def _menu_index(self, cur) -> dict[str, int]:
+        """Index designationmenu → id (plus petit id en cas de doublons historiques)."""
+        cur.execute("SELECT id, designationmenu FROM tb_menu ORDER BY id")
+        index: dict[str, int] = {}
+        for menu_id, name in cur.fetchall():
+            if not name:
+                continue
+            key = str(name)
+            mid = int(menu_id)
+            if key not in index or mid < index[key]:
+                index[key] = mid
+        return index
+
+    def _dedupe_logistique_menus(self, cur) -> None:
+        """Fusionne les doublons tb_menu logistique (scripts SQL rejoués sans contrainte UNIQUE)."""
+        names = list(PAGES_LOGISTIQUE.keys())
+        cur.execute(
+            """
+            SELECT designationmenu, array_agg(id ORDER BY id) AS ids
+            FROM tb_menu
+            WHERE designationmenu = ANY(%s)
+            GROUP BY designationmenu
+            HAVING COUNT(*) > 1
+            """,
+            (names,),
+        )
+        for designation, ids in cur.fetchall():
+            keep_id = int(ids[0])
+            for dup_id in (int(x) for x in ids[1:]):
+                cur.execute(
+                    """
+                    UPDATE tb_autorisation a
+                    SET idmenu = %s
+                    WHERE a.idmenu = %s
+                      AND NOT EXISTS (
+                          SELECT 1 FROM tb_autorisation x
+                          WHERE x.idfonction = a.idfonction AND x.idmenu = %s
+                      )
+                    """,
+                    (keep_id, dup_id, keep_id),
+                )
+                cur.execute("DELETE FROM tb_autorisation WHERE idmenu = %s", (dup_id,))
+                cur.execute("DELETE FROM tb_menu WHERE id = %s", (dup_id,))
+
     def _ensure_required_menus(self, cur):
         self._sync_sequence(cur, "tb_menu_id_seq", "tb_menu", "id")
-        cur.execute("SELECT id, designationmenu FROM tb_menu")
-        existing = {str(name): int(menu_id) for menu_id, name in cur.fetchall() if name}
+        self._dedupe_logistique_menus(cur)
+        existing = self._menu_index(cur)
 
         newly_inserted: set[int] = set()
         param_names = set(noms_menus_param_modules())
 
         for name in self._required_menu_names():
             if name in existing:
+                page = PAGES_LOGISTIQUE.get(name, "")
+                if page and name in PAGES_LOGISTIQUE:
+                    cur.execute(
+                        "UPDATE tb_menu SET page = %s WHERE id = %s AND COALESCE(page, '') = ''",
+                        (page, existing[name]),
+                    )
                 continue
+            page = PAGES_LOGISTIQUE.get(name, "")
             cur.execute(
                 "INSERT INTO tb_menu (designationmenu, page) VALUES (%s, %s) RETURNING id",
-                (name, ""),
+                (name, page),
             )
             menu_id = int(cur.fetchone()[0])
             existing[name] = menu_id

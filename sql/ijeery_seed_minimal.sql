@@ -159,7 +159,15 @@ INSERT INTO tb_menu (id, designationmenu, page) VALUES
   (84, 'BLOC: BASE DE DONNÉES', ''),
   (85, 'Paramètres', ''),
   (86, 'Historiques livraison', ''),
-  (87, 'Bon de Livraison', '');
+  (87, 'Bon de Livraison', ''),
+  (88, 'BLOC: LOGISTIQUE', ''),
+  (89, 'Parc Vehicule', 'pages.page_parcVehicule'),
+  (90, 'Pieces Detachees', 'pages.page_piecesDetachees'),
+  (91, 'Carburant', 'pages.page_carburant'),
+  (92, 'Itineraires', 'pages.page_itineraires'),
+  (93, 'Bons Sortie', 'pages.page_bonsSortie'),
+  (94, 'Maintenance', 'pages.page_maintenance'),
+  (95, 'Rapport Logistique', 'pages.page_rapportLogistique');
 
 -- Droits administrateur : tous les menus
 INSERT INTO tb_autorisation (idfonction, idmenu)
@@ -191,5 +199,5 @@ SELECT setval('public.tb_configdb_id_seq', 1, true);
 SELECT setval('public.tb_transporteur_idtransporteur_seq', 1, true);
 SELECT setval('public.tb_codeautorisation_id_seq', 1, true);
 SELECT setval('public.tb_users_iduser_seq', 1, true);
-SELECT setval('public.tb_menu_id_seq', 87, true);
+SELECT setval('public.tb_menu_id_seq', 95, true);
 COMMIT;

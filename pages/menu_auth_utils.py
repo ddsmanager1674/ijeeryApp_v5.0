@@ -18,6 +18,29 @@ CLE_CONF_PRIX = "Configuration Prix Article"
 
 BLOC_PARAMETRES_MODULES = "BLOC: PARAMÈTRES MODULES"
 
+BLOC_LOGISTIQUE = "BLOC: LOGISTIQUE"
+
+CLES_LOGISTIQUE: tuple[str, ...] = (
+    "Parc Vehicule",
+    "Pieces Detachees",
+    "Carburant",
+    "Itineraires",
+    "Bons Sortie",
+    "Maintenance",
+    "Rapport Logistique",
+)
+
+PAGES_LOGISTIQUE: Dict[str, str] = {
+    BLOC_LOGISTIQUE: "",
+    "Parc Vehicule": "pages.page_parcVehicule",
+    "Pieces Detachees": "pages.page_piecesDetachees",
+    "Carburant": "pages.page_carburant",
+    "Itineraires": "pages.page_itineraires",
+    "Bons Sortie": "pages.page_bonsSortie",
+    "Maintenance": "pages.page_maintenance",
+    "Rapport Logistique": "pages.page_rapportLogistique",
+}
+
 CLES_PARAMETRES_MODULES: tuple[str, ...] = (
     CLE_PARAM_STOCK,
     CLE_PARAM_LIVRAISON,
@@ -94,3 +117,8 @@ def appliquer_visibilite_lien_pack(
 def noms_menus_param_modules() -> Iterable[str]:
     yield BLOC_PARAMETRES_MODULES
     yield from CLES_PARAMETRES_MODULES
+
+
+def noms_menus_logistique() -> Iterable[str]:
+    yield BLOC_LOGISTIQUE
+    yield from CLES_LOGISTIQUE

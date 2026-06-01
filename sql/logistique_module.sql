@@ -158,7 +158,9 @@ CREATE TABLE IF NOT EXISTS logistique_bon_sortie_ligne (
 
 CREATE INDEX IF NOT EXISTS idx_ligne_bon ON logistique_bon_sortie_ligne (bon_id);
 
-INSERT INTO tb_menu (designationmenu, page) VALUES
+INSERT INTO tb_menu (designationmenu, page)
+SELECT v.designationmenu, v.page
+FROM (VALUES
     ('BLOC: LOGISTIQUE',   ''),
     ('Parc Vehicule',      'pages.page_parcVehicule'),
     ('Pieces Detachees',   'pages.page_piecesDetachees'),
@@ -167,7 +169,10 @@ INSERT INTO tb_menu (designationmenu, page) VALUES
     ('Bons Sortie',        'pages.page_bonsSortie'),
     ('Maintenance',        'pages.page_maintenance'),
     ('Rapport Logistique', 'pages.page_rapportLogistique')
-ON CONFLICT DO NOTHING;
+) AS v(designationmenu, page)
+WHERE NOT EXISTS (
+    SELECT 1 FROM tb_menu m WHERE m.designationmenu = v.designationmenu
+);
 
 -- Droits admin (fonction 1) : à adapter si votre id admin diffère
 INSERT INTO tb_autorisation (idfonction, idmenu)

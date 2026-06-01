@@ -73,16 +73,8 @@
             ""
         ],
         [
-            "Bons Sortie",
-            "pages.page_bonsSortie"
-        ],
-        [
             "Caisse",
             "PageCaisse"
-        ],
-        [
-            "Carburant",
-            "pages.page_carburant"
         ],
         [
             "CHAT INTERNE",
@@ -153,10 +145,6 @@
             "PageMagasin"
         ],
         [
-            "Maintenance",
-            "pages.page_maintenance"
-        ],
-        [
             "Marge Commerciale",
             "PageStock"
         ],
@@ -205,10 +193,6 @@
             ""
         ],
         [
-            "Parc Vehicule",
-            "pages.page_parcVehicule"
-        ],
-        [
             "Péremption d'article",
             "PageGestionPeremption"
         ],
@@ -223,10 +207,6 @@
         [
             "Prix de revient",
             "PagePrixRevient"
-        ],
-        [
-            "Rapport Logistique",
-            "pages.page_rapportLogistique"
         ],
         [
             "Salaire Horaire",
