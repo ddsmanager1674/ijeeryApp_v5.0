@@ -1461,7 +1461,7 @@ Solde Total Restant: {self._formater_nombre(credit_total_restant)} Ar"""
                     messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
                     return
                 
-                if montant_global > credit_total_restant:
+                if round(montant_global) > round(credit_total_restant):
                     messagebox.showwarning("Attention", f"Le montant dépasse le solde total ({self._formater_nombre(credit_total_restant)} Ar).")
                     return
                 

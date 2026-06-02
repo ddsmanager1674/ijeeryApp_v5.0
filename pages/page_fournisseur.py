@@ -1207,7 +1207,7 @@ class PageFournisseur(ctk.CTkFrame):
                 if montant_global <= 0:
                     messagebox.showwarning("Attention", "Le montant doit être supérieur à 0.")
                     return
-                if montant_global > dette_total_restant:
+                if round(montant_global) > round(dette_total_restant):
                     messagebox.showwarning("Attention",
                                            f"Le montant dépasse le solde total ({self._formater_nombre(dette_total_restant)} Ar).")
                     return
