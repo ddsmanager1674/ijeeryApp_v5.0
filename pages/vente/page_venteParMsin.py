@@ -942,27 +942,89 @@ class PageVenteParMsin(ctk.CTkFrame):
         try:
             cur = conn.cursor()
             annee = datetime.now().year
+            self._ensure_facture_sequence(cur, annee)
             cur.execute("""
-                SELECT refvente FROM tb_vente
-                WHERE refvente ILIKE %s ORDER BY id DESC LIMIT 1
-            """, (f"%{annee}-FA-%",))
+                SELECT GREATEST(
+                    COALESCE((SELECT dernier_numero
+                              FROM tb_facture_sequence
+                              WHERE annee=%s), 0),
+                    COALESCE((
+                        SELECT MAX((regexp_match(refvente, %s))[1]::integer)
+                        FROM tb_vente
+                        WHERE refvente ~ %s
+                    ), 0)
+                )
+            """, (annee, rf"^{annee}-FA-([0-9]+)$", rf"^{annee}-FA-[0-9]+$"))
             row = cur.fetchone()
-            num = 1
-            if row:
-                parts = row[0].split('-')
-                if len(parts) == 3 and parts[1] == 'FA':
-                    try: num = int(parts[-1]) + 1
-                    except ValueError: pass
+            num = int(row[0] or 0) + 1
             ref = f"{annee}-FA-{num:05d}"
             self.entry_ref_vente.configure(state="normal")
             self.entry_ref_vente.delete(0, "end")
             self.entry_ref_vente.insert(0, ref)
             self.entry_ref_vente.configure(state="readonly")
+            conn.commit()
         except Exception as e:
+            conn.rollback()
             MessageDialog("Erreur", f"Génération référence : {e}", 'error')
         finally:
             if 'cur' in locals(): cur.close()
             self._put_conn(conn)
+
+    def _ensure_facture_sequence(self, cur, annee: int):
+        """
+        Prépare le compteur annuel des factures et l'aligne sur l'historique.
+        La ligne (annee) est unique, ce qui permet ensuite de la verrouiller
+        implicitement avec un UPDATE dans la transaction d'enregistrement.
+        """
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tb_facture_sequence (
+                annee INTEGER PRIMARY KEY,
+                dernier_numero INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            INSERT INTO tb_facture_sequence (annee, dernier_numero)
+            SELECT %s,
+                   COALESCE((
+                       SELECT MAX((regexp_match(refvente, %s))[1]::integer)
+                       FROM tb_vente
+                       WHERE refvente ~ %s
+                   ), 0)
+            ON CONFLICT (annee) DO NOTHING
+        """, (annee, rf"^{annee}-FA-([0-9]+)$", rf"^{annee}-FA-[0-9]+$"))
+        cur.execute("""
+            UPDATE tb_facture_sequence
+            SET dernier_numero = GREATEST(
+                    dernier_numero,
+                    COALESCE((
+                        SELECT MAX((regexp_match(refvente, %s))[1]::integer)
+                        FROM tb_vente
+                        WHERE refvente ~ %s
+                    ), 0)
+                ),
+                updated_at = NOW()
+            WHERE annee = %s
+        """, (rf"^{annee}-FA-([0-9]+)$", rf"^{annee}-FA-[0-9]+$", annee))
+
+    def _reserver_reference_facture(self, cur, annee: int) -> str:
+        """
+        Réserve atomiquement le prochain numéro FA-AAAA-NNNNN.
+        L'UPDATE verrouille la ligne du compteur jusqu'au COMMIT/ROLLBACK :
+        deux opérateurs ne peuvent donc pas recevoir le même numéro.
+        """
+        self._ensure_facture_sequence(cur, annee)
+        cur.execute("""
+            UPDATE tb_facture_sequence
+            SET dernier_numero = dernier_numero + 1,
+                updated_at = NOW()
+            WHERE annee = %s
+            RETURNING dernier_numero
+        """, (annee,))
+        row = cur.fetchone()
+        if not row:
+            raise RuntimeError(f"Compteur facture introuvable pour l'année {annee}")
+        return f"{annee}-FA-{int(row[0]):05d}"
 
     def charger_magasins(self):
         """Charge les magasins dans combo_magasin et sélectionne celui de l'utilisateur."""
@@ -1862,20 +1924,9 @@ class PageVenteParMsin(ctk.CTkFrame):
                     )
                     nom_mag = details_mag[0]['designationmag']
 
-                    # Référence unique par magasin
+                    # Référence unique par magasin, réservée par compteur verrouillé
                     annee = now.year
-                    cur.execute("""
-                        SELECT refvente FROM tb_vente
-                        WHERE refvente ILIKE %s ORDER BY id DESC LIMIT 1
-                    """, (f"%{annee}-FA-%",))
-                    r = cur.fetchone()
-                    num = 1
-                    if r:
-                        parts = r[0].split('-')
-                        if len(parts) == 3 and parts[1] == 'FA':
-                            try: num = int(parts[-1]) + 1
-                            except ValueError: pass
-                    ref_mag = f"{annee}-FA-{num:05d}"
+                    ref_mag = self._reserver_reference_facture(cur, annee)
 
                     # Insertion en-tête
                     cur.execute("""
