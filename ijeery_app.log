@@ -292,3 +292,8 @@
 2026-06-04 17:38:01 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
 2026-06-04 17:38:03 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
 2026-06-04 17:38:03 | INFO     | ijeery | [DB] Connexion établie.
+2026-04-28 20:00:10 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-04-28 20:00:14 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-04-28 20:00:14 | INFO     | ijeery | Fichier config.json lu (encodage utf-8)
+2026-04-28 20:00:18 | INFO     | ijeery | === iJeery démarré | frozen=False | exe=D:\Projets 2026\ijeeryApp_v5.0\venv\Scripts\python.exe | cwd=D:\Projets 2026\ijeeryApp_v5.0 | log=d:\Projets 2026\ijeeryApp_v5.0\ijeery_app.log ===
+2026-04-28 20:00:18 | INFO     | ijeery | [DB] Connexion établie.

@@ -76,6 +76,7 @@ class PageFactureListe(ctk.CTkFrame):
         self.filtre_actif       = False
         self.date_debut_filtre  = None
         self.date_fin_filtre    = None
+        self._performance_indexes_checked = False
 
         # ── Construction ──────────────────────────────────────────────────────
         self._build_filter_band()   # Row 0
@@ -422,8 +423,78 @@ class PageFactureListe(ctk.CTkFrame):
             messagebox.showerror("Erreur de Base de Données", f"Impossible de se connecter : {e}")
             return None
 
+    def _ensure_performance_indexes(self, conn):
+        """
+        Ajoute les index essentiels au chargement de cette page.
+        Si l'utilisateur SQL n'a pas les droits DDL, la page continue avec la
+        requete optimisee ci-dessous.
+        """
+        if self._performance_indexes_checked or not conn:
+            return
+
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            for stmt in (
+                """
+                CREATE INDEX IF NOT EXISTS idx_tb_pmtfacture_refvente
+                ON tb_pmtfacture(refvente)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_tb_ventedetail_idvente
+                ON tb_ventedetail(idvente)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_tb_vente_factureliste_filter
+                ON tb_vente(deleted, statut, dateregistre DESC, refvente DESC)
+                """,
+            ):
+                cursor.execute(stmt)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        finally:
+            if cursor:
+                cursor.close()
+            self._performance_indexes_checked = True
+
     # ── Requête SQL partagée (DRY) ────────────────────────────────────────────
-    _SQL_BASE = """
+    _SQL_TEMPLATE = """
+        WITH ventes_filtrees AS (
+            SELECT
+                v.id,
+                v.refvente,
+                v.dateregistre,
+                v.description,
+                v.totmtvente,
+                v.statut,
+                v.iduser,
+                v.idclient
+            FROM tb_vente v
+            WHERE v.deleted = 0
+            {vente_filters}
+        ),
+        pmt AS (
+            SELECT
+                p.refvente,
+                SUM(p.mtpaye) AS total_paye
+            FROM tb_pmtfacture p
+            INNER JOIN ventes_filtrees vf ON vf.refvente = p.refvente
+            GROUP BY p.refvente
+        ),
+        dr AS (
+            SELECT
+                vd.idvente,
+                COUNT(*) AS nb_lignes,
+                (ARRAY_AGG(m.designationmag) FILTER (WHERE m.designationmag IS NOT NULL))[1] AS premier_magasin
+            FROM tb_ventedetail vd
+            INNER JOIN ventes_filtrees vf ON vf.id = vd.idvente
+            LEFT JOIN tb_magasin m ON vd.idmag = m.idmag
+            GROUP BY vd.idvente
+        )
         SELECT
             v.refvente,
             v.dateregistre,
@@ -436,24 +507,16 @@ class PageFactureListe(ctk.CTkFrame):
             CONCAT(u.prenomuser,' ',u.nomuser) AS utilisateur,
             COALESCE(dr.nb_lignes, 0)        AS nb_lignes,
             dr.premier_magasin
-        FROM tb_vente v
+        FROM ventes_filtrees v
         LEFT JOIN tb_users  u ON v.iduser   = u.iduser
         LEFT JOIN tb_client c ON v.idclient = c.idclient
-        LEFT JOIN LATERAL (
-            SELECT SUM(p.mtpaye) AS total_paye
-            FROM tb_pmtfacture p
-            WHERE p.refvente = v.refvente
-        ) pmt ON TRUE
-        LEFT JOIN LATERAL (
-            SELECT
-                COUNT(*) AS nb_lignes,
-                (ARRAY_AGG(m.designationmag) FILTER (WHERE m.designationmag IS NOT NULL))[1] AS premier_magasin
-            FROM tb_ventedetail vd
-            LEFT JOIN tb_magasin m ON vd.idmag = m.idmag
-            WHERE vd.idvente = v.id
-        ) dr ON TRUE
-        WHERE v.deleted = 0
+        LEFT JOIN pmt ON pmt.refvente = v.refvente
+        LEFT JOIN dr  ON dr.idvente   = v.id
+        ORDER BY v.dateregistre DESC, v.refvente DESC
     """
+
+    def _build_credit_query(self, vente_filters: str) -> str:
+        return self._SQL_TEMPLATE.format(vente_filters=vente_filters)
 
     def _remplir_tableau(self, resultats, date_format="%d/%m/%Y %H:%M:%S",
                          prefixe_mag="Magasin "):
@@ -555,13 +618,13 @@ class PageFactureListe(ctk.CTkFrame):
         if not conn:
             return
         try:
+            self._ensure_performance_indexes(conn)
             cursor = conn.cursor()
-            query  = self._SQL_BASE + """
+            query = self._build_credit_query("""
                 AND v.dateregistre >= %s
                 AND v.dateregistre < (%s::date + INTERVAL '1 day')
                 AND v.statut IN ('EN_ATTENTE', 'VALIDEE')
-                ORDER BY v.dateregistre DESC, v.refvente DESC
-            """
+            """)
             cursor.execute(query, (date_debut, date_fin))
             self._remplir_tableau(cursor.fetchall(), prefixe_mag="")
         except Exception as e:
@@ -593,13 +656,13 @@ class PageFactureListe(ctk.CTkFrame):
         if not conn:
             return
         try:
+            self._ensure_performance_indexes(conn)
             cursor = conn.cursor()
-            query  = self._SQL_BASE + """
+            query = self._build_credit_query("""
                 AND v.dateregistre >= CURRENT_DATE
                 AND v.dateregistre < (CURRENT_DATE + INTERVAL '1 day')
                 AND v.statut IN ('EN_ATTENTE', 'VALIDEE')
-                ORDER BY v.dateregistre DESC, v.refvente DESC
-            """
+            """)
             cursor.execute(query)
             self._remplir_tableau(cursor.fetchall(), prefixe_mag="Magasin ")
         except Exception as e:
