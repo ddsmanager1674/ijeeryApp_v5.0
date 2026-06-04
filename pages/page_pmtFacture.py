@@ -603,8 +603,6 @@ class PagePmtFacture(ctk.CTkToplevel):
 
     def connect_db(self):
         try:
-            with open(get_config_path('config.json')) as f:
-                config = json.load(f)
             from pages.db_helper import connect_page_db
             return connect_page_db()
         except Exception as e:
@@ -969,9 +967,6 @@ class PagePmtFacture(ctk.CTkToplevel):
             if description != "":
                 observation_pmt = f"PMT {self.refvente} - {self.client} (Obs: {description})"
 
-        conn = self.connect_db()
-        if not conn: return
-        
         try:
             montant_saisi = float(montant_saisi_str)
         except: 
@@ -1004,21 +999,17 @@ class PagePmtFacture(ctk.CTkToplevel):
             print(f"✓ Magasin: {idmag_facture}")
             print(f"✓ Statut facture: {statut_vente}")
 
-            cursor.execute("SELECT statut FROM tb_vente WHERE refvente = %s", (self.refvente,))
-            statut_row = cursor.fetchone()
-            statut_vente_actuel = statut_row[0] if statut_row else None
-
-            if statut_vente_actuel is not None and statut_vente_actuel != 'EN_ATTENTE':
+            if statut_vente is not None and statut_vente != 'EN_ATTENTE':
                 messagebox.showwarning(
                     "Paiement annulé",
-                    f"Ce facture n'est plus en attente, il est déja {statut_vente_actuel}"
+                    f"Ce facture n'est plus en attente, il est déja {statut_vente}"
                 )
                 return
             
             cursor.execute(
                 "SELECT nomcli, COALESCE(adressecli, ''), COALESCE(contactcli, '') "
-                "FROM tb_client WHERE nomcli = %s",
-                (self.client,)
+                "FROM tb_client WHERE idclient = %s",
+                (idclient,)
             )
             res_client = cursor.fetchone()
             client = res_client[0] if res_client else "Inconnu"
@@ -1168,6 +1159,11 @@ class PagePmtFacture(ctk.CTkToplevel):
                 print(f"📦 ÉTAPE 4 : MISE À JOUR DU STOCK")
                 print(f"{'='*70}")
 
+                try:
+                    cursor.execute("SELECT setval(pg_get_serial_sequence('tb_log_stock', 'id'), COALESCE((SELECT MAX(id) FROM tb_log_stock), 0) + 1, false);")
+                except Exception:
+                    pass
+
                 for det_idx, det in enumerate(articles, 1):
                     idarticle = det[0]
                     idunite = det[1]
@@ -1189,21 +1185,14 @@ class PagePmtFacture(ctk.CTkToplevel):
 
                     if codearticle:
                         cursor.execute("UPDATE tb_stock SET qtstock = %s WHERE codearticle = %s AND idmag = %s", (nouveau_stock, codearticle, idmag))
-                        cursor.execute("SELECT COUNT(*) FROM tb_stock WHERE codearticle = %s AND idmag = %s", (codearticle, idmag))
-                        if cursor.fetchone()[0] == 0:
+                        if cursor.rowcount == 0:
                             cursor.execute("INSERT INTO tb_stock (codearticle, idmag, qtstock, qtalert, deleted) VALUES (%s, %s, %s, 0, 0)", (codearticle, idmag, nouveau_stock))
                         print(f"     ✓ SYNC tb_stock avec codearticle='{codearticle}': qtstock={nouveau_stock}")
                     else:
                         cursor.execute("UPDATE tb_stock SET qtstock = %s WHERE idarticle = %s AND idmag = %s", (nouveau_stock, idarticle, idmag))
-                        cursor.execute("SELECT COUNT(*) FROM tb_stock WHERE idarticle = %s AND idmag = %s", (idarticle, idmag))
-                        if cursor.fetchone()[0] == 0:
+                        if cursor.rowcount == 0:
                             cursor.execute("INSERT INTO tb_stock (idarticle, idmag, qtstock, qtalert, deleted) VALUES (%s, %s, %s, 0, 0)", (idarticle, idmag, nouveau_stock))
                         print(f"     ✓ SYNC tb_stock avec idarticle={idarticle}: qtstock={nouveau_stock}")
-
-                    try:
-                        cursor.execute("SELECT setval(pg_get_serial_sequence('tb_log_stock', 'id'), COALESCE((SELECT MAX(id) FROM tb_log_stock), 0) + 1, false);")
-                    except Exception:
-                        pass
 
                     cursor.execute(
                         """

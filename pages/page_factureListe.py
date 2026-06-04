@@ -355,9 +355,11 @@ class PageFactureListe(ctk.CTkFrame):
         def _after_payment_closed(event=None):
             if event is not None and event.widget is not pay_win:
                 return
+            if not getattr(pay_win, "_payment_finalized", False):
+                return
             should_restore_focus = bool(selected_refvente)
             try:
-                self.reset_date_filter()
+                self.reload_data()
             except Exception:
                 should_restore_focus = False
 
@@ -428,21 +430,28 @@ class PageFactureListe(ctk.CTkFrame):
             v.description,
             COALESCE(v.totmtvente, 0)        AS montant_total,
             v.statut,
-            COALESCE((
-                SELECT SUM(p.mtpaye)
-                FROM tb_pmtfacture p
-                WHERE p.refvente = v.refvente
-            ), 0)                            AS total_paye,
+            COALESCE(pmt.total_paye, 0)      AS total_paye,
             c.nomcli                         AS client_name,
             c.idclient,
             CONCAT(u.prenomuser,' ',u.nomuser) AS utilisateur,
-            (SELECT COUNT(*) FROM tb_ventedetail vd WHERE vd.idvente = v.id) AS nb_lignes,
-            (SELECT m.designationmag FROM tb_ventedetail vd
-             INNER JOIN tb_magasin m ON vd.idmag = m.idmag
-             WHERE vd.idvente = v.id LIMIT 1) AS premier_magasin
+            COALESCE(dr.nb_lignes, 0)        AS nb_lignes,
+            dr.premier_magasin
         FROM tb_vente v
         LEFT JOIN tb_users  u ON v.iduser   = u.iduser
         LEFT JOIN tb_client c ON v.idclient = c.idclient
+        LEFT JOIN LATERAL (
+            SELECT SUM(p.mtpaye) AS total_paye
+            FROM tb_pmtfacture p
+            WHERE p.refvente = v.refvente
+        ) pmt ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*) AS nb_lignes,
+                (ARRAY_AGG(m.designationmag) FILTER (WHERE m.designationmag IS NOT NULL))[1] AS premier_magasin
+            FROM tb_ventedetail vd
+            LEFT JOIN tb_magasin m ON vd.idmag = m.idmag
+            WHERE vd.idvente = v.id
+        ) dr ON TRUE
         WHERE v.deleted = 0
     """
 
@@ -548,7 +557,8 @@ class PageFactureListe(ctk.CTkFrame):
         try:
             cursor = conn.cursor()
             query  = self._SQL_BASE + """
-                AND v.dateregistre::DATE BETWEEN %s AND %s
+                AND v.dateregistre >= %s
+                AND v.dateregistre < (%s::date + INTERVAL '1 day')
                 AND v.statut IN ('EN_ATTENTE', 'VALIDEE')
                 ORDER BY v.dateregistre DESC, v.refvente DESC
             """
@@ -585,7 +595,8 @@ class PageFactureListe(ctk.CTkFrame):
         try:
             cursor = conn.cursor()
             query  = self._SQL_BASE + """
-                AND v.dateregistre::DATE = CURRENT_DATE
+                AND v.dateregistre >= CURRENT_DATE
+                AND v.dateregistre < (CURRENT_DATE + INTERVAL '1 day')
                 AND v.statut IN ('EN_ATTENTE', 'VALIDEE')
                 ORDER BY v.dateregistre DESC, v.refvente DESC
             """
