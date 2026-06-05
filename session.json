@@ -1,0 +1,256 @@
+{
+    "user_id": 26,
+    "username": "brian",
+    "fonction_id": 1,
+    "fonction_name": "Administration",
+    "menus": [
+        [
+            "Ajout Banque",
+            "PageBanqueNv"
+        ],
+        [
+            "Article Liste",
+            "page_listeArticle"
+        ],
+        [
+            "Autorisation",
+            "PageAutorisation"
+        ],
+        [
+            "Autorisation Admin",
+            "PageCodeAutorisation"
+        ],
+        [
+            "Avance 15e",
+            "PageAVQ"
+        ],
+        [
+            "Avance Spéciale",
+            "FenetreAvanceSpec"
+        ],
+        [
+            "Banque",
+            "PageBanque"
+        ],
+        [
+            "Base Liste",
+            "PageBaseListe"
+        ],
+        [
+            "BLOC: BASE DE DONNÉES",
+            ""
+        ],
+        [
+            "BLOC: CHAT INTERNE",
+            ""
+        ],
+        [
+            "BLOC: COMMERCIALE",
+            ""
+        ],
+        [
+            "BLOC: LOGISTIQUE",
+            ""
+        ],
+        [
+            "BLOC: PARAMÈTRES MODULES",
+            ""
+        ],
+        [
+            "BLOC: PERSONNEL",
+            ""
+        ],
+        [
+            "BLOC: TABLEAU DE BORD",
+            ""
+        ],
+        [
+            "BLOC: TRÉSORERIE",
+            ""
+        ],
+        [
+            "Bon de Livraison",
+            ""
+        ],
+        [
+            "Caisse",
+            "PageCaisse"
+        ],
+        [
+            "CHAT INTERNE",
+            "PageChat"
+        ],
+        [
+            "Client",
+            "PageClient"
+        ],
+        [
+            "Configuration Liste mouvements",
+            ""
+        ],
+        [
+            "Configuration Mouvement Stock",
+            ""
+        ],
+        [
+            "Configuration Prix Article",
+            ""
+        ],
+        [
+            "Etat de Salaire",
+            "PageSalaireEtatSB"
+        ],
+        [
+            "Evenements",
+            "PageEvenement"
+        ],
+        [
+            "Facture Liste",
+            "PageFactureListe"
+        ],
+        [
+            "Fonction",
+            "PageFonction"
+        ],
+        [
+            "Fournisseur",
+            "PageFournisseur"
+        ],
+        [
+            "Historiques livraison",
+            ""
+        ],
+        [
+            "Inventaire du Jour",
+            "PageInventaireJour"
+        ],
+        [
+            "Itineraires",
+            "pages.page_itineraires"
+        ],
+        [
+            "Liste Facture",
+            "PageFactureListe"
+        ],
+        [
+            "Liste mouvements",
+            "PageListeMouvement"
+        ],
+        [
+            "Liste Personnel",
+            "AppMain"
+        ],
+        [
+            "Magasin",
+            "PageMagasin"
+        ],
+        [
+            "Marge Commerciale",
+            "PageStock"
+        ],
+        [
+            "Menu",
+            "PageMenu"
+        ],
+        [
+            "Mouvement d'article",
+            "PageArticleMouvement"
+        ],
+        [
+            "Mouvement Stock",
+            "PageInfoMouvementStock"
+        ],
+        [
+            "Nouveau SB",
+            "PageSalaireBase"
+        ],
+        [
+            "Paiement Salaire",
+            "PageValidationSalaire"
+        ],
+        [
+            "Paramètres",
+            ""
+        ],
+        [
+            "Paramètres Bon de Livraison",
+            ""
+        ],
+        [
+            "Paramètres Commande Fournisseur",
+            ""
+        ],
+        [
+            "Paramètres Liste mouvements",
+            ""
+        ],
+        [
+            "Paramètres Mouvement Stock",
+            ""
+        ],
+        [
+            "Paramètres Prix Article",
+            ""
+        ],
+        [
+            "Péremption d'article",
+            "PageGestionPeremption"
+        ],
+        [
+            "Pieces Detachees",
+            "pages.page_piecesDetachees"
+        ],
+        [
+            "Prix d'article",
+            "PagePrixListe"
+        ],
+        [
+            "Prix de revient",
+            "PagePrixRevient"
+        ],
+        [
+            "Salaire Horaire",
+            "PageEtatSalaireHoraire"
+        ],
+        [
+            "Sauvegarde",
+            "PageSauvegarde"
+        ],
+        [
+            "Stock Alerte",
+            "PageStockAlerte"
+        ],
+        [
+            "Stock Article",
+            "PageStock"
+        ],
+        [
+            "Suivi de présence",
+            "PageSuiviPresence"
+        ],
+        [
+            "TABLEAU DE BORD",
+            "page_home"
+        ],
+        [
+            "Taux Horaire",
+            "PageTauxHoraire"
+        ],
+        [
+            "Transfert Banque",
+            "PageTransfertBanque"
+        ],
+        [
+            "Transfert Caisse",
+            "PageTransfertCaisse"
+        ],
+        [
+            "Utilisateurs",
+            "PageUsers"
+        ],
+        [
+            "Ventes par Dépôt",
+            "PageVenteParMsin"
+        ]
+    ]
+}
